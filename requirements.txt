@@ -1,0 +1,10 @@
+# Bắt buộc để chạy giao diện
+ttkbootstrap>=1.10
+pillow>=10.0          # render icon mượt (khử răng cưa) + emoji màu
+
+# Cần khi gắn logic thật cho từng tool:
+# pandas>=2.0          # Gộp Excel, Làm sạch dữ liệu
+# openpyxl>=3.1        # Đọc/ghi .xlsx
+# pypdf>=4.0           # Gộp / Tách PDF
+# anthropic>=0.40      # Quét CV (AI - Claude)
+# pywin32>=306         # Gửi mail qua Outlook (chỉ Windows)
