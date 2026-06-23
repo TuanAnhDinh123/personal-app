@@ -66,8 +66,14 @@ App sẽ **tự động** nhận tool mới và hiện trong sidebar — không 
 
 ```bash
 pip install pyinstaller
-pyinstaller --onefile --noconsole --icon=icon_app.ico --name personal_app --collect-submodules app.tools main.py
+pyinstaller --onefile --noconsole --icon=icon_app.ico --name personal_app --collect-submodules app.tools --add-data "icon_app.ico;." main.py
 ```
 
-> `--collect-submodules app.tools` là bắt buộc, vì tool được nạp động;
-> thiếu nó thì bản .exe sẽ không thấy tool nào.
+> - `--collect-submodules app.tools`: nhét code của tất cả tool vào .exe (vì tool
+>   được nạp động). Thiếu nó thì code tool không có trong bản đóng gói.
+> - `--add-data "icon_app.ico;."`: gói kèm icon để cửa sổ hiển thị đúng icon.
+>   (Trên Linux/macOS dùng dấu `:` thay vì `;`.)
+>
+> Lưu ý: `registry.py` đã xử lý cả trường hợp `--onefile` (module nằm trong
+> archive, không trên đĩa). Nếu sửa cách quét tool, nhớ giữ logic đọc `toc` của
+> PyInstaller, nếu không bản .exe sẽ hiện thiếu tool dù build báo thành công.

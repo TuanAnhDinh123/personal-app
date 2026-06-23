@@ -1,10 +1,21 @@
 """Cửa sổ chính: thanh bên điều hướng + vùng nội dung."""
+import os
+import sys
 import tkinter as tk
 
 import ttkbootstrap as ttk
 
 from app.core.registry import discover_tools
 from app.ui import theme, widgets
+
+
+def _resource(name):
+    """Đường dẫn tới file tài nguyên, đúng cả khi chạy dev lẫn bản .exe.
+
+    PyInstaller giải nén tài nguyên vào thư mục tạm sys._MEIPASS lúc chạy.
+    """
+    base = getattr(sys, "_MEIPASS", os.path.abspath("."))
+    return os.path.join(base, name)
 
 
 class NavItem(tk.Frame):
@@ -109,7 +120,7 @@ class MainWindow(ttk.Window):
         self.geometry("1140x710")
         self.minsize(960, 600)
         try:
-            self.iconbitmap("icon_app.ico")
+            self.iconbitmap(_resource("icon_app.ico"))
         except Exception:
             pass
 
