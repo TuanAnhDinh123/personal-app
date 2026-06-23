@@ -73,6 +73,27 @@ def text_row(parent, label, placeholder="", bg=None):
     return var
 
 
+def text_area(parent, label, value="", height=8, bg=None):
+    """Ô nhập chữ nhiều dòng. Trả về widget tk.Text (đọc bằng .get)."""
+    bg = bg or theme.CARD_BG
+    block = tk.Frame(parent, bg=bg)
+    block.pack(fill="x", pady=(6, 10))
+    tk.Label(
+        block, text=label, bg=bg, fg=theme.TEXT,
+        font=(theme.FONT_FAMILY, 9),
+    ).pack(anchor="w", pady=(0, 4))
+    box = tk.Text(
+        block, height=height, wrap="word", relief="solid", bd=1,
+        font=(theme.FONT_FAMILY, 10), bg="#ffffff", fg=theme.TEXT,
+        highlightthickness=1, highlightbackground=theme.BORDER,
+        padx=8, pady=6,
+    )
+    box.pack(fill="x")
+    if value:
+        box.insert("1.0", value)
+    return box
+
+
 def checkbox(parent, label, checked=True):
     """Công tắc bật/tắt một tùy chọn."""
     var = tk.BooleanVar(value=checked)

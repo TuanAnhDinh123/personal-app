@@ -134,6 +134,20 @@ class MainWindow(ttk.Window):
 
         self.show_home()
 
+        # Chạy các tác vụ nền (vd: quét lịch phỏng vấn buổi sáng) sau khi
+        # cửa sổ đã hiện — tránh chặn lúc khởi động.
+        self.after(500, self._run_startup_tasks)
+
+    def _run_startup_tasks(self):
+        """Gọi startup() của những tool bật auto_startup."""
+        for tool in self.tools:
+            if not getattr(tool, "auto_startup", False):
+                continue
+            try:
+                tool.startup(self)
+            except Exception:
+                pass   # một tool lỗi không được làm hỏng cả app
+
     # ----- Thanh bên -----
     def _build_sidebar(self):
         sb = tk.Frame(self, bg=theme.SIDEBAR_BG, width=252)

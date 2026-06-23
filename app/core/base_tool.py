@@ -22,6 +22,7 @@ class BaseTool(ABC):
     order: int = 100              # thứ tự hiển thị trong cùng một nhóm
     action_label: str = "Thực hiện"
     action_style: str = "primary"  # bootstyle của nút chính
+    auto_startup: bool = False     # nếu True, MainWindow gọi startup() khi mở app
 
     def build(self, parent) -> tk.Frame:
         """Dựng giao diện của tool — khung chung, hiếm khi cần ghi đè."""
@@ -55,3 +56,10 @@ class BaseTool(ABC):
     def run(self) -> None:
         """Hành động khi bấm nút chính. Hiện chỉ hiển thị thông báo mẫu."""
         messagebox.showinfo("Hoàn tất", f'Task "{self.name}" đã hoàn thành ✅')
+
+    def startup(self, window) -> None:
+        """Chạy tự động khi mở app (chỉ khi auto_startup=True).
+
+        `window` là MainWindow — dùng để điều hướng / hiện hộp thoại nếu cần.
+        Mặc định không làm gì; tool cần tính năng nền sẽ ghi đè.
+        """
