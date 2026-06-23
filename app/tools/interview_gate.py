@@ -27,12 +27,11 @@ DEFAULTS = {
     "keywords": "phỏng vấn, pv, interview",
     "to": "",
     "cc": "",
-    "subject": "Đề nghị mở cổng đón ứng viên phỏng vấn ngày {date}",
+    "subject": "Đề nghị mở cổng đón ứng viên phỏng vấn ngày",
     "body": (
         "Kính gửi team Security,\n\n"
-        "Hôm nay ({date}) bộ phận tuyển dụng có lịch phỏng vấn sau, "
+        "Hôm nay bộ phận tuyển dụng có lịch phỏng vấn sau, "
         "nhờ team hỗ trợ mở cổng đón ứng viên:\n\n"
-        "{list}\n\n"
         "Cảm ơn team!"
     ),
     "auto": True,
@@ -41,9 +40,9 @@ DEFAULTS = {
 
 
 class InterviewGateTool(BaseTool):
-    name = "Mở cổng lịch phỏng vấn"
+    name = "Gửi mail theo lịch"
     description = "Quét lịch phỏng vấn Outlook hôm nay và soạn mail nhờ Security mở cổng."
-    icon = "🛂"
+    icon = "📧"
     category = "Văn phòng"
     order = 5
     action_label = "Quét lịch hôm nay"
@@ -65,7 +64,7 @@ class InterviewGateTool(BaseTool):
             "coi là lịch phỏng vấn (không phân biệt hoa thường).",
         )
 
-        widgets.section_label(parent, "Người nhận (team Security)")
+        widgets.section_label(parent, "Người nhận")
         self.var_to = widgets.text_row(
             parent, "Email nhận (nhiều email cách nhau bởi dấu ;)",
             placeholder=cfg["to"],
@@ -80,11 +79,6 @@ class InterviewGateTool(BaseTool):
         )
         self.body_box = widgets.text_area(
             parent, "Nội dung", value=cfg["body"], height=9,
-        )
-        widgets.hint(
-            parent,
-            "Dùng {date} để chèn ngày hôm nay, {list} để chèn danh sách lịch "
-            "phỏng vấn (giờ — tiêu đề — địa điểm).",
         )
 
         self.var_auto = widgets.checkbox(
@@ -200,14 +194,22 @@ class InterviewGateTool(BaseTool):
                 line += f" ({a['location']})"
             lines.append(line)
         listing = "\n".join(lines)
-        subject = cfg["subject"].format(date=date_str, list=listing)
-        body = cfg["body"].format(date=date_str, list=listing)
+
+        subject = cfg["subject"].rstrip() + f" {date_str}"
+
+        body = cfg["body"]
+        idx = body.rfind("\nCảm ơn")
+        if idx != -1:
+            body = body[:idx].rstrip() + f"\n\n{listing}" + body[idx:]
+        else:
+            body = body.rstrip() + f"\n\n{listing}"
+
         return subject, body
 
     # ---------------------------------------------------- hộp thoại xác nhận
     def _open_confirm(self, parent, to, cc, subject, body):
         dlg = tk.Toplevel(parent)
-        dlg.title("Xác nhận gửi mail cho Security")
+        dlg.title("Xác nhận gửi mail")
         dlg.configure(bg=theme.CONTENT_BG)
         dlg.geometry("640x560")
         dlg.transient(parent)
@@ -265,7 +267,7 @@ class InterviewGateTool(BaseTool):
                     "Lỗi gửi mail", f"Không gửi được:\n{exc}", parent=dlg)
                 return
             dlg.destroy()
-            messagebox.showinfo("Đã gửi", "Đã gửi mail cho team Security ✅")
+            messagebox.showinfo("Đã gửi", "Đã gửi mail✅")
 
         ttk.Button(
             actions, text="Gửi mail", bootstyle="primary", command=do_send,

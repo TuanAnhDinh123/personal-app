@@ -103,6 +103,38 @@ def checkbox(parent, label, checked=True):
     return var
 
 
+class ScrollableFrame(tk.Frame):
+    """Frame cuộn dọc. Thêm nội dung vào thuộc tính .inner."""
+
+    def __init__(self, parent, bg=None, **kwargs):
+        bg = bg or theme.CONTENT_BG
+        super().__init__(parent, bg=bg, **kwargs)
+
+        self._canvas = tk.Canvas(self, bg=bg, highlightthickness=0)
+        self._vsb = ttk.Scrollbar(self, orient="vertical", command=self._canvas.yview)
+        self.inner = tk.Frame(self._canvas, bg=bg)
+
+        self._win_id = self._canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self._canvas.configure(yscrollcommand=self._vsb.set)
+
+        self._vsb.pack(side="right", fill="y")
+        self._canvas.pack(side="left", fill="both", expand=True)
+
+        self._canvas.bind("<Configure>", self._on_canvas_resize)
+        self.inner.bind("<Configure>", self._on_inner_resize)
+        self._canvas.bind("<Enter>", lambda _: self._canvas.bind_all("<MouseWheel>", self._on_wheel))
+        self._canvas.bind("<Leave>", lambda _: self._canvas.unbind_all("<MouseWheel>"))
+
+    def _on_canvas_resize(self, event):
+        self._canvas.itemconfig(self._win_id, width=event.width)
+
+    def _on_inner_resize(self, event):
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+
+    def _on_wheel(self, event):
+        self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+
 def dropdown(parent, label, options, bg=None):
     """Danh sách lựa chọn (combobox)."""
     bg = bg or theme.CARD_BG

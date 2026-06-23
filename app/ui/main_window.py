@@ -216,7 +216,9 @@ class MainWindow(ttk.Window):
         self._set_active("home")
         self._clear_content()
 
-        wrap = tk.Frame(self.content, bg=theme.CONTENT_BG)
+        sf = widgets.ScrollableFrame(self.content, bg=theme.CONTENT_BG)
+        sf.pack(fill="both", expand=True)
+        wrap = tk.Frame(sf.inner, bg=theme.CONTENT_BG)
         wrap.pack(fill="both", expand=True, padx=40, pady=34)
 
         tk.Label(
@@ -265,5 +267,7 @@ class MainWindow(ttk.Window):
             anchor="w", justify="left",
         ).pack(anchor="w", pady=(2, 0))
 
-        body = tool.build(self.content)
+        sf = widgets.ScrollableFrame(self.content, bg=theme.CONTENT_BG)
+        sf.pack(fill="both", expand=True)
+        body = tool.build(sf.inner)
         body.pack(fill="both", expand=True, padx=40, pady=22)
