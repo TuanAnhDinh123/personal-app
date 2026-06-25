@@ -185,7 +185,6 @@ class InterviewGateTool(BaseTool):
         self._open_confirm(parent, cfg["to"], cfg["cc"], subject, body)
 
     def _compose(self, interviews, cfg):
-        date_str = datetime.date.today().strftime("%d/%m/%Y")
         lines = []
         for a in interviews:
             t = a["start"].strftime("%H:%M") if a["start"] else "??:??"
@@ -195,7 +194,8 @@ class InterviewGateTool(BaseTool):
             lines.append(line)
         listing = "\n".join(lines)
 
-        subject = cfg["subject"].rstrip() + f" {date_str}"
+        # Tiêu đề giữ NGUYÊN như người dùng nhập ở UI (không tự thêm ngày).
+        subject = cfg["subject"]
 
         body = cfg["body"]
         idx = body.rfind("\nCảm ơn")
@@ -211,12 +211,38 @@ class InterviewGateTool(BaseTool):
         dlg = tk.Toplevel(parent)
         dlg.title("Xác nhận gửi mail")
         dlg.configure(bg=theme.CONTENT_BG)
-        dlg.geometry("640x560")
+        dlg.geometry("960x840")          # to hơn 1.5× so với trước (640x560)
         dlg.transient(parent)
         dlg.grab_set()
 
-        wrap = tk.Frame(dlg, bg=theme.CONTENT_BG)
-        wrap.pack(fill="both", expand=True, padx=22, pady=20)
+        # --- vùng cuộn dọc: Canvas + Scrollbar, nội dung nằm trong `wrap` ---
+        canvas = tk.Canvas(dlg, bg=theme.CONTENT_BG, highlightthickness=0)
+        vbar = ttk.Scrollbar(dlg, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vbar.set)
+        vbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        wrap = tk.Frame(canvas, bg=theme.CONTENT_BG)
+        wrap_id = canvas.create_window((0, 0), window=wrap, anchor="nw")
+
+        def _sync_scrollregion(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _stretch_wrap(event):
+            # cho nội dung rộng bằng canvas (trừ padding hai bên)
+            canvas.itemconfigure(wrap_id, width=event.width)
+
+        wrap.bind("<Configure>", _sync_scrollregion)
+        canvas.bind("<Configure>", _stretch_wrap)
+
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-event.delta / 120), "units")
+
+        dlg.bind("<MouseWheel>", _on_mousewheel)
+        dlg.bind("<Destroy>", lambda e: dlg.unbind("<MouseWheel>"))
+
+        # padding nội dung bên trong frame cuộn
+        wrap.configure(padx=22, pady=20)
 
         tk.Label(
             wrap, text="Kiểm tra & gửi mail", bg=theme.CONTENT_BG,
