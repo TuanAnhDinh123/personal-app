@@ -59,46 +59,47 @@ def today_appointments(log=None):
         _log(f"[DEBUG] Calendar folder: {calendar.Name} | Items.Count={calendar.Items.Count}")
 
         items = calendar.Items
-        items.IncludeRecurrences = True      # nở các lịch lặp lại
+        # IncludeRecurrences + Restrict không tương thích (Restrict trả về 2147483647).
+        # Giải pháp: sort theo Start rồi duyệt thủ công, break khi qua ngày hôm nay.
+        items.IncludeRecurrences = True
         items.Sort("[Start]")
 
         today = datetime.date.today()
-        start = datetime.datetime(today.year, today.month, today.day)
-        end = start + datetime.timedelta(days=1)
-        fmt = "%m/%d/%Y %I:%M %p"             # định dạng Outlook Restrict hiểu
-        restriction = (
-            f"[Start] >= '{start.strftime(fmt)}' "
-            f"AND [Start] < '{end.strftime(fmt)}'"
-        )
-        _log(f"[DEBUG] Restrict filter: {restriction}")
-
-        restricted = items.Restrict(restriction)
-        _log(f"[DEBUG] Sau Restrict: {restricted.Count} item(s)")
+        _log(f"[DEBUG] Đang lọc ngày: {today}")
 
         result = []
-        for item in restricted:
+        skipped_before = 0
+        skipped_class = 0
+        for item in items:
             try:
+                t_start = _to_datetime(getattr(item, "Start", None))
+                if t_start is None:
+                    continue
+                if t_start.date() < today:
+                    skipped_before += 1
+                    continue
+                if t_start.date() > today:
+                    break   # đã qua hôm nay, dừng (danh sách đã sort)
                 item_class = item.Class
+                subj = str(getattr(item, "Subject", "") or "")
+                _log(f"[DEBUG]   {t_start.strftime('%H:%M')} | Class={item_class} | {subj!r}")
+                if item_class != _OL_APPOINTMENT:
+                    skipped_class += 1
+                    _log(f"[DEBUG]   → bỏ qua (Class={item_class}, cần {_OL_APPOINTMENT})")
+                    continue
+                result.append({
+                    "subject": subj,
+                    "start": t_start,
+                    "end": _to_datetime(getattr(item, "End", None)),
+                    "location": str(getattr(item, "Location", "") or ""),
+                    "organizer": str(getattr(item, "Organizer", "") or ""),
+                    "categories": str(getattr(item, "Categories", "") or ""),
+                })
             except Exception as e:
-                _log(f"[DEBUG]   item.Class lỗi: {e} — bỏ qua")
+                _log(f"[DEBUG]   item lỗi: {e}")
                 continue
-            subj = str(getattr(item, "Subject", "") or "")
-            t_start = _to_datetime(getattr(item, "Start", None))
-            _log(f"[DEBUG]   Class={item_class} | {t_start} | {subj!r}")
-            if item_class != _OL_APPOINTMENT:
-                _log(f"[DEBUG]   → bỏ qua (không phải AppointmentItem)")
-                continue
-            result.append({
-                "subject": subj,
-                "start": t_start,
-                "end": _to_datetime(getattr(item, "End", None)),
-                "location": str(getattr(item, "Location", "") or ""),
-                "organizer": str(getattr(item, "Organizer", "") or ""),
-                "categories": str(getattr(item, "Categories", "") or ""),
-            })
 
-        _log(f"[DEBUG] Kết quả cuối: {len(result)} appointment(s)")
-        result.sort(key=lambda a: a["start"] or datetime.datetime.max)
+        _log(f"[DEBUG] Kết quả: {len(result)} appointment(s) | bỏ qua trước hôm nay={skipped_before} | sai class={skipped_class}")
         return result
     finally:
         pythoncom.CoUninitialize()
