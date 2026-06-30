@@ -37,18 +37,13 @@ def _to_datetime(value):
         return None
 
 
-def today_appointments(log=None):
+def today_appointments():
     """Trả về danh sách sự kiện lịch của HÔM NAY.
 
     Mỗi phần tử là dict: subject, start, end, location, organizer, categories.
-    log: callback(str) tùy chọn để ghi debug.
     """
     import pythoncom
     import win32com.client
-
-    def _log(msg):
-        if log:
-            log(msg)
 
     pythoncom.CoInitialize()
     try:
@@ -56,50 +51,35 @@ def today_appointments(log=None):
         ns = outlook.GetNamespace("MAPI")
         calendar = ns.GetDefaultFolder(_OL_FOLDER_CALENDAR)
 
-        _log(f"[DEBUG] Calendar folder: {calendar.Name} | Items.Count={calendar.Items.Count}")
-
         items = calendar.Items
-        # IncludeRecurrences + Restrict không tương thích (Restrict trả về 2147483647).
-        # Giải pháp: sort theo Start rồi duyệt thủ công, break khi qua ngày hôm nay.
+        # IncludeRecurrences + Restrict không tương thích — duyệt thủ công thay thế.
         items.IncludeRecurrences = True
         items.Sort("[Start]")
 
         today = datetime.date.today()
-        _log(f"[DEBUG] Đang lọc ngày: {today}")
-
         result = []
-        skipped_before = 0
-        skipped_class = 0
         for item in items:
             try:
                 t_start = _to_datetime(getattr(item, "Start", None))
                 if t_start is None:
                     continue
                 if t_start.date() < today:
-                    skipped_before += 1
                     continue
                 if t_start.date() > today:
-                    break   # đã qua hôm nay, dừng (danh sách đã sort)
-                item_class = item.Class
-                subj = str(getattr(item, "Subject", "") or "")
-                _log(f"[DEBUG]   {t_start.strftime('%H:%M')} | Class={item_class} | {subj!r}")
-                if item_class != _OL_APPOINTMENT:
-                    skipped_class += 1
-                    _log(f"[DEBUG]   → bỏ qua (Class={item_class}, cần {_OL_APPOINTMENT})")
+                    break
+                if item.Class != _OL_APPOINTMENT:
                     continue
                 result.append({
-                    "subject": subj,
+                    "subject": str(getattr(item, "Subject", "") or ""),
                     "start": t_start,
                     "end": _to_datetime(getattr(item, "End", None)),
                     "location": str(getattr(item, "Location", "") or ""),
                     "organizer": str(getattr(item, "Organizer", "") or ""),
                     "categories": str(getattr(item, "Categories", "") or ""),
                 })
-            except Exception as e:
-                _log(f"[DEBUG]   item lỗi: {e}")
+            except Exception:
                 continue
 
-        _log(f"[DEBUG] Kết quả: {len(result)} appointment(s) | bỏ qua trước hôm nay={skipped_before} | sai class={skipped_class}")
         return result
     finally:
         pythoncom.CoUninitialize()
