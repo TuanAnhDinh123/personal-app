@@ -257,12 +257,16 @@ class ScanCvTool(BaseTool):
             font=(theme.FONT_FAMILY, 9),
         ).pack(anchor="w", padx=22, pady=(0, 10))
 
+        # ---- Nút hành động — pack trước để luôn hiển thị ở đáy ----
+        acts = tk.Frame(dlg, bg=theme.CONTENT_BG)
+        acts.pack(side="bottom", fill="x", padx=22, pady=14)
+
         # ---- Treeview ----
         frm = tk.Frame(dlg, bg=theme.CONTENT_BG)
         frm.pack(fill="both", expand=True, padx=22)
 
         cols = ("original", "cname", "newname")
-        tree = ttk.Treeview(frm, columns=cols, show="headings", height=22)
+        tree = ttk.Treeview(frm, columns=cols, show="headings")
         tree.heading("original", text="Tên file gốc")
         tree.heading("cname",    text="Tên ứng viên  (double-click để sửa)")
         tree.heading("newname",  text="Tên file mới (xem trước)")
@@ -338,10 +342,6 @@ class ScanCvTool(BaseTool):
             ).pack(side="left", padx=(8, 0), ipady=3)
 
         tree.bind("<Double-1>", _on_double_click)
-
-        # ---- Nút hành động ----
-        acts = tk.Frame(dlg, bg=theme.CONTENT_BG)
-        acts.pack(fill="x", padx=22, pady=14)
 
         def do_rename():
             errors  = []
