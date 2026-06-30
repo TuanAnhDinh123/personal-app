@@ -158,8 +158,8 @@ class ScanCvTool(BaseTool):
 
         widgets.hint(
             parent,
-            "Ví dụ: prefix=2506, start=01  →  2506_01_Nguyen Van A.pdf, "
-            "2506_02_Tran Thi B.pdf, …",
+            "Ví dụ: prefix=2506, start=01  →  250601_Nguyen Van A.pdf, "
+            "250602_Tran Thi B.pdf, …",
         )
 
         # ---- Từ nhiễu ----
