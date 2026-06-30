@@ -12,6 +12,7 @@ Cấu hình (từ khóa, email Security, mẫu mail) lưu trong app/core/config.
 nên lần quét tự động vẫn dùng đúng thiết lập bạn đã lưu.
 """
 import datetime
+import os
 from tkinter import messagebox
 
 import tkinter as tk
@@ -37,6 +38,20 @@ DEFAULTS = {
     "auto": True,
     "last_scan": "",
 }
+
+
+def _log_path():
+    base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "PersonalToolbox", "interview_gate.log")
+
+
+def _write_log(lines):
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    path = _log_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        for line in lines:
+            f.write(f"[{ts}] {line}\n")
 
 
 class InterviewGateTool(BaseTool):
@@ -91,6 +106,10 @@ class InterviewGateTool(BaseTool):
             row, text="💾 Lưu cấu hình", bootstyle="secondary-outline",
             command=self._save_config,
         ).pack(side="left")
+        ttk.Button(
+            row, text="📋 Xem log", bootstyle="secondary-outline",
+            command=self._open_log,
+        ).pack(side="left", padx=(8, 0))
 
         if not outlook.available():
             widgets.hint(
@@ -115,6 +134,13 @@ class InterviewGateTool(BaseTool):
     def _save_config(self):
         config.save(SECTION, self._collect())
         messagebox.showinfo("Đã lưu", "Đã lưu cấu hình ✅")
+
+    def _open_log(self):
+        path = _log_path()
+        if not os.path.exists(path):
+            messagebox.showinfo("Chưa có log", f"Chưa có file log nào.\n({path})")
+            return
+        os.startfile(path)
 
     # ---------------------------------------------------------- quét & gửi
     def run(self):
@@ -165,12 +191,22 @@ class InterviewGateTool(BaseTool):
             interviews = appointments
 
         if not interviews:
+            _write_log([f"Quét lịch: {len(appointments)} sự kiện hôm nay, không có lịch nào khớp keyword."])
             if not silent_if_empty:
                 messagebox.showinfo(
                     "Không có lịch",
                     "Hôm nay không có lịch phỏng vấn nào trong Outlook.",
                 )
             return
+
+        log_lines = [f"Quét lịch: tìm thấy {len(interviews)}/{len(appointments)} lịch phỏng vấn:"]
+        for a in interviews:
+            t = a["start"].strftime("%H:%M") if a["start"] else "??:??"
+            entry = f"  - {t} {a['subject']}"
+            if a["location"]:
+                entry += f" ({a['location']})"
+            log_lines.append(entry)
+        _write_log(log_lines)
 
         subject, body = self._compose(interviews, cfg)
 
@@ -300,6 +336,7 @@ class InterviewGateTool(BaseTool):
                 messagebox.showerror(
                     "Lỗi gửi mail", f"Không gửi được:\n{exc}", parent=dlg)
                 return
+            _write_log([f"Đã gửi mail → {to_value}"])
             dlg.destroy()
             messagebox.showinfo("Đã gửi", "Đã gửi mail✅")
 
