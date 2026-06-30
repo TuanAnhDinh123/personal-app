@@ -184,11 +184,19 @@ class InterviewGateTool(BaseTool):
 
         self._open_confirm(parent, cfg["to"], cfg["cc"], subject, body)
 
+    @staticmethod
+    def _extract_name(subject):
+        """Lấy phần text sau 'Mr.' hoặc 'Ms.' trong subject mail."""
+        import re
+        m = re.search(r'\b(?:Mr|Ms)\.\s*(.+)', subject, re.IGNORECASE)
+        return m.group(1).strip() if m else subject
+
     def _compose(self, interviews, cfg):
         lines = []
         for a in interviews:
             t = a["start"].strftime("%H:%M") if a["start"] else "??:??"
-            line = f"- {t} — {a['subject']}"
+            name = self._extract_name(a["subject"])
+            line = f"- {t} — {name}"
             if a["location"]:
                 line += f" ({a['location']})"
             lines.append(line)
