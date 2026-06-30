@@ -37,19 +37,26 @@ def _to_datetime(value):
         return None
 
 
-def today_appointments():
+def today_appointments(log=None):
     """Trả về danh sách sự kiện lịch của HÔM NAY.
 
     Mỗi phần tử là dict: subject, start, end, location, organizer, categories.
+    log: callback(str) tùy chọn để ghi debug.
     """
     import pythoncom
     import win32com.client
+
+    def _log(msg):
+        if log:
+            log(msg)
 
     pythoncom.CoInitialize()
     try:
         outlook = win32com.client.Dispatch("Outlook.Application")
         ns = outlook.GetNamespace("MAPI")
         calendar = ns.GetDefaultFolder(_OL_FOLDER_CALENDAR)
+
+        _log(f"[DEBUG] Calendar folder: {calendar.Name} | Items.Count={calendar.Items.Count}")
 
         items = calendar.Items
         items.IncludeRecurrences = True      # nở các lịch lặp lại
@@ -63,22 +70,34 @@ def today_appointments():
             f"[Start] >= '{start.strftime(fmt)}' "
             f"AND [Start] < '{end.strftime(fmt)}'"
         )
+        _log(f"[DEBUG] Restrict filter: {restriction}")
+
+        restricted = items.Restrict(restriction)
+        _log(f"[DEBUG] Sau Restrict: {restricted.Count} item(s)")
 
         result = []
-        for item in items.Restrict(restriction):
+        for item in restricted:
             try:
-                if item.Class != _OL_APPOINTMENT:
-                    continue
-            except Exception:
-                pass
+                item_class = item.Class
+            except Exception as e:
+                _log(f"[DEBUG]   item.Class lỗi: {e} — bỏ qua")
+                continue
+            subj = str(getattr(item, "Subject", "") or "")
+            t_start = _to_datetime(getattr(item, "Start", None))
+            _log(f"[DEBUG]   Class={item_class} | {t_start} | {subj!r}")
+            if item_class != _OL_APPOINTMENT:
+                _log(f"[DEBUG]   → bỏ qua (không phải AppointmentItem)")
+                continue
             result.append({
-                "subject": str(getattr(item, "Subject", "") or ""),
-                "start": _to_datetime(getattr(item, "Start", None)),
+                "subject": subj,
+                "start": t_start,
                 "end": _to_datetime(getattr(item, "End", None)),
                 "location": str(getattr(item, "Location", "") or ""),
                 "organizer": str(getattr(item, "Organizer", "") or ""),
                 "categories": str(getattr(item, "Categories", "") or ""),
             })
+
+        _log(f"[DEBUG] Kết quả cuối: {len(result)} appointment(s)")
         result.sort(key=lambda a: a["start"] or datetime.datetime.max)
         return result
     finally:

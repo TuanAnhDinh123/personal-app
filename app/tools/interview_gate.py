@@ -172,8 +172,9 @@ class InterviewGateTool(BaseTool):
             return
 
         cfg = config.load(SECTION, DEFAULTS)
+        _write_log(["=== BẮT ĐẦU QUÉT ==="])
         try:
-            appointments = outlook.today_appointments()
+            appointments = outlook.today_appointments(log=lambda m: _write_log([m]))
         except Exception as exc:           # noqa: BLE001
             _write_log([f"[ERROR] Không đọc được lịch Outlook: {exc}"])
             if not silent_if_empty:
