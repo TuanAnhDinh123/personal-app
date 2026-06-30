@@ -175,6 +175,7 @@ class InterviewGateTool(BaseTool):
         try:
             appointments = outlook.today_appointments()
         except Exception as exc:           # noqa: BLE001
+            _write_log([f"[ERROR] Không đọc được lịch Outlook: {exc}"])
             if not silent_if_empty:
                 messagebox.showerror(
                     "Lỗi đọc Outlook", f"Không đọc được lịch:\n{exc}")
@@ -182,6 +183,18 @@ class InterviewGateTool(BaseTool):
 
         keywords = [k.strip().lower()
                     for k in cfg["keywords"].split(",") if k.strip()]
+
+        debug_lines = [f"[DEBUG] Tổng sự kiện hôm nay: {len(appointments)} | Keyword: {cfg['keywords']}"]
+        for a in appointments:
+            t = a["start"].strftime("%H:%M") if a["start"] else "??:??"
+            matched = any(kw in a["subject"].lower() for kw in keywords) if keywords else True
+            flag = "✓" if matched else "✗"
+            entry = f"  [{flag}] {t} | {a['subject']}"
+            if a["location"]:
+                entry += f" | {a['location']}"
+            debug_lines.append(entry)
+        _write_log(debug_lines)
+
         if keywords:
             interviews = [
                 a for a in appointments
@@ -191,7 +204,7 @@ class InterviewGateTool(BaseTool):
             interviews = appointments
 
         if not interviews:
-            _write_log([f"Quét lịch: {len(appointments)} sự kiện hôm nay, không có lịch nào khớp keyword."])
+            _write_log([f"Kết quả: không có lịch nào khớp keyword."])
             if not silent_if_empty:
                 messagebox.showinfo(
                     "Không có lịch",
