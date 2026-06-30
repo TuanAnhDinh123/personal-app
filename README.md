@@ -1,3 +1,13 @@
+# git command
+## Đẩy code lên git
+git add .
+git commit -m "description"
+git push origin main
+
+## Lấy code về
+git pull origin main
+
+
 # Personal Toolbox
 
 Ứng dụng desktop "hộp đồ nghề cá nhân" — gom nhiều tác vụ hằng ngày
