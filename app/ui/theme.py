@@ -23,7 +23,6 @@ ACCENT_HOVER = "#7c83f6"
 CATEGORY_COLORS = {
     "Tệp & Tài liệu": "#3b82f6",      # xanh dương
     "Dữ liệu": "#10b981",             # xanh lá
-    "Trí tuệ nhân tạo": "#8b5cf6",    # tím
     "Văn phòng": "#f59e0b",           # cam
 }
 CATEGORY_DEFAULT_COLOR = "#64748b"    # xám xanh

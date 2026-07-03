@@ -4,9 +4,8 @@ pillow>=10.0          # render icon mượt (khử răng cưa) + emoji màu
 
 # Cần khi gắn logic thật cho từng tool:
 # pandas>=2.0          # Gộp Excel, Làm sạch dữ liệu
-openpyxl>=3.1         # Đọc/ghi .xlsx
+openpyxl>=3.1         # Đọc/ghi .xlsx (Gộp Excel, Quét CV → xuất bảng tổng hợp)
 # pypdf>=4.0           # Gộp / Tách PDF
-pymupdf>=1.24         # PDF → Text: trích text + render trang ra ảnh để đối chiếu
+pymupdf>=1.24         # PDF → Text & Quét CV: trích text từ PDF
 pytesseract>=0.3.10   # OCR cho PDF scan (cần cài thêm Tesseract-OCR + gói tiếng Việt)
-# anthropic>=0.40      # Quét CV (AI - Claude)
 pywin32>=306           # Đọc lịch & gửi mail qua Outlook (chỉ Windows)

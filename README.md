@@ -11,7 +11,7 @@ git pull origin main
 # Personal Toolbox
 
 Ứng dụng desktop "hộp đồ nghề cá nhân" — gom nhiều tác vụ hằng ngày
-(xử lý file, dữ liệu, AI...) vào một app với giao diện sidebar.
+(xử lý file, dữ liệu, văn phòng...) vào một app với giao diện sidebar.
 
 ## Chạy ứng dụng
 
@@ -40,7 +40,6 @@ personal-app/
     └── tools/               # MỖI FILE = 1 TÁC VỤ
         ├── merge_excel.py
         ├── pdf_tools.py
-        ├── batch_rename.py
         ├── clean_data.py
         ├── scan_cv.py
         └── send_mail.py

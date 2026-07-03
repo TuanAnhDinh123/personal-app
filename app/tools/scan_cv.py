@@ -1,4 +1,4 @@
-"""Quét CV bằng AI và đổi tên file CV hàng loạt.
+"""Đổi tên file CV hàng loạt và trích xuất dữ liệu CV ra Excel.
 
 Tính năng đổi tên:
   • Quét thư mục → tìm file PDF/Word
@@ -6,10 +6,17 @@ Tính năng đổi tên:
   • Hiển thị bảng xem trước, cho phép chỉnh tên trước khi đổi
   • Đổi tên theo format: {prefixcode}_{startcode}_{TenUngVien}.ext
     start code tăng dần cho từng file theo thứ tự sắp xếp
+
+Tính năng trích xuất:
+  • Đọc nội dung từng file CV (PDF / DOCX)
+  • Dùng regex tìm Email và Số điện thoại
+  • Xuất bảng tổng hợp ra file Excel (.xlsx)
 """
+import html
 import os
 import re
 import unicodedata
+import zipfile
 from pathlib import Path
 from tkinter import messagebox
 
@@ -19,6 +26,18 @@ import ttkbootstrap as ttk
 from app.core import config
 from app.core.base_tool import BaseTool
 from app.ui import widgets, theme
+
+try:
+    import fitz  # PyMuPDF — đọc text từ PDF
+    _FITZ_OK = True
+except ImportError:
+    _FITZ_OK = False
+
+try:
+    import openpyxl
+    _OPENPYXL_OK = True
+except ImportError:
+    _OPENPYXL_OK = False
 
 _CV_EXTENSIONS = {".pdf", ".doc", ".docx"}
 
@@ -111,26 +130,144 @@ def _seq_code(start_str: str, index: int) -> str:
     return str(n).zfill(pad)
 
 
-class ScanCvTool(BaseTool):
-    name = "Quét CV (AI)"
-    description = "Đổi tên hàng loạt file CV và đọc CV bằng AI để xuất bảng tổng hợp."
-    icon = "🤖"
-    category = "Trí tuệ nhân tạo"
-    order = 10
-    action_label = "Đổi tên file CV"
-    action_style = "success"
+# ---------------------------------------------------------------------------
+# Trích xuất dữ liệu từ CV (độc lập với UI, dễ test)
+# ---------------------------------------------------------------------------
 
-    def build_body(self, parent):
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+# Số điện thoại VN: bắt đầu bằng 0 hoặc +84, cho phép dấu cách/chấm/gạch xen giữa.
+_PHONE_RE = re.compile(r"(?:\+?84|0)[\d.\-\s]{8,13}")
+
+
+def _read_pdf_text(path: Path) -> str:
+    """Trích toàn bộ lớp text của file PDF (không OCR ảnh scan)."""
+    parts = []
+    with fitz.open(path) as doc:
+        for page in doc:
+            parts.append(page.get_text("text"))
+    return "\n".join(parts)
+
+
+def _read_docx_text(path: Path) -> str:
+    """Trích text từ .docx bằng cách đọc word/document.xml (không cần thư viện ngoài)."""
+    with zipfile.ZipFile(path) as z:
+        xml = z.read("word/document.xml").decode("utf-8", "ignore")
+    xml = xml.replace("</w:p>", "\n")          # mỗi đoạn xuống một dòng
+    text = re.sub(r"<[^>]+>", " ", xml)         # bỏ toàn bộ thẻ XML
+    return html.unescape(text)
+
+
+def _extract_cv_text(path: Path) -> str:
+    """Đọc nội dung text của một file CV theo phần mở rộng."""
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        if not _FITZ_OK:
+            raise RuntimeError("Cần cài PyMuPDF để đọc PDF: pip install pymupdf")
+        return _read_pdf_text(path)
+    if suffix == ".docx":
+        return _read_docx_text(path)
+    # .doc cũ (định dạng nhị phân) không đọc được nếu không có Word/thư viện
+    raise ValueError("Định dạng .doc cũ chưa hỗ trợ — hãy lưu lại thành .docx hoặc .pdf")
+
+
+def _find_email(text: str) -> str:
+    m = _EMAIL_RE.search(text)
+    return m.group(0) if m else ""
+
+
+def _find_phone(text: str) -> str:
+    """Tìm số điện thoại VN đầu tiên hợp lệ (10–11 chữ số sau khi chuẩn hóa)."""
+    for m in _PHONE_RE.finditer(text):
+        digits = re.sub(r"\D", "", m.group())
+        if digits.startswith("84"):
+            digits = "0" + digits[2:]
+        if 10 <= len(digits) <= 11:
+            return digits
+    return ""
+
+
+def _write_excel(path: str, headers: list[str], rows: list[list]) -> None:
+    """Ghi bảng tổng hợp ra file .xlsx."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "CV"
+    ws.append(headers)
+    for row in rows:
+        ws.append(row)
+    wb.save(path)
+
+
+class ScanCvTool(BaseTool):
+    name = "Quét CV"
+    description = "Đổi tên hàng loạt file CV và trích xuất Email, Số điện thoại ra Excel."
+    icon = "📇"
+    category = "Tệp & Tài liệu"
+    order = 10
+    # Hai tính năng tách thành 2 tab riêng nên ghi đè build() thay vì dùng
+    # nút hành động mặc định của BaseTool.
+    def build(self, parent):
         self._parent = parent
         cfg = config.load(SECTION, DEFAULTS)
 
-        # ---- Thư mục ----
-        widgets.section_label(parent, "Thư mục chứa CV")
-        self.var_folder = widgets.file_row(parent, "Thư mục", mode="folder")
+        outer = tk.Frame(parent, bg=theme.CONTENT_BG)
+
+        # ---- Card dùng chung cho cả hai tab: thư mục + từ nhiễu ----
+        shared = self._card(outer, pady=(0, 14))
+        widgets.section_label(shared, "Thư mục chứa CV")
+        self.var_folder = widgets.file_row(shared, "Thư mục", mode="folder")
         if cfg["folder"]:
             self.var_folder.set(cfg["folder"])
 
-        # ---- Mã CV — hai ô cạnh nhau ----
+        widgets.section_label(shared, "Từ cần xóa khi trích tên ứng viên")
+        self.noise_box = widgets.text_area(
+            shared,
+            "Mỗi từ / cụm từ một dòng (hoặc cách nhau bởi dấu phẩy):",
+            value=cfg["noise_keywords"],
+            height=5,
+        )
+        save_row = tk.Frame(shared, bg=theme.CARD_BG)
+        save_row.pack(fill="x", pady=(4, 0))
+        ttk.Button(
+            save_row, text="💾 Lưu cấu hình", bootstyle="secondary-outline",
+            command=self._save_config,
+        ).pack(side="left")
+
+        # ---- Notebook: mỗi tính năng một tab ----
+        nb = ttk.Notebook(outer)
+        nb.pack(fill="both", expand=True)
+
+        page_rename,  body_rename  = self._tab_page(nb)
+        page_extract, body_extract = self._tab_page(nb)
+        nb.add(page_rename,  text="Đổi tên file")
+        nb.add(page_extract, text="Trích xuất Excel")
+
+        self._build_rename_tab(body_rename, cfg)
+        self._build_extract_tab(body_extract)
+
+        return outer
+
+    # ----- Khung tiện ích -----
+
+    def _card(self, parent, **pack):
+        card = tk.Frame(
+            parent, bg=theme.CARD_BG,
+            highlightbackground=theme.BORDER, highlightthickness=1,
+        )
+        card.pack(fill="x", **pack)
+        inner = tk.Frame(card, bg=theme.CARD_BG)
+        inner.pack(fill="both", expand=True, padx=24, pady=18)
+        return inner
+
+    def _tab_page(self, notebook):
+        """Tạo một trang tab có nền thẻ và lề trong. Trả về (page, inner)."""
+        page = tk.Frame(notebook, bg=theme.CARD_BG)
+        inner = tk.Frame(page, bg=theme.CARD_BG)
+        inner.pack(fill="both", expand=True, padx=24, pady=20)
+        return page, inner
+
+    # ----- Tab 1: Đổi tên file -----
+
+    def _build_rename_tab(self, parent, cfg):
         widgets.section_label(parent, "Mã CV")
 
         code_row = tk.Frame(parent, bg=theme.CARD_BG)
@@ -162,32 +299,39 @@ class ScanCvTool(BaseTool):
             "250602_Tran Thi B.pdf, …",
         )
 
-        # ---- Từ nhiễu ----
-        widgets.section_label(parent, "Từ cần xóa khi trích tên ứng viên")
-        self.noise_box = widgets.text_area(
-            parent,
-            "Mỗi từ / cụm từ một dòng (hoặc cách nhau bởi dấu phẩy):",
-            value=cfg["noise_keywords"],
-            height=6,
-        )
-
-        btn_row = tk.Frame(parent, bg=theme.CARD_BG)
-        btn_row.pack(fill="x", pady=(4, 0))
+        act = tk.Frame(parent, bg=theme.CARD_BG)
+        act.pack(fill="x", pady=(16, 0))
         ttk.Button(
-            btn_row, text="💾 Lưu cấu hình", bootstyle="secondary-outline",
-            command=self._save_config,
-        ).pack(side="left")
+            act, text="📝 Đổi tên file CV", bootstyle="success",
+            command=self.run,
+        ).pack(side="left", ipadx=12, ipady=5)
 
-        # ---- AI (placeholder) ----
-        widgets.section_label(parent, "Trích xuất AI (sắp ra mắt)")
-        self.var_output = widgets.file_row(parent, "Xuất bảng tổng hợp ra", mode="save")
-        widgets.checkbox(parent, "Họ tên, Email, Số điện thoại")
-        widgets.checkbox(parent, "Số năm kinh nghiệm")
-        widgets.checkbox(parent, "Kỹ năng & Học vấn")
+    # ----- Tab 2: Trích xuất Excel -----
+
+    def _build_extract_tab(self, parent):
+        widgets.section_label(parent, "Trích xuất dữ liệu ra Excel")
+        self.var_output = widgets.file_row(
+            parent, "Xuất bảng tổng hợp ra (.xlsx)", mode="save")
+        self.chk_name  = widgets.checkbox(parent, "Họ tên (lấy từ tên file)")
+        self.chk_email = widgets.checkbox(parent, "Email")
+        self.chk_phone = widgets.checkbox(parent, "Số điện thoại")
         widgets.hint(
             parent,
-            "⚠️ Tính năng trích xuất AI dùng Claude API — cần cấu hình API key trước khi chạy.",
+            "Đọc nội dung từng file CV (PDF/DOCX) và dùng regex tìm Email, Số điện thoại. "
+            "Cột Họ tên lấy theo cách trích tên ứng viên (dùng từ nhiễu ở khung trên). "
+            "File .doc cũ chưa hỗ trợ — hãy lưu lại thành .docx hoặc .pdf.",
         )
+
+        act = tk.Frame(parent, bg=theme.CARD_BG)
+        act.pack(fill="x", pady=(16, 0))
+        ttk.Button(
+            act, text="📊 Trích xuất ra Excel", bootstyle="primary",
+            command=self._run_extract,
+        ).pack(side="left", ipadx=12, ipady=5)
+
+    def build_body(self, parent):
+        # Không dùng — đã ghi đè build(). Bắt buộc cài đặt vì là abstract.
+        pass
 
     # ----------------------------------------------------------------- config
 
@@ -202,6 +346,87 @@ class ScanCvTool(BaseTool):
     def _save_config(self):
         config.save(SECTION, self._collect())
         messagebox.showinfo("Đã lưu", "Đã lưu cấu hình ✅")
+
+    # ------------------------------------------------------- trích xuất Excel
+
+    def _run_extract(self):
+        if not _OPENPYXL_OK:
+            messagebox.showerror(
+                "Thiếu thư viện",
+                "Cần cài openpyxl để xuất Excel:\n  pip install openpyxl")
+            return
+
+        folder = self.var_folder.get().strip()
+        if not folder or not os.path.isdir(folder):
+            messagebox.showwarning("Thiếu thư mục", "Vui lòng chọn thư mục chứa CV.")
+            return
+
+        out = self.var_output.get().strip()
+        if not out:
+            messagebox.showwarning("Thiếu file xuất", "Vui lòng chọn nơi lưu file Excel.")
+            return
+
+        want_name  = self.chk_name.get()
+        want_email = self.chk_email.get()
+        want_phone = self.chk_phone.get()
+        if not (want_name or want_email or want_phone):
+            messagebox.showwarning(
+                "Chưa chọn trường", "Hãy chọn ít nhất một trường để trích xuất.")
+            return
+
+        noise = _parse_noise(self.noise_box.get("1.0", "end-1c"))
+        files = sorted(
+            p for p in Path(folder).iterdir()
+            if p.is_file() and p.suffix.lower() in _CV_EXTENSIONS
+        )
+        if not files:
+            messagebox.showinfo(
+                "Không có file",
+                "Không tìm thấy file PDF/DOC/DOCX trong thư mục đã chọn.")
+            return
+
+        config.save(SECTION, self._collect())
+
+        headers = ["Tên file"]
+        if want_name:
+            headers.append("Họ tên")
+        if want_email:
+            headers.append("Email")
+        if want_phone:
+            headers.append("Số điện thoại")
+
+        rows    = []
+        errors  = []
+        need_text = want_email or want_phone
+        for p in files:
+            text = ""
+            if need_text:
+                try:
+                    text = _extract_cv_text(p)
+                except Exception as exc:
+                    errors.append(f"{p.name}: {exc}")
+
+            row = [p.name]
+            if want_name:
+                row.append(_extract_name(p.stem, noise))
+            if want_email:
+                row.append(_find_email(text))
+            if want_phone:
+                row.append(_find_phone(text))
+            rows.append(row)
+
+        try:
+            _write_excel(out, headers, rows)
+        except Exception as exc:
+            messagebox.showerror("Lỗi", f"Không lưu được file Excel:\n{exc}")
+            return
+
+        msg = f"✅ Đã trích xuất {len(rows)} CV và lưu vào:\n{out}"
+        if errors:
+            preview = "\n".join(errors[:5])
+            extra = f"\n(+{len(errors) - 5} file nữa)" if len(errors) > 5 else ""
+            msg += f"\n\n⚠ Một số file không đọc được nội dung:\n{preview}{extra}"
+        messagebox.showinfo("Hoàn thành", msg)
 
     # ----------------------------------------------------------------- hành động
 
