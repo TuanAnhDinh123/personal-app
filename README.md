@@ -20,6 +20,10 @@ pip install -r requirements.txt
 python main.py
 ```
 
+```bash
+./Personal_Tool.bat
+```
+
 ## Cấu trúc dự án
 
 ```
