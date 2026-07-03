@@ -4,14 +4,17 @@ REM Lan dau: tu tao moi truong + cai thu vien. Cac lan sau: mo thang.
 cd /d "%~dp0"
 
 if not exist ".venv\Scripts\python.exe" (
-    echo === Lan dau chay: tao moi truong va cai thu vien ===
+    echo === Lan dau chay: tao moi truong ===
     python -m venv .venv || goto :err
     call ".venv\Scripts\activate.bat"
     python -m pip install --upgrade pip
-    python -m pip install -r requirements.txt || goto :err
 ) else (
     call ".venv\Scripts\activate.bat"
 )
+
+REM Luon dong bo thu vien: cai phan con thieu (du roi se chay rat nhanh)
+echo === Kiem tra / cai thu vien ===
+python -m pip install -r requirements.txt || goto :err
 
 REM pythonw = chay GUI khong kem cua so console den
 start "" ".venv\Scripts\pythonw.exe" main.py
