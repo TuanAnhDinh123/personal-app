@@ -260,8 +260,8 @@ def _write_candidates(ws, rows: list[dict]) -> None:
     cell_border = Border(left=_thin, right=_thin, top=_thin, bottom=_thin)
 
     start = _next_empty_row(ws)
-    # Các cột nằm trong khung border cho mỗi dòng (từ ID đến PHONE).
-    border_cols = range(COL_ID, COL_PHONE + 1)
+    # Kẻ khung cho toàn bộ cột từ A (1) đến W (23) của mỗi dòng được thêm.
+    border_cols = range(1, 24)
     field_col = {
         "id": COL_ID, "name": COL_NAME, "apply": COL_APPLY,
         "email": COL_EMAIL, "phone": COL_PHONE,
