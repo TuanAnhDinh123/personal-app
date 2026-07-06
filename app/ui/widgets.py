@@ -59,6 +59,44 @@ def file_row(parent, label, mode="file", bg=None):
     return var
 
 
+def export_target_row(parent, label, bg=None):
+    """Ô chọn ĐÍCH xuất: chọn Thư mục (tạo file mới) hoặc File Excel (nối tiếp).
+
+    Trả về StringVar chứa đường dẫn. Bên gọi tự phân biệt thư mục / file.
+    """
+    bg = bg or theme.CARD_BG
+    block = tk.Frame(parent, bg=bg)
+    block.pack(fill="x", pady=(6, 10))
+    tk.Label(
+        block, text=label, bg=bg, fg=theme.TEXT,
+        font=(theme.FONT_FAMILY, 9),
+    ).pack(anchor="w", pady=(0, 4))
+
+    row = tk.Frame(block, bg=bg)
+    row.pack(fill="x")
+    var = tk.StringVar()
+    ttk.Entry(row, textvariable=var).pack(side="left", fill="x", expand=True, ipady=4)
+
+    def pick_folder():
+        path = filedialog.askdirectory()
+        if path:
+            var.set(path)
+
+    def pick_file():
+        path = filedialog.askopenfilename(
+            filetypes=[("Excel", "*.xlsx"), ("Tất cả", "*.*")])
+        if path:
+            var.set(path)
+
+    ttk.Button(
+        row, text="📁 Thư mục", bootstyle="secondary-outline", command=pick_folder,
+    ).pack(side="left", padx=(8, 0))
+    ttk.Button(
+        row, text="📄 File Excel", bootstyle="secondary-outline", command=pick_file,
+    ).pack(side="left", padx=(6, 0))
+    return var
+
+
 def text_row(parent, label, placeholder="", bg=None):
     """Ô nhập chữ một dòng."""
     bg = bg or theme.CARD_BG

@@ -9,12 +9,17 @@ Tính năng đổi tên:
 
 Tính năng trích xuất:
   • Đọc nội dung từng file CV (PDF / DOCX)
-  • Dùng regex tìm Email và Số điện thoại
-  • Xuất bảng tổng hợp ra file Excel (.xlsx)
+  • Tách ID (mã CV) và Tên ứng viên từ tên file, dùng regex tìm Email/SĐT
+  • Xuất theo template Excel có sẵn (sheet "Candidates"):
+      – Chọn THƯ MỤC  → tạo file Excel mới theo template
+      – Chọn FILE .xlsx → nối tiếp dữ liệu vào sheet "Candidates"
+        (báo lỗi nếu file không có sheet này)
 """
+import datetime
 import html
 import os
 import re
+import sys
 import unicodedata
 import zipfile
 from pathlib import Path
@@ -59,6 +64,27 @@ DEFAULTS = {
 }
 
 _NOISE_NUMBER = re.compile(r"^(?:20\d{2}|\d+)$")
+
+# ----- Template Excel (sheet "Candidates") -----
+_TEMPLATE_NAME = "template_cv.xlsx"
+CANDIDATES_SHEET = "Candidates"
+DATA_START_ROW = 12          # dòng dữ liệu đầu tiên (tiêu đề ở dòng 11)
+# Cột (1-based) trong sheet Candidates
+COL_ID    = 2   # B  — ID
+COL_NAME  = 3   # C  — NAME
+COL_APPLY = 4   # D  — APPLYING FOR (phòng ban)
+COL_EMAIL = 7   # G  — EMAIL ADDRESS
+COL_PHONE = 8   # H  — PHONE
+
+
+def _template_path() -> Path:
+    """Đường dẫn tới file template Excel, đúng cả khi chạy dev lẫn bản .exe."""
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        p = Path(base) / "app" / _TEMPLATE_NAME
+        if p.exists():
+            return p
+    return Path(__file__).resolve().parent.parent / _TEMPLATE_NAME
 
 
 def _ascii_fold(s: str) -> str:
@@ -135,8 +161,9 @@ def _seq_code(start_str: str, index: int) -> str:
 # ---------------------------------------------------------------------------
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
-# Số điện thoại VN: bắt đầu bằng 0 hoặc +84, cho phép dấu cách/chấm/gạch xen giữa.
-_PHONE_RE = re.compile(r"(?:\+?84|0)[\d.\-\s]{8,13}")
+# Số điện thoại VN: bắt đầu bằng 0, 84, +84 hoặc (+84); cho phép dấu
+# cách/chấm/gạch xen giữa. Ví dụ: 0369..., +84 369..., (+84) 369...
+_PHONE_RE = re.compile(r"(?:\(?\+?84\)?|0)[\d.\-\s]{8,13}")
 
 
 def _read_pdf_text(path: Path) -> str:
@@ -176,25 +203,89 @@ def _find_email(text: str) -> str:
 
 
 def _find_phone(text: str) -> str:
-    """Tìm số điện thoại VN đầu tiên hợp lệ (10–11 chữ số sau khi chuẩn hóa)."""
+    """Tìm số điện thoại VN đầu tiên hợp lệ.
+
+    Giữ nguyên định dạng quốc tế: số viết dạng 84/+84/(+84) → trả về '+84…'
+    (bỏ ngoặc và khoảng trắng). Số viết bắt đầu bằng 0 → giữ '0…'.
+    """
     for m in _PHONE_RE.finditer(text):
         digits = re.sub(r"\D", "", m.group())
         if digits.startswith("84"):
-            digits = "0" + digits[2:]
-        if 10 <= len(digits) <= 11:
-            return digits
+            local = digits[2:]
+            if 9 <= len(local) <= 10:
+                return "+84" + local
+        elif digits.startswith("0"):
+            if 10 <= len(digits) <= 11:
+                return digits
     return ""
 
 
-def _write_excel(path: str, headers: list[str], rows: list[list]) -> None:
-    """Ghi bảng tổng hợp ra file .xlsx."""
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "CV"
-    ws.append(headers)
-    for row in rows:
-        ws.append(row)
-    wb.save(path)
+def _split_id_name(stem: str, noise_list: list[str]) -> tuple[str, str]:
+    """Tách (ID, Tên) từ tên file CV.
+
+    File đã đổi tên có dạng '{prefix}{startcode}_{Tên ứng viên}', ví dụ
+    '250601_Nguyen Van A' → ID='250601', Tên='Nguyen Van A'. Nếu phần đầu
+    trước dấu phân cách không phải dãy số thì ID để trống và tên lấy từ
+    toàn bộ tên file (dùng bộ lọc từ nhiễu như cũ).
+    """
+    norm = unicodedata.normalize("NFC", stem)
+    m = re.match(r"\s*(\d{4,})[\s_\-]+(.+)", norm)
+    if m:
+        return m.group(1), _extract_name(m.group(2), noise_list)
+    return "", _extract_name(norm, noise_list)
+
+
+def _next_empty_row(ws) -> int:
+    """Dòng trống đầu tiên (từ DATA_START_ROW) trong vùng dữ liệu ứng viên."""
+    row = DATA_START_ROW
+    while any(
+        ws.cell(row=row, column=c).value not in (None, "")
+        for c in (COL_ID, COL_NAME, COL_APPLY, COL_EMAIL, COL_PHONE)
+    ):
+        row += 1
+    return row
+
+
+def _write_candidates(ws, rows: list[dict]) -> None:
+    """Ghi danh sách ứng viên vào sheet Candidates, nối tiếp sau dữ liệu cũ."""
+    start = _next_empty_row(ws)
+    field_col = {
+        "id": COL_ID, "name": COL_NAME, "apply": COL_APPLY,
+        "email": COL_EMAIL, "phone": COL_PHONE,
+    }
+    for i, r in enumerate(rows):
+        for field, col in field_col.items():
+            value = r.get(field, "")
+            if value:
+                ws.cell(row=start + i, column=col, value=value)
+
+
+def _safe_filename(name: str) -> str:
+    """Bỏ các ký tự không hợp lệ trong tên file Windows."""
+    return re.sub(r'[<>:"/\\|?*]+', "_", name).strip() or "Candidates"
+
+
+def _open_template_workbook():
+    """Mở file template, trả về (workbook, worksheet Candidates)."""
+    tpl = _template_path()
+    if not tpl.exists():
+        raise FileNotFoundError(
+            f"Không tìm thấy file template:\n{tpl}")
+    wb = openpyxl.load_workbook(tpl)
+    if CANDIDATES_SHEET not in wb.sheetnames:
+        raise ValueError(
+            f"Template thiếu sheet '{CANDIDATES_SHEET}'.")
+    return wb, wb[CANDIDATES_SHEET]
+
+
+def _open_existing_workbook(path: str):
+    """Mở file Excel có sẵn để nối tiếp; báo lỗi nếu thiếu sheet Candidates."""
+    wb = openpyxl.load_workbook(path)
+    if CANDIDATES_SHEET not in wb.sheetnames:
+        raise ValueError(
+            f"File Excel không có sheet '{CANDIDATES_SHEET}'.\n"
+            "Hãy chọn file đúng mẫu hoặc chọn một thư mục để tạo file mới.")
+    return wb, wb[CANDIDATES_SHEET]
 
 
 class ScanCvTool(BaseTool):
@@ -310,15 +401,29 @@ class ScanCvTool(BaseTool):
 
     def _build_extract_tab(self, parent):
         widgets.section_label(parent, "Trích xuất dữ liệu ra Excel")
-        self.var_output = widgets.file_row(
-            parent, "Xuất bảng tổng hợp ra (.xlsx)", mode="save")
-        self.chk_name  = widgets.checkbox(parent, "Họ tên (lấy từ tên file)")
+
+        self.var_dept = widgets.text_row(
+            parent, "Phòng ban (điền vào cột APPLYING FOR)")
+
+        self.var_output = widgets.export_target_row(
+            parent, "Xuất bảng tổng hợp ra")
+        widgets.hint(
+            parent,
+            "• Chọn 📁 Thư mục → tạo file Excel mới theo template có sẵn.\n"
+            "• Chọn 📄 File Excel → nối tiếp dữ liệu vào sheet 'Candidates' "
+            "(báo lỗi nếu file không có sheet này).",
+        )
+
+        widgets.section_label(parent, "Trường cần lấy")
+        self.chk_name  = widgets.checkbox(parent, "Tên ứng viên (không kèm ID)")
+        self.chk_id    = widgets.checkbox(parent, "ID (prefix + start code từ tên file)")
         self.chk_email = widgets.checkbox(parent, "Email")
         self.chk_phone = widgets.checkbox(parent, "Số điện thoại")
         widgets.hint(
             parent,
-            "Đọc nội dung từng file CV (PDF/DOCX) và dùng regex tìm Email, Số điện thoại. "
-            "Cột Họ tên lấy theo cách trích tên ứng viên (dùng từ nhiễu ở khung trên). "
+            "Tên & ID tách từ tên file (vd '250601_Nguyen Van A' → ID=250601, "
+            "Tên=Nguyen Van A) — nên đổi tên file ở tab 'Đổi tên file' trước. "
+            "Email & SĐT đọc từ nội dung CV (PDF/DOCX); SĐT hỗ trợ cả dạng (+84). "
             "File .doc cũ chưa hỗ trợ — hãy lưu lại thành .docx hoặc .pdf.",
         )
 
@@ -361,15 +466,19 @@ class ScanCvTool(BaseTool):
             messagebox.showwarning("Thiếu thư mục", "Vui lòng chọn thư mục chứa CV.")
             return
 
-        out = self.var_output.get().strip()
-        if not out:
-            messagebox.showwarning("Thiếu file xuất", "Vui lòng chọn nơi lưu file Excel.")
+        target = self.var_output.get().strip()
+        if not target:
+            messagebox.showwarning(
+                "Thiếu đích xuất",
+                "Vui lòng chọn thư mục (tạo file mới) hoặc file Excel (nối tiếp).")
             return
 
+        dept       = self.var_dept.get().strip()
         want_name  = self.chk_name.get()
+        want_id    = self.chk_id.get()
         want_email = self.chk_email.get()
         want_phone = self.chk_phone.get()
-        if not (want_name or want_email or want_phone):
+        if not (want_name or want_id or want_email or want_phone):
             messagebox.showwarning(
                 "Chưa chọn trường", "Hãy chọn ít nhất một trường để trích xuất.")
             return
@@ -387,16 +496,8 @@ class ScanCvTool(BaseTool):
 
         config.save(SECTION, self._collect())
 
-        headers = ["Tên file"]
-        if want_name:
-            headers.append("Họ tên")
-        if want_email:
-            headers.append("Email")
-        if want_phone:
-            headers.append("Số điện thoại")
-
-        rows    = []
-        errors  = []
+        rows      = []
+        errors    = []
         need_text = want_email or want_phone
         for p in files:
             text = ""
@@ -406,22 +507,51 @@ class ScanCvTool(BaseTool):
                 except Exception as exc:
                     errors.append(f"{p.name}: {exc}")
 
-            row = [p.name]
+            cv_id, cv_name = _split_id_name(p.stem, noise)
+            row = {}
             if want_name:
-                row.append(_extract_name(p.stem, noise))
+                row["name"] = cv_name
+            if want_id:
+                row["id"] = cv_id
+            if dept:
+                row["apply"] = dept
             if want_email:
-                row.append(_find_email(text))
+                row["email"] = _find_email(text)
             if want_phone:
-                row.append(_find_phone(text))
+                row["phone"] = _find_phone(text)
             rows.append(row)
 
+        # ---- Xác định chế độ: tạo mới theo template hay nối tiếp file có sẵn ----
         try:
-            _write_excel(out, headers, rows)
+            if os.path.isdir(target):
+                wb, ws = _open_template_workbook()
+                stamp  = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                base   = _safe_filename(f"Candidates_{dept}" if dept else "Candidates")
+                out    = os.path.join(target, f"{base}_{stamp}.xlsx")
+                mode   = "mới"
+            elif os.path.isfile(target):
+                wb, ws = _open_existing_workbook(target)
+                out    = target
+                mode   = "nối tiếp"
+            elif target.lower().endswith(".xlsx") and os.path.isdir(os.path.dirname(target)):
+                # Đường dẫn file chưa tồn tại nhưng thư mục cha hợp lệ → tạo mới.
+                wb, ws = _open_template_workbook()
+                out    = target
+                mode   = "mới"
+            else:
+                messagebox.showerror(
+                    "Đích không hợp lệ",
+                    "Hãy chọn một THƯ MỤC (tạo file mới) hoặc một FILE .xlsx có sẵn "
+                    "(nối tiếp) bằng nút '📁 Thư mục' / '📄 File Excel'.")
+                return
+
+            _write_candidates(ws, rows)
+            wb.save(out)
         except Exception as exc:
-            messagebox.showerror("Lỗi", f"Không lưu được file Excel:\n{exc}")
+            messagebox.showerror("Lỗi", f"Không xuất được Excel:\n{exc}")
             return
 
-        msg = f"✅ Đã trích xuất {len(rows)} CV và lưu vào:\n{out}"
+        msg = f"✅ Đã trích xuất {len(rows)} CV ({mode}) và lưu vào:\n{out}"
         if errors:
             preview = "\n".join(errors[:5])
             extra = f"\n(+{len(errors) - 5} file nữa)" if len(errors) > 5 else ""
