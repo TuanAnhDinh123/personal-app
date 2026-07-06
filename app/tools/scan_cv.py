@@ -70,11 +70,22 @@ _TEMPLATE_NAME = "template_cv.xlsx"
 CANDIDATES_SHEET = "Candidates"
 DATA_START_ROW = 12          # dòng dữ liệu đầu tiên (tiêu đề ở dòng 11)
 # Cột (1-based) trong sheet Candidates
+COL_BATCH = 1   # A  — Batch
 COL_ID    = 2   # B  — ID
 COL_NAME  = 3   # C  — NAME
 COL_APPLY = 4   # D  — APPLYING FOR (phòng ban)
 COL_EMAIL = 7   # G  — EMAIL ADDRESS
 COL_PHONE = 8   # H  — PHONE
+
+# Tên thư mục CV thường đặt là "batch 1", "batch 2"… → lấy số batch.
+_BATCH_RE = re.compile(r"batch[\s_\-]*0*(\d+)", re.IGNORECASE)
+
+
+def _batch_from_folder(folder: str):
+    """Lấy số batch từ tên thư mục, vd 'batch 2' → 2. Không khớp thì trả None."""
+    name = os.path.basename(os.path.normpath(folder))
+    m = _BATCH_RE.search(name)
+    return int(m.group(1)) if m else None
 
 
 def _template_path() -> Path:
@@ -263,7 +274,7 @@ def _write_candidates(ws, rows: list[dict]) -> None:
     # Kẻ khung cho toàn bộ cột từ A (1) đến W (23) của mỗi dòng được thêm.
     border_cols = range(1, 24)
     field_col = {
-        "id": COL_ID, "name": COL_NAME, "apply": COL_APPLY,
+        "batch": COL_BATCH, "id": COL_ID, "name": COL_NAME, "apply": COL_APPLY,
         "email": COL_EMAIL, "phone": COL_PHONE,
     }
     for i, r in enumerate(rows):
@@ -515,6 +526,8 @@ class ScanCvTool(BaseTool):
 
         config.save(SECTION, self._collect())
 
+        batch = _batch_from_folder(folder)   # số batch lấy từ tên thư mục CV
+
         rows      = []
         errors    = []
         need_text = want_email or want_phone
@@ -528,6 +541,8 @@ class ScanCvTool(BaseTool):
 
             cv_id, cv_name = _split_id_name(p.stem, noise)
             row = {}
+            if batch is not None:
+                row["batch"] = batch
             if want_name:
                 row["name"] = cv_name
             if want_id:
@@ -566,6 +581,13 @@ class ScanCvTool(BaseTool):
 
             _write_candidates(ws, rows)
             wb.save(out)
+        except PermissionError:
+            messagebox.showerror(
+                "Không ghi được file",
+                f"Không có quyền ghi vào:\n{out}\n\n"
+                "Thường do file Excel đang được MỞ trong Excel. "
+                "Hãy ĐÓNG file đó (kể cả cửa sổ xem trước) rồi thử lại.")
+            return
         except Exception as exc:
             messagebox.showerror("Lỗi", f"Không xuất được Excel:\n{exc}")
             return
