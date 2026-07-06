@@ -247,7 +247,16 @@ def _next_empty_row(ws) -> int:
 
 
 def _write_candidates(ws, rows: list[dict]) -> None:
-    """Ghi danh sách ứng viên vào sheet Candidates, nối tiếp sau dữ liệu cũ."""
+    """Ghi danh sách ứng viên vào sheet Candidates, nối tiếp sau dữ liệu cũ.
+
+    Mọi ô được ghi đều chuẩn hóa về cùng một font: Aptos Display, cỡ 12,
+    căn trái.
+    """
+    from openpyxl.styles import Alignment, Font
+
+    cell_font  = Font(name="Aptos Display", size=12)
+    cell_align = Alignment(horizontal="left")
+
     start = _next_empty_row(ws)
     field_col = {
         "id": COL_ID, "name": COL_NAME, "apply": COL_APPLY,
@@ -257,7 +266,9 @@ def _write_candidates(ws, rows: list[dict]) -> None:
         for field, col in field_col.items():
             value = r.get(field, "")
             if value:
-                ws.cell(row=start + i, column=col, value=value)
+                cell = ws.cell(row=start + i, column=col, value=value)
+                cell.font = cell_font
+                cell.alignment = cell_align
 
 
 def _safe_filename(name: str) -> str:
