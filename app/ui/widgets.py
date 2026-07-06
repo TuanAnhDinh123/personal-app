@@ -97,6 +97,20 @@ def export_target_row(parent, label, bg=None):
     return var
 
 
+def _only_digits(proposed):
+    """Cho phép chuỗi rỗng hoặc toàn chữ số (dùng cho validatecommand)."""
+    return proposed == "" or proposed.isdigit()
+
+
+def digit_entry(parent, textvariable, **kw):
+    """Ô nhập chỉ cho phép gõ chữ số."""
+    vcmd = (parent.register(_only_digits), "%P")
+    return ttk.Entry(
+        parent, textvariable=textvariable,
+        validate="key", validatecommand=vcmd, **kw,
+    )
+
+
 def text_row(parent, label, placeholder="", bg=None):
     """Ô nhập chữ một dòng."""
     bg = bg or theme.CARD_BG
@@ -260,3 +274,53 @@ def icon_glyph(parent, emoji, bg, size=22):
         return lbl
     return tk.Label(parent, text=emoji, bg=bg,
                     font=(theme.FONT_EMOJI, int(size * 0.7)))
+
+
+# ----- Hiệu ứng loading cho mọi nút bấm -----
+
+def install_loading_buttons(loading_text="⏳ Đang xử lý…"):
+    """Bọc lại ttk.Button để mọi nút hiện trạng thái 'đang xử lý' khi bấm.
+
+    Gọi đúng một lần lúc khởi động (trước khi dựng UI). Nhờ vậy tất cả nút
+    trong dự án tự có hiệu ứng loading mà không phải sửa từng nơi: khi bấm,
+    nút bị vô hiệu hóa và đổi chữ thành trạng thái chờ, xử lý xong thì trả
+    lại như cũ. Nút bị hủy giữa chừng (vd lệnh đóng hộp thoại) được bỏ qua.
+    """
+    orig = ttk.Button
+    if getattr(orig, "_loading_wrapped", False):
+        return  # đã cài rồi
+
+    class _LoadingButton(orig):
+        _loading_wrapped = True
+
+        def __init__(self, master=None, **kw):
+            cmd = kw.get("command")
+            if callable(cmd):
+                self._user_command = cmd
+                kw["command"] = self._run_with_loading
+            else:
+                self._user_command = None
+            super().__init__(master, **kw)
+
+        def _run_with_loading(self):
+            try:
+                prev_text = self.cget("text")
+            except tk.TclError:
+                self._user_command()
+                return
+            try:
+                self.configure(text=loading_text)
+                self.state(["disabled"])
+                self.update_idletasks()
+            except tk.TclError:
+                pass
+            try:
+                self._user_command()
+            finally:
+                try:
+                    self.configure(text=prev_text)
+                    self.state(["!disabled"])
+                except tk.TclError:
+                    pass  # nút đã bị hủy bởi chính lệnh (vd đóng hộp thoại)
+
+    ttk.Button = _LoadingButton

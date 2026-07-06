@@ -252,21 +252,29 @@ def _write_candidates(ws, rows: list[dict]) -> None:
     Mọi ô được ghi đều chuẩn hóa về cùng một font: Aptos Display, cỡ 12,
     căn trái.
     """
-    from openpyxl.styles import Alignment, Font
+    from openpyxl.styles import Alignment, Border, Font, Side
 
-    cell_font  = Font(name="Aptos Display", size=12)
-    cell_align = Alignment(horizontal="left")
+    cell_font   = Font(name="Aptos Display", size=12)
+    cell_align  = Alignment(horizontal="left")
+    _thin       = Side(style="thin", color="000000")
+    cell_border = Border(left=_thin, right=_thin, top=_thin, bottom=_thin)
 
     start = _next_empty_row(ws)
+    # Các cột nằm trong khung border cho mỗi dòng (từ ID đến PHONE).
+    border_cols = range(COL_ID, COL_PHONE + 1)
     field_col = {
         "id": COL_ID, "name": COL_NAME, "apply": COL_APPLY,
         "email": COL_EMAIL, "phone": COL_PHONE,
     }
     for i, r in enumerate(rows):
+        row_no = start + i
+        # Kẻ border cho toàn bộ ô của dòng được thêm (kể cả ô để trống).
+        for col in border_cols:
+            ws.cell(row=row_no, column=col).border = cell_border
         for field, col in field_col.items():
             value = r.get(field, "")
             if value:
-                cell = ws.cell(row=start + i, column=col, value=value)
+                cell = ws.cell(row=row_no, column=col, value=value)
                 cell.font = cell_font
                 cell.alignment = cell_align
 
@@ -383,7 +391,7 @@ class ScanCvTool(BaseTool):
             font=(theme.FONT_FAMILY, 9),
         ).pack(anchor="w", pady=(0, 4))
         self.var_prefix = tk.StringVar(value=cfg["prefix"])
-        ttk.Entry(col_l, textvariable=self.var_prefix).pack(fill="x", ipady=4)
+        widgets.digit_entry(col_l, self.var_prefix).pack(fill="x", ipady=4)
 
         col_r = tk.Frame(code_row, bg=theme.CARD_BG)
         col_r.pack(side="left", fill="x", expand=True)
@@ -393,7 +401,7 @@ class ScanCvTool(BaseTool):
             font=(theme.FONT_FAMILY, 9),
         ).pack(anchor="w", pady=(0, 4))
         self.var_start = tk.StringVar(value=cfg["start"])
-        ttk.Entry(col_r, textvariable=self.var_start).pack(fill="x", ipady=4)
+        widgets.digit_entry(col_r, self.var_start).pack(fill="x", ipady=4)
 
         widgets.hint(
             parent,
@@ -670,7 +678,7 @@ class ScanCvTool(BaseTool):
             popup.resizable(False, False)
             popup.transient(dlg)
             popup.grab_set()
-            popup.geometry(f"420x130+{event.x_root}+{event.y_root}")
+            popup.geometry(f"440x210+{event.x_root}+{event.y_root}")
 
             tk.Label(
                 popup, text="Tên ứng viên:",
@@ -698,7 +706,7 @@ class ScanCvTool(BaseTool):
             entry.bind("<Escape>", lambda _: popup.destroy())
 
             btn_row = tk.Frame(popup, bg=theme.CONTENT_BG)
-            btn_row.pack(fill="x", padx=14, pady=(8, 0))
+            btn_row.pack(fill="x", padx=14, pady=(18, 14))
             ttk.Button(
                 btn_row, text="OK", bootstyle="primary", command=_save,
             ).pack(side="left", ipadx=10, ipady=3)
