@@ -134,13 +134,32 @@ def text_area(parent, label, value="", height=8, bg=None):
         block, text=label, bg=bg, fg=theme.TEXT,
         font=(theme.FONT_FAMILY, 9),
     ).pack(anchor="w", pady=(0, 4))
-    box = tk.Text(
-        block, height=height, wrap="word", relief="solid", bd=1,
-        font=(theme.FONT_FAMILY, 10), bg="#ffffff", fg=theme.TEXT,
+    holder = tk.Frame(
+        block, bg="#ffffff", relief="solid", bd=1,
         highlightthickness=1, highlightbackground=theme.BORDER,
-        padx=8, pady=6,
     )
-    box.pack(fill="x")
+    holder.pack(fill="x")
+    box = tk.Text(
+        holder, height=height, wrap="word", relief="flat", bd=0,
+        font=(theme.FONT_FAMILY, 10), bg="#ffffff", fg=theme.TEXT,
+        highlightthickness=0, padx=8, pady=6,
+    )
+    vsb = ttk.Scrollbar(holder, orient="vertical", command=box.yview)
+    box.configure(yscrollcommand=vsb.set)
+    box.pack(side="left", fill="both", expand=True)
+    vsb.pack(side="right", fill="y")
+
+    def _on_wheel(event):
+        # Nếu nội dung còn phần bị ẩn -> cuộn trong ô này và chặn cuộn trang;
+        # nếu đã hiện hết -> để sự kiện rơi xuống trang (ScrollableFrame).
+        first, last = box.yview()
+        if first <= 0.0 and last >= 1.0:
+            return None
+        box.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        return "break"
+
+    box.bind("<MouseWheel>", _on_wheel)
+
     if value:
         box.insert("1.0", value)
     return box
