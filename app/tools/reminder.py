@@ -31,12 +31,16 @@ SECTION = "reminder"
 DEFAULTS = {
     "keywords": "interview, interview invitation, phỏng vấn, pv",
     "exclude_domain": "datalogic.com",
-    "subject": "Interview result — Thank you for your time",
+    "subject": "Interview Result — {position}",
     "body": (
         "Dear {name},\n\n"
-        "Thank you for taking the time to attend the interview with us.\n"
-        "We would like to inform you of the result of your interview.\n\n"
+        "Thank you for taking the time to interview for the {position} "
+        "position with us. We truly appreciate your interest and the effort "
+        "you put into the process.\n\n"
+        "After careful consideration, we would like to inform you of the "
+        "result of your interview:\n\n"
         "…\n\n"
+        "Should you have any questions, please feel free to contact us.\n\n"
         "Best regards,\n"
     ),
     "auto": True,
@@ -54,16 +58,31 @@ def _month_ago(d):
 
 
 def _extract_name(subject):
-    """Lấy tên ứng viên: phần sau 'Mr.'/'Ms.' nếu có, không thì cả subject."""
+    """Lấy tên ứng viên: phần sau 'Mr.'/'Ms.'/'Mrs.' nếu có, không thì cả subject."""
     m = re.search(r'\b(?:Mr|Ms|Mrs)\.\s*(.+)', subject, re.IGNORECASE)
     return m.group(1).strip() if m else subject.strip()
 
 
+def _extract_position(subject):
+    """Lấy vị trí ứng tuyển từ tiêu đề dạng 'Interview invitation for <vị trí> - Mr. ...'.
+
+    Bỏ phần tên (từ 'Mr.'/'Ms.'/'Mrs.' trở đi) và các dấu ngăn cách ở cuối.
+    """
+    m = re.search(r'interview\s+(?:invitation\s+)?for\s+(.+)', subject,
+                  re.IGNORECASE)
+    if not m:
+        return ""
+    rest = re.split(r'\b(?:Mr|Ms|Mrs)\.', m.group(1), maxsplit=1,
+                    flags=re.IGNORECASE)[0]
+    return rest.strip().strip("-–—").strip()
+
+
 def _fill_template(text, appt):
-    """Thay các placeholder {name}/{subject}/{date}/{time} trong mẫu mail."""
+    """Thay các placeholder {name}/{position}/{subject}/{date}/{time} trong mẫu."""
     start = appt.get("start")
     return (
         text.replace("{name}", _extract_name(appt["subject"]))
+            .replace("{position}", _extract_position(appt["subject"]))
             .replace("{subject}", appt["subject"])
             .replace("{date}", start.strftime("%d/%m/%Y") if start else "")
             .replace("{time}", start.strftime("%H:%M") if start else "")
@@ -118,8 +137,9 @@ class ReminderTool(BaseTool):
             parent, "Tiêu đề", placeholder=cfg["subject"],
         )
         self.body_box = widgets.text_area(
-            parent, "Nội dung  (dùng được {name}, {subject}, {date}, {time})",
-            value=cfg["body"], height=9,
+            parent,
+            "Nội dung  (dùng được {name}, {position}, {subject}, {date}, {time})",
+            value=cfg["body"], height=11,
         )
 
         self.var_auto = widgets.checkbox(
@@ -171,18 +191,33 @@ class ReminderTool(BaseTool):
         config.save(SECTION, self._collect())
         messagebox.showinfo("Đã lưu", "Đã lưu cấu hình ✅")
 
+    @staticmethod
+    def _save_runtime(**changes):
+        """Chỉ lưu các trường runtime (last_scan/dismissed) — KHÔNG đóng băng
+        mẫu mail. Đọc thẳng phần đã lưu (bỏ qua DEFAULTS) để lần sau đổi
+        DEFAULTS vẫn có tác dụng nếu người dùng chưa tự lưu cấu hình."""
+        raw = dict(config._read_all().get(SECTION, {}))
+        raw.update(changes)
+        config.save(SECTION, raw)
+
     def _dismiss(self, appt):
-        """Đánh dấu 1 lịch đã xử lý → nhớ EntryID & bỏ khỏi bảng."""
-        cfg = config.load(SECTION, DEFAULTS)
-        dismissed = list(cfg.get("dismissed", []))
+        """Đánh dấu 1 lịch đã xử lý → nhớ EntryID & bỏ đúng dòng đó khỏi bảng.
+
+        Không dựng lại cả bảng để KHÔNG làm khung cuộn nhảy về đầu."""
         eid = appt.get("entry_id")
+        dismissed = list(config.load(SECTION, DEFAULTS).get("dismissed", []))
         if eid and eid not in dismissed:
             dismissed.append(eid)
-        cfg["dismissed"] = dismissed
-        config.save(SECTION, cfg)
-        self._interviews = [a for a in self._interviews
-                            if a.get("entry_id") != eid]
-        self._render_table()
+            self._save_runtime(dismissed=dismissed)
+
+        self._interviews = [a for a in self._interviews if a is not appt]
+        rowf = self._row_widgets.pop(id(appt), None)
+        if not self._interviews:
+            self._render_table()          # hết dòng → hiện thông báo trống
+        elif rowf is not None:
+            rowf.destroy()                # xóa đúng dòng, giữ nguyên vị trí cuộn
+        else:
+            self._render_table()
 
     # ---------------------------------------------------------- quét lịch
     def _fetch_interviews(self):
@@ -212,8 +247,9 @@ class ReminderTool(BaseTool):
         return out
 
     def _scan_clicked(self):
-        """Nút '🔄 Quét lịch': lưu cấu hình rồi quét lại và cập nhật bảng."""
-        config.save(SECTION, self._collect())
+        """Nút '🔄 Quét lịch': quét lại theo giá trị đang nhập & cập nhật bảng.
+
+        Không tự lưu mẫu mail (để không đóng băng default) — dùng nút 💾 để lưu."""
         if not outlook.available():
             messagebox.showwarning(
                 "Cần Outlook",
@@ -234,8 +270,7 @@ class ReminderTool(BaseTool):
         today = datetime.date.today().isoformat()
         if cfg.get("last_scan") == today:
             return
-        cfg["last_scan"] = today
-        config.save(SECTION, cfg)
+        self._save_runtime(last_scan=today)
         if self._fetch_interviews():
             try:
                 window.deiconify()
@@ -248,6 +283,7 @@ class ReminderTool(BaseTool):
     def _render_table(self):
         for child in self._table_holder.winfo_children():
             child.destroy()
+        self._row_widgets = {}   # id(appt) -> frame của dòng (để xóa lẻ từng dòng)
 
         if not self._interviews:
             tk.Label(
@@ -279,7 +315,7 @@ class ReminderTool(BaseTool):
         ).grid(row=0, column=1, sticky="e")
 
         for i, appt in enumerate(self._interviews, start=1):
-            self._table_row(table, i, appt)
+            self._row_widgets[id(appt)] = self._table_row(table, i, appt)
 
     def _table_row(self, table, row_idx, appt):
         rowf = tk.Frame(table, bg=theme.CARD_BG)
@@ -311,6 +347,7 @@ class ReminderTool(BaseTool):
             btns, text="No", bootstyle="danger-outline",
             command=lambda a=appt: self._on_no(a),
         ).pack(side="left", padx=(8, 0), ipadx=6)
+        return rowf
 
     # ------------------------------------------------------- xử lý nút Yes/No
     def _on_yes(self, appt):
