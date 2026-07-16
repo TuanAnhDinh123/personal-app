@@ -190,6 +190,8 @@ def _lines(box):
 
 # Hằng số Excel (tránh phải EnsureDispatch để lấy win32com.client.constants)
 _XL_UP = -4162            # xlUp
+_XL_CALC_MANUAL = -4135   # xlCalculationManual
+_XL_CALC_AUTO = -4105     # xlCalculationAutomatic
 _XL_LINK_EXCEL = 1        # xlLinkTypeExcelLinks (dùng cho BreakLink)
 _HEADER_SCAN = "A1:DA20"  # vùng dò tiêu đề cột NCC, giống macro
 _INVALID_FS = re.compile(r'[\\/:*?"<>|]')
@@ -299,6 +301,19 @@ def _contiguous_groups(sorted_rows):
     return groups
 
 
+def _delete_row_groups(ws, groups):
+    """Xóa các cụm hàng [start, end], từ DƯỚI LÊN (cụm số hàng lớn trước) để
+    việc dồn hàng không làm lệch số hàng của các cụm phía trên.
+
+    Mỗi cụm liên tục xóa bằng MỘT lệnh Delete riêng. KHÔNG gộp nhiều cụm rời
+    rạc vào một lệnh Delete đa-vùng ("8:10,2:5"): Excel xử lý các vùng theo
+    thứ tự không đảm bảo nên dễ dồn hàng sai, bỏ sót hoặc xóa nhầm hàng. Vì đã
+    đặt Calculation = Manual nên xóa từng cụm vẫn nhanh (không recalc mỗi lần).
+    """
+    for start, end in reversed(groups):
+        ws.Rows(f"{start}:{end}").Delete()
+
+
 def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
                    delete_full, delete_rows, stt_headers=None):
     """Tạo 1 file kết quả cho mỗi NCC. Trả về (danh_sách_file, cảnh_báo)."""
@@ -335,6 +350,7 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
     excel.DisplayAlerts = False
     excel.ScreenUpdating = False
     excel.AskToUpdateLinks = False
+    excel.EnableEvents = False  # không chạy macro/sự kiện của file khi mở/sửa
     try:
         for supplier in suppliers:
             safe = _INVALID_FS.sub("_", supplier)
@@ -346,6 +362,9 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
             # gốc; nhờ vậy chạy được kể cả khi file lương đang mở ở nơi khác.
             wb = excel.Workbooks.Open(source_path, UpdateLinks=0, ReadOnly=True)
             try:
+                # Manual calc: Excel KHÔNG tính lại toàn bộ công thức mỗi lần
+                # mở/xóa hàng/lưu — đây là phần tốn thời gian nhất với file lương.
+                excel.Calculation = _XL_CALC_MANUAL
                 wb.SaveAs(tmp_out, FileFormat=save_fmt)
 
                 # Break hết link tới file ngoài (biến công thức link thành giá
@@ -406,9 +425,9 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
                     # dữ liệu bên dưới, nên xác định 1 lần rồi đánh lại sau.
                     stt_row, stt_col = _find_header(top, stt_headers)
 
-                    # Xóa từ dưới lên để số hàng phía trên không bị lệch
-                    for start, end in reversed(_contiguous_groups(to_delete)):
-                        ws.Rows(f"{start}:{end}").Delete()
+                    # Xóa hàng KHÔNG thuộc NCC: mỗi cụm liên tục một lệnh Delete,
+                    # từ dưới lên (xem _delete_row_groups để hiểu vì sao không gộp).
+                    _delete_row_groups(ws, _contiguous_groups(to_delete))
 
                     # 3) Đánh lại số thứ tự cột STT từ 1 (chỉ đánh những ô vốn
                     # đã có giá trị; ô trống/dòng phân cách được giữ nguyên)
@@ -422,6 +441,12 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
                             ws.AutoFilterMode = False
                     except pythoncom.com_error:
                         pass
+
+                # Tính lại MỘT LẦN cho toàn bộ thay đổi rồi trả về Automatic:
+                # file lưu ra có giá trị công thức đúng và mở lên ở chế độ tự
+                # động (giống macro gốc), nhưng ta chỉ recalc 1 lần thay vì mỗi
+                # thao tác xóa hàng.
+                excel.Calculation = _XL_CALC_AUTO
 
                 wb.Close(SaveChanges=True)
             except Exception:
