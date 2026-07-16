@@ -225,6 +225,31 @@ def _find_header(top_block, vendor_headers):
     return None, None
 
 
+def _copy_to_dest(src, dest, dest_dir):
+    """Copy file tạm -> đích, có retry cho ổ đám mây (Google Drive/OneDrive)
+    hay materialize placeholder chậm. Lỗi -> báo rõ cả 2 đường dẫn."""
+    import shutil
+    import time
+
+    last_exc = None
+    for attempt in range(3):
+        try:
+            os.makedirs(dest_dir, exist_ok=True)  # đảm bảo thư mục đích sẵn sàng
+            shutil.copy2(src, dest)
+            return
+        except OSError as exc:
+            last_exc = exc
+            time.sleep(0.7)  # chờ ổ đám mây "hiện" thư mục rồi thử lại
+    raise RuntimeError(
+        "Không ghi được file kết quả tới thư mục đích.\n"
+        f"Đích: {dest}\n"
+        f"(File tạm đã tạo OK tại: {src})\n"
+        f"Chi tiết: {last_exc}\n\n"
+        "Gợi ý: thư mục đích có thể nằm trên Google Drive/OneDrive chưa sẵn "
+        "sàng. Hãy thử chọn 'Thư mục lưu kết quả' là một thư mục trên ổ C:."
+    )
+
+
 def _contiguous_groups(sorted_rows):
     """Gom các số hàng liên tiếp thành các cụm [start, end]."""
     groups = []
@@ -255,7 +280,15 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
     # Excel SaveAs hay lỗi 1004 khi ghi THẲNG lên ổ ảo/đám mây (Google Drive
     # "G:\\", OneDrive) hay ổ mạng, do cách Excel ghi qua file tạm rồi đổi tên.
     # Vì vậy cho Excel lưu ra thư mục TẠM cục bộ, rồi Python copy sang đích.
-    scratch = tempfile.mkdtemp(prefix="tach_luong_")
+    # Dùng ổ C: cục bộ (LOCALAPPDATA) để tránh TEMP bị chuyển hướng lên đám mây.
+    local_base = os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()
+    try:
+        scratch = tempfile.mkdtemp(prefix="tach_luong_", dir=local_base)
+    except OSError:
+        scratch = tempfile.mkdtemp(prefix="tach_luong_")
+
+    # Bảo đảm thư mục đích tồn tại (không phá nếu đã có, kể cả trên G:\).
+    os.makedirs(output_dir, exist_ok=True)
 
     pythoncom.CoInitialize()
     excel = win32.DispatchEx("Excel.Application")
@@ -343,7 +376,10 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
 
             # Chuyển từ thư mục tạm sang đích thật bằng copy thường — ổn định
             # với Google Drive/OneDrive/ổ mạng (nơi Excel SaveAs hay thất bại).
-            shutil.copy2(tmp_out, final_out)
+            if not os.path.isfile(tmp_out):
+                raise RuntimeError(
+                    f"Excel không tạo được file tạm:\n{tmp_out}")
+            _copy_to_dest(tmp_out, final_out, output_dir)
             try:
                 os.remove(tmp_out)
             except OSError:
