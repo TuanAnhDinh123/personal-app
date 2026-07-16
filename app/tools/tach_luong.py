@@ -180,10 +180,18 @@ def _lines(box):
 
 # Hằng số Excel (tránh phải EnsureDispatch để lấy win32com.client.constants)
 _XL_UP = -4162            # xlUp
-_XL_OPENXML = 51          # xlOpenXMLWorkbook (.xlsx)
 _XL_LINK_EXCEL = 1        # xlLinkTypeExcelLinks (dùng cho BreakLink)
 _HEADER_SCAN = "A1:DA20"  # vùng dò tiêu đề cột NCC, giống macro
 _INVALID_FS = re.compile(r'[\\/:*?"<>|]')
+
+# FileFormat theo phần mở rộng — LƯU ĐÚNG định dạng file nguồn (giống macro),
+# tránh lỗi "SaveAs failed" khi nguồn là .xlsm mà ép lưu thành .xlsx.
+_FMT_BY_EXT = {
+    ".xlsx": 51,   # xlOpenXMLWorkbook
+    ".xlsm": 52,   # xlOpenXMLWorkbookMacroEnabled
+    ".xlsb": 50,   # xlExcel12
+    ".xls": 56,    # xlExcel8
+}
 
 
 def _base_name(filename):
@@ -232,11 +240,22 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
                    delete_full, delete_rows):
     """Tạo 1 file kết quả cho mỗi NCC. Trả về (danh_sách_file, cảnh_báo)."""
     import pythoncom
+    import shutil
+    import tempfile
     import win32com.client as win32
 
     created = []
     warnings = []
     base = _base_name(os.path.basename(source_path))
+    src_ext = os.path.splitext(source_path)[1].lower()
+    save_fmt = _FMT_BY_EXT.get(src_ext)
+    if save_fmt is None:          # đuôi lạ -> mặc định .xlsx
+        src_ext, save_fmt = ".xlsx", 51
+
+    # Excel SaveAs hay lỗi 1004 khi ghi THẲNG lên ổ ảo/đám mây (Google Drive
+    # "G:\\", OneDrive) hay ổ mạng, do cách Excel ghi qua file tạm rồi đổi tên.
+    # Vì vậy cho Excel lưu ra thư mục TẠM cục bộ, rồi Python copy sang đích.
+    scratch = tempfile.mkdtemp(prefix="tach_luong_")
 
     pythoncom.CoInitialize()
     excel = win32.DispatchEx("Excel.Application")
@@ -247,13 +266,15 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
     try:
         for supplier in suppliers:
             safe = _INVALID_FS.sub("_", supplier)
-            out_path = os.path.join(output_dir, f"{base}-{safe}.xlsx")
+            fname = f"{base}-{safe}{src_ext}"
+            tmp_out = os.path.join(scratch, fname)       # Excel ghi ở đây (cục bộ)
+            final_out = os.path.join(output_dir, fname)  # đích thật (có thể là G:\\)
 
             # Mở read-only: ta SaveAs sang file mới nên không cần ghi vào file
             # gốc; nhờ vậy chạy được kể cả khi file lương đang mở ở nơi khác.
             wb = excel.Workbooks.Open(source_path, UpdateLinks=0, ReadOnly=True)
             try:
-                wb.SaveAs(out_path, FileFormat=_XL_OPENXML)
+                wb.SaveAs(tmp_out, FileFormat=save_fmt)
 
                 # Break hết link tới file ngoài (biến công thức link thành giá
                 # trị) — thay cho thao tác tay Data > Edit Links > Break Link.
@@ -313,13 +334,21 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
                         ws.Rows(f"{start}:{end}").Delete()
 
                 wb.Close(SaveChanges=True)
-                created.append(out_path)
             except Exception:
                 try:
                     wb.Close(SaveChanges=False)
                 except Exception:
                     pass
                 raise
+
+            # Chuyển từ thư mục tạm sang đích thật bằng copy thường — ổn định
+            # với Google Drive/OneDrive/ổ mạng (nơi Excel SaveAs hay thất bại).
+            shutil.copy2(tmp_out, final_out)
+            try:
+                os.remove(tmp_out)
+            except OSError:
+                pass
+            created.append(final_out)
     finally:
         excel.ScreenUpdating = True
         excel.DisplayAlerts = True
@@ -328,5 +357,6 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
         except Exception:
             pass
         pythoncom.CoUninitialize()
+        shutil.rmtree(scratch, ignore_errors=True)
 
     return created, warnings
