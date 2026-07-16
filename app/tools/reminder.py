@@ -411,16 +411,38 @@ class ReminderTool(BaseTool):
         dlg = tk.Toplevel(parent)
         dlg.title("Soạn mail phản hồi")
         dlg.configure(bg=theme.CONTENT_BG)
-        dlg.geometry("760x640")
+        dlg.geometry("960x820")
+        dlg.minsize(720, 520)
         dlg.transient(parent)
         dlg.grab_set()
 
-        wrap = tk.Frame(dlg, bg=theme.CONTENT_BG)
-        wrap.pack(fill="both", expand=True, padx=22, pady=20)
+        # --- Nút thao tác cố định ở ĐÁY (không cuộn theo) ---
+        actions = tk.Frame(dlg, bg=theme.CONTENT_BG)
+        actions.pack(side="bottom", fill="x", padx=24, pady=16)
+
+        # --- Vùng cuộn dọc: Canvas + Scrollbar, nội dung nằm trong `wrap` ---
+        canvas = tk.Canvas(dlg, bg=theme.CONTENT_BG, highlightthickness=0)
+        vbar = ttk.Scrollbar(dlg, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vbar.set)
+        vbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        wrap = tk.Frame(canvas, bg=theme.CONTENT_BG)
+        wrap_id = canvas.create_window((0, 0), window=wrap, anchor="nw")
+        wrap.configure(padx=24, pady=20)
+
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfigure(wrap_id, width=e.width))
+        wrap.bind("<Configure>",
+                  lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
+        def _on_wheel(event):
+            canvas.yview_scroll(int(-event.delta / 120), "units")
+        dlg.bind("<MouseWheel>", _on_wheel)
 
         tk.Label(
             wrap, text="Soạn mail phản hồi ứng viên", bg=theme.CONTENT_BG,
-            fg=theme.TEXT, font=(theme.FONT_FAMILY, 14, "bold"),
+            fg=theme.TEXT, font=(theme.FONT_FAMILY, 15, "bold"),
         ).pack(anchor="w", pady=(0, 10))
 
         def field(label, value, single=True, height=10):
@@ -438,7 +460,7 @@ class ReminderTool(BaseTool):
                 highlightthickness=1, highlightbackground=theme.BORDER,
                 padx=8, pady=6,
             )
-            box.pack(fill="both", expand=True)
+            box.pack(fill="x")
             box.insert("1.0", value)
             return box
 
@@ -447,7 +469,7 @@ class ReminderTool(BaseTool):
             "Tiêu đề", _fill_template(self.var_subject.get().strip(), appt))
         body_box = field(
             "Nội dung", _fill_template(self.body_box.get("1.0", "end-1c"), appt),
-            single=False, height=12)
+            single=False, height=18)
 
         if not self._eligible_recipients(appt):
             widgets.hint(
@@ -455,9 +477,6 @@ class ReminderTool(BaseTool):
                 "⚠ Không tìm thấy email ứng viên (ngoài domain nội bộ) trong lịch "
                 "này — vui lòng nhập tay ở ô 'Đến'.", bg=theme.CONTENT_BG,
             )
-
-        actions = tk.Frame(wrap, bg=theme.CONTENT_BG)
-        actions.pack(fill="x", pady=(16, 0))
 
         def do_send():
             to_value = to_var.get().strip()

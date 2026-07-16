@@ -189,7 +189,6 @@ def _lines(box):
 # ---------------------------------------------------------------------------
 
 # Hằng số Excel (tránh phải EnsureDispatch để lấy win32com.client.constants)
-_XL_UP = -4162            # xlUp
 _XL_CALC_MANUAL = -4135   # xlCalculationManual
 _XL_CALC_AUTO = -4105     # xlCalculationAutomatic
 _XL_LINK_EXCEL = 1        # xlLinkTypeExcelLinks (dùng cho BreakLink)
@@ -268,7 +267,8 @@ def _renumber_stt(ws, header_row, col):
     Chỉ đánh số cho những ô vốn đã có giá trị; ô trống được giữ nguyên để
     không phá dòng phân cách/tổng cộng. Đọc/ghi cả cột 1 lần cho nhanh.
     """
-    last_row = ws.Cells(ws.Rows.Count, col).End(_XL_UP).Row
+    used = ws.UsedRange  # dòng cuối theo UsedRange (không lệ thuộc dòng ẩn)
+    last_row = used.Row + used.Rows.Count - 1
     if last_row <= header_row:
         return  # không có dòng dữ liệu
 
@@ -376,6 +376,16 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
                 except pythoncom.com_error as exc:
                     warnings.append(f"{supplier}: không break được link ({exc})")
 
+                # 0) Tắt AutoFilter ở TẤT CẢ sheet TRƯỚC KHI xóa. Bắt buộc phải
+                # làm sớm: nếu filter còn bật và đang ẩn dòng thì End(xlUp) sẽ
+                # BỎ QUA dòng ẩn -> tính sai dòng cuối -> sót dòng không khớp.
+                for ws in wb.Sheets:
+                    try:
+                        if ws.AutoFilterMode:
+                            ws.AutoFilterMode = False
+                    except pythoncom.com_error:
+                        pass
+
                 # 1) Xóa hẳn các sheet trong danh sách "xóa hoàn toàn"
                 for sheet_name in delete_full:
                     try:
@@ -402,7 +412,12 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
                             f"Sheet '{sheet_name}': không tìm thấy cột NCC "
                             f"(các tiêu đề đã thử: {', '.join(vendor_headers)}).")
 
-                    last_row = ws.Cells(ws.Rows.Count, dest_col).End(_XL_UP).Row
+                    # Dòng cuối lấy từ UsedRange (KHÔNG dùng End(xlUp)): End(xlUp)
+                    # bỏ qua dòng bị ẩn nên dễ tính thiếu; UsedRange bao trọn mọi
+                    # dòng có dữ liệu bất kể ẩn/hiện. Dư vài dòng trống bên dưới
+                    # cũng vô hại (đọc ra rỗng -> được giữ, không xóa nhầm).
+                    used = ws.UsedRange
+                    last_row = used.Row + used.Rows.Count - 1
                     if last_row <= dest_row:
                         continue  # không có dòng dữ liệu
 
@@ -433,14 +448,6 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
                     # đã có giá trị; ô trống/dòng phân cách được giữ nguyên)
                     if stt_col is not None:
                         _renumber_stt(ws, stt_row, stt_col)
-
-                # Tắt tính năng Filter (AutoFilter) ở TẤT CẢ sheet của file kết quả
-                for ws in wb.Sheets:
-                    try:
-                        if ws.AutoFilterMode:
-                            ws.AutoFilterMode = False
-                    except pythoncom.com_error:
-                        pass
 
                 # Tính lại MỘT LẦN cho toàn bộ thay đổi rồi trả về Automatic:
                 # file lưu ra có giá trị công thức đúng và mở lên ở chế độ tự
