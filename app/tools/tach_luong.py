@@ -34,6 +34,8 @@ _DEFAULTS = {
     "suppliers": "ANNK-HR\nPower Connect\nNhân Kiệt\nMEKONG SUBLABOR",
     # Cột D: các tên tiêu đề cột chứa NCC (tìm cột nào khớp trước thì dùng)
     "vendor_headers": "Vendor\nNCC\nAGENCY\nVendorName\nNhà cung cấp dịch vụ\nAgency",
+    # Tên tiêu đề cột số thứ tự (tìm thấy cột nào thì đánh lại STT từ 1)
+    "stt_headers": "STT\nNo\nNo.",
     # Cột H: các sheet bị xóa hoàn toàn
     "delete_full": "HC\nCompare",
     # Cột I: các sheet bị xóa hàng (chỉ giữ hàng thuộc NCC đang xử lý)
@@ -77,6 +79,9 @@ class TachBangLuongTool(BaseTool):
         self._headers_box = widgets.text_area(
             parent, "Tên tiêu đề cột chứa NCC — mỗi dòng 1 tên (khớp cái nào trước dùng cái đó)",
             value=cfg.get("vendor_headers", ""), height=6)
+        self._stt_box = widgets.text_area(
+            parent, "Tên tiêu đề cột STT — mỗi dòng 1 tên (tìm thấy sẽ đánh lại số từ 1; để trống = bỏ qua)",
+            value=cfg.get("stt_headers", ""), height=3)
         self._del_full_box = widgets.text_area(
             parent, "Sheet xóa hoàn toàn — mỗi dòng 1 tên sheet",
             value=cfg.get("delete_full", ""), height=3)
@@ -89,6 +94,8 @@ class TachBangLuongTool(BaseTool):
             "💡 Với mỗi NCC: mở lại file lương gốc → lưu thành "
             "\"<tên gốc>-<NCC>.xlsx\" → xóa các sheet ở ô trên → ở mỗi sheet chi tiết, "
             "tìm cột NCC rồi xóa mọi hàng KHÔNG thuộc NCC đó (hàng trống được giữ).\n"
+            "🔢 Sau khi xóa hàng, nếu tìm thấy cột STT thì tự động đánh lại số thứ tự từ 1.\n"
+            "🧹 Tự động tắt tính năng Filter (AutoFilter) ở tất cả sheet của file kết quả.\n"
             "🔗 Tool tự động break hết link và mở file gốc ở chế độ chỉ-đọc, nên không "
             "cần tắt file lương gốc trước khi chạy.\n"
             "📌 Cấu hình sẽ được lưu lại mỗi lần bấm Tách file."
@@ -100,6 +107,7 @@ class TachBangLuongTool(BaseTool):
         output_dir = self._output_var.get().strip()
         suppliers = _lines(self._suppliers_box)
         vendor_headers = _lines(self._headers_box)
+        stt_headers = _lines(self._stt_box)
         delete_full = _lines(self._del_full_box)
         delete_rows = _lines(self._del_rows_box)
 
@@ -109,6 +117,7 @@ class TachBangLuongTool(BaseTool):
             "output_dir": output_dir,
             "suppliers": _text(self._suppliers_box),
             "vendor_headers": _text(self._headers_box),
+            "stt_headers": _text(self._stt_box),
             "delete_full": _text(self._del_full_box),
             "delete_rows": _text(self._del_rows_box),
         })
@@ -142,6 +151,7 @@ class TachBangLuongTool(BaseTool):
                 output_dir=out_dir,
                 suppliers=suppliers,
                 vendor_headers=vendor_headers,
+                stt_headers=stt_headers,
                 delete_full=delete_full,
                 delete_rows=delete_rows,
             )
@@ -250,6 +260,34 @@ def _copy_to_dest(src, dest, dest_dir):
     )
 
 
+def _renumber_stt(ws, header_row, col):
+    """Đánh lại số thứ tự cột STT (1-based col) bắt đầu từ 1.
+
+    Chỉ đánh số cho những ô vốn đã có giá trị; ô trống được giữ nguyên để
+    không phá dòng phân cách/tổng cộng. Đọc/ghi cả cột 1 lần cho nhanh.
+    """
+    last_row = ws.Cells(ws.Rows.Count, col).End(_XL_UP).Row
+    if last_row <= header_row:
+        return  # không có dòng dữ liệu
+
+    rng = ws.Range(ws.Cells(header_row + 1, col), ws.Cells(last_row, col))
+    vals = rng.Value
+    if isinstance(vals, tuple):
+        cur = [row[0] for row in vals]
+    else:
+        cur = [vals]  # vùng chỉ 1 ô -> Value trả scalar
+
+    counter = 0
+    new_col = []
+    for v in cur:
+        if v is None or str(v).strip() == "":
+            new_col.append(None)          # giữ nguyên ô trống
+        else:
+            counter += 1
+            new_col.append(counter)
+    rng.Value = tuple((n,) for n in new_col)  # ghi lại dạng mảng cột (n x 1)
+
+
 def _contiguous_groups(sorted_rows):
     """Gom các số hàng liên tiếp thành các cụm [start, end]."""
     groups = []
@@ -262,8 +300,9 @@ def _contiguous_groups(sorted_rows):
 
 
 def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
-                   delete_full, delete_rows):
+                   delete_full, delete_rows, stt_headers=None):
     """Tạo 1 file kết quả cho mỗi NCC. Trả về (danh_sách_file, cảnh_báo)."""
+    stt_headers = stt_headers or []
     import pythoncom
     import shutil
     import tempfile
@@ -362,9 +401,27 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
                         if name != "" and name != supplier_key:
                             to_delete.append(dest_row + 1 + idx)
 
+                    # Tìm cột STT NGAY TRÊN khối tiêu đề (trước khi xóa hàng):
+                    # vị trí cột & hàng tiêu đề không đổi khi ta chỉ xóa hàng
+                    # dữ liệu bên dưới, nên xác định 1 lần rồi đánh lại sau.
+                    stt_row, stt_col = _find_header(top, stt_headers)
+
                     # Xóa từ dưới lên để số hàng phía trên không bị lệch
                     for start, end in reversed(_contiguous_groups(to_delete)):
                         ws.Rows(f"{start}:{end}").Delete()
+
+                    # 3) Đánh lại số thứ tự cột STT từ 1 (chỉ đánh những ô vốn
+                    # đã có giá trị; ô trống/dòng phân cách được giữ nguyên)
+                    if stt_col is not None:
+                        _renumber_stt(ws, stt_row, stt_col)
+
+                # Tắt tính năng Filter (AutoFilter) ở TẤT CẢ sheet của file kết quả
+                for ws in wb.Sheets:
+                    try:
+                        if ws.AutoFilterMode:
+                            ws.AutoFilterMode = False
+                    except pythoncom.com_error:
+                        pass
 
                 wb.Close(SaveChanges=True)
             except Exception:
