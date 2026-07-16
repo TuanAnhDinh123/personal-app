@@ -1,0 +1,525 @@
+"""Nhắc phản hồi kết quả phỏng vấn cho ứng viên.
+
+Luồng hoạt động:
+  • Quét lịch Outlook từ HÔM NAY lùi về 1 tháng, lấy các sự kiện có tiêu đề
+    chứa từ khóa phỏng vấn ("interview", "interview invitation"…). Cấu hình
+    (từ khóa, mẫu mail) giống tính năng "Gửi mail theo lịch".
+  • Hiển thị các lịch đó thành 1 bảng: cột 1 là tiêu đề (subject) của lịch,
+    cột 2 có 2 nút Yes / No cho câu hỏi "đã phản hồi ứng viên hay chưa?".
+        - Bấm YES  → coi như đã phản hồi: xóa khỏi bảng, lần sau không hiện nữa.
+        - Bấm NO   → hiện popup xác nhận "Gửi phản hồi ngay bây giờ?"
+              · Yes → mở popup SOẠN MAIL (gửi xong thì xóa record như bấm Yes).
+              · No  → mở popup ĐẶT LỊCH NHẮC khác.
+  • Người nhận mail lấy từ chính lịch đó (loại bỏ email nội bộ, vd datalogic.com).
+
+Các lịch đã xử lý được nhớ trong config (theo EntryID) nên không hiện lại.
+"""
+import calendar
+import datetime
+import re
+from tkinter import messagebox
+
+import tkinter as tk
+import ttkbootstrap as ttk
+
+from app.core import config, outlook
+from app.core.base_tool import BaseTool
+from app.ui import theme, widgets
+
+SECTION = "reminder"
+
+DEFAULTS = {
+    "keywords": "interview, interview invitation, phỏng vấn, pv",
+    "exclude_domain": "datalogic.com",
+    "subject": "Interview result — Thank you for your time",
+    "body": (
+        "Dear {name},\n\n"
+        "Thank you for taking the time to attend the interview with us.\n"
+        "We would like to inform you of the result of your interview.\n\n"
+        "…\n\n"
+        "Best regards,\n"
+    ),
+    "auto": True,
+    "last_scan": "",
+    "dismissed": [],      # EntryID các lịch đã xử lý (đã phản hồi / đã gửi mail)
+}
+
+
+def _month_ago(d):
+    """Trả về ngày cùng 'ngày' nhưng lùi lại 1 tháng (kẹp cuối tháng nếu cần)."""
+    month = d.month - 1 or 12
+    year = d.year - (1 if d.month == 1 else 0)
+    day = min(d.day, calendar.monthrange(year, month)[1])
+    return d.replace(year=year, month=month, day=day)
+
+
+def _extract_name(subject):
+    """Lấy tên ứng viên: phần sau 'Mr.'/'Ms.' nếu có, không thì cả subject."""
+    m = re.search(r'\b(?:Mr|Ms|Mrs)\.\s*(.+)', subject, re.IGNORECASE)
+    return m.group(1).strip() if m else subject.strip()
+
+
+def _fill_template(text, appt):
+    """Thay các placeholder {name}/{subject}/{date}/{time} trong mẫu mail."""
+    start = appt.get("start")
+    return (
+        text.replace("{name}", _extract_name(appt["subject"]))
+            .replace("{subject}", appt["subject"])
+            .replace("{date}", start.strftime("%d/%m/%Y") if start else "")
+            .replace("{time}", start.strftime("%H:%M") if start else "")
+    )
+
+
+class ReminderTool(BaseTool):
+    name = "Nhắc phản hồi PV"
+    description = "Quét lịch phỏng vấn 1 tháng gần đây và nhắc gửi kết quả cho ứng viên."
+    icon = "🔔"
+    category = "Văn phòng"
+    order = 6
+    auto_startup = True
+
+    # ------------------------------------------------------------------ UI
+    def build(self, parent):
+        """Ghi đè: bố cục riêng (không dùng nút thao tác mặc định của BaseTool)."""
+        outer = tk.Frame(parent, bg=theme.CONTENT_BG)
+        card = tk.Frame(
+            outer, bg=theme.CARD_BG,
+            highlightbackground=theme.BORDER, highlightthickness=1,
+        )
+        card.pack(fill="x", anchor="n")
+        inner = tk.Frame(card, bg=theme.CARD_BG)
+        inner.pack(fill="both", expand=True, padx=28, pady=24)
+        self.build_body(inner)
+        return outer
+
+    def build_body(self, parent):
+        self._parent = parent
+        self._interviews = []
+        cfg = config.load(SECTION, DEFAULTS)
+
+        # --- Khu vực cấu hình ---
+        widgets.section_label(parent, "Nhận diện lịch phỏng vấn")
+        self.var_keywords = widgets.text_row(
+            parent, "Từ khóa trong tiêu đề (cách nhau bởi dấu phẩy)",
+            placeholder=cfg["keywords"],
+        )
+        widgets.hint(
+            parent,
+            "Sự kiện có tiêu đề chứa MỘT trong các từ khóa trên (không phân biệt "
+            "hoa thường) sẽ được coi là lịch phỏng vấn.",
+        )
+        self.var_exclude = widgets.text_row(
+            parent, "Bỏ qua email thuộc domain (người nhận nội bộ)",
+            placeholder=cfg["exclude_domain"],
+        )
+
+        widgets.section_label(parent, "Mẫu email phản hồi ứng viên")
+        self.var_subject = widgets.text_row(
+            parent, "Tiêu đề", placeholder=cfg["subject"],
+        )
+        self.body_box = widgets.text_area(
+            parent, "Nội dung  (dùng được {name}, {subject}, {date}, {time})",
+            value=cfg["body"], height=9,
+        )
+
+        self.var_auto = widgets.checkbox(
+            parent, "Tự động quét khi mở app", checked=cfg["auto"],
+        )
+
+        row = tk.Frame(parent, bg=theme.CARD_BG)
+        row.pack(fill="x", pady=(6, 0))
+        ttk.Button(
+            row, text="💾 Lưu cấu hình", bootstyle="secondary-outline",
+            command=self._save_config,
+        ).pack(side="left")
+        ttk.Button(
+            row, text="🔄 Quét lịch (1 tháng gần đây)", bootstyle="primary",
+            command=self._scan_clicked,
+        ).pack(side="left", padx=(10, 0))
+
+        if not outlook.available():
+            widgets.hint(
+                parent,
+                "⚠ Không tìm thấy Outlook (pywin32). Tính năng quét/gửi mail chỉ "
+                "chạy trên Windows có cài Outlook.",
+            )
+
+        # --- Khu vực dữ liệu (bảng lịch phỏng vấn) ---
+        widgets.section_label(parent, "Lịch phỏng vấn quét được")
+        self._table_holder = tk.Frame(parent, bg=theme.CARD_BG)
+        self._table_holder.pack(fill="x", pady=(2, 0))
+
+        # Quét ngay khi mở tool để có sẵn dữ liệu (im lặng nếu không có Outlook)
+        self._interviews = self._fetch_interviews()
+        self._render_table()
+
+    # -------------------------------------------------------------- config
+    def _collect(self, keep_runtime=True):
+        cfg = config.load(SECTION, DEFAULTS)
+        data = {
+            "keywords": self.var_keywords.get().strip(),
+            "exclude_domain": self.var_exclude.get().strip(),
+            "subject": self.var_subject.get().strip(),
+            "body": self.body_box.get("1.0", "end-1c"),
+            "auto": bool(self.var_auto.get()),
+            "last_scan": cfg.get("last_scan", ""),
+            "dismissed": cfg.get("dismissed", []),
+        }
+        return data
+
+    def _save_config(self):
+        config.save(SECTION, self._collect())
+        messagebox.showinfo("Đã lưu", "Đã lưu cấu hình ✅")
+
+    def _dismiss(self, appt):
+        """Đánh dấu 1 lịch đã xử lý → nhớ EntryID & bỏ khỏi bảng."""
+        cfg = config.load(SECTION, DEFAULTS)
+        dismissed = list(cfg.get("dismissed", []))
+        eid = appt.get("entry_id")
+        if eid and eid not in dismissed:
+            dismissed.append(eid)
+        cfg["dismissed"] = dismissed
+        config.save(SECTION, cfg)
+        self._interviews = [a for a in self._interviews
+                            if a.get("entry_id") != eid]
+        self._render_table()
+
+    # ---------------------------------------------------------- quét lịch
+    def _fetch_interviews(self):
+        """Quét Outlook & trả về danh sách lịch phỏng vấn chưa xử lý (không dựng UI)."""
+        if not outlook.available():
+            return []
+        cfg = config.load(SECTION, DEFAULTS)
+        # ưu tiên giá trị đang gõ trên UI (nếu đã dựng), rồi tới config đã lưu
+        kw_raw = self.var_keywords.get() if hasattr(self, "var_keywords") else cfg["keywords"]
+        keywords = [k.strip().lower() for k in kw_raw.split(",") if k.strip()]
+
+        today = datetime.date.today()
+        try:
+            appts = outlook.appointments_between(_month_ago(today), today)
+        except Exception:
+            return []
+
+        dismissed = set(cfg.get("dismissed", []))
+        out = []
+        for a in appts:
+            if a.get("entry_id") in dismissed:
+                continue
+            subj = a["subject"].lower()
+            if keywords and not any(kw in subj for kw in keywords):
+                continue
+            out.append(a)
+        return out
+
+    def _scan_clicked(self):
+        """Nút '🔄 Quét lịch': lưu cấu hình rồi quét lại và cập nhật bảng."""
+        config.save(SECTION, self._collect())
+        if not outlook.available():
+            messagebox.showwarning(
+                "Cần Outlook",
+                "Tính năng này cần Outlook trên Windows (pywin32).")
+            return
+        self._interviews = self._fetch_interviews()
+        self._render_table()
+        if not self._interviews:
+            messagebox.showinfo(
+                "Không có lịch",
+                "Không tìm thấy lịch phỏng vấn nào trong 1 tháng gần đây.")
+
+    def startup(self, window):
+        """Tự chạy khi mở app — mỗi ngày một lần, có lịch thì mở tool ra."""
+        cfg = config.load(SECTION, DEFAULTS)
+        if not cfg.get("auto") or not outlook.available():
+            return
+        today = datetime.date.today().isoformat()
+        if cfg.get("last_scan") == today:
+            return
+        cfg["last_scan"] = today
+        config.save(SECTION, cfg)
+        if self._fetch_interviews():
+            try:
+                window.deiconify()
+                window.lift()
+                window.show_tool(self)   # kích hoạt build_body → tự quét & hiện bảng
+            except Exception:
+                pass
+
+    # ----------------------------------------------------------- bảng dữ liệu
+    def _render_table(self):
+        for child in self._table_holder.winfo_children():
+            child.destroy()
+
+        if not self._interviews:
+            tk.Label(
+                self._table_holder,
+                text="Chưa có lịch phỏng vấn nào (bấm 🔄 Quét lịch).",
+                bg=theme.CARD_BG, fg=theme.MUTED,
+                font=(theme.FONT_FAMILY, 9),
+            ).pack(anchor="w", pady=6)
+            return
+
+        table = tk.Frame(
+            self._table_holder, bg=theme.BORDER,
+            highlightbackground=theme.BORDER, highlightthickness=1,
+        )
+        table.pack(fill="x")
+        table.columnconfigure(0, weight=1)
+
+        # Header
+        head = tk.Frame(table, bg="#f0f2f8")
+        head.grid(row=0, column=0, columnspan=2, sticky="ew")
+        head.columnconfigure(0, weight=1)
+        tk.Label(
+            head, text="Lịch phỏng vấn (subject)", bg="#f0f2f8", fg=theme.TEXT,
+            font=(theme.FONT_FAMILY, 9, "bold"), anchor="w", padx=12, pady=8,
+        ).grid(row=0, column=0, sticky="w")
+        tk.Label(
+            head, text="Đã phản hồi ứng viên?", bg="#f0f2f8", fg=theme.TEXT,
+            font=(theme.FONT_FAMILY, 9, "bold"), padx=12, pady=8,
+        ).grid(row=0, column=1, sticky="e")
+
+        for i, appt in enumerate(self._interviews, start=1):
+            self._table_row(table, i, appt)
+
+    def _table_row(self, table, row_idx, appt):
+        rowf = tk.Frame(table, bg=theme.CARD_BG)
+        rowf.grid(row=row_idx, column=0, columnspan=2, sticky="ew", pady=(1, 0))
+        rowf.columnconfigure(0, weight=1)
+
+        start = appt.get("start")
+        when = start.strftime("%d/%m/%Y %H:%M") if start else ""
+        info = tk.Frame(rowf, bg=theme.CARD_BG)
+        info.grid(row=0, column=0, sticky="w", padx=12, pady=9)
+        tk.Label(
+            info, text=appt["subject"] or "(không có tiêu đề)", bg=theme.CARD_BG,
+            fg=theme.TEXT, font=(theme.FONT_FAMILY, 10), anchor="w",
+            justify="left", wraplength=520,
+        ).pack(anchor="w")
+        if when:
+            tk.Label(
+                info, text=when, bg=theme.CARD_BG, fg=theme.MUTED,
+                font=(theme.FONT_FAMILY, 8), anchor="w",
+            ).pack(anchor="w")
+
+        btns = tk.Frame(rowf, bg=theme.CARD_BG)
+        btns.grid(row=0, column=1, sticky="e", padx=12, pady=6)
+        ttk.Button(
+            btns, text="Yes", bootstyle="success",
+            command=lambda a=appt: self._on_yes(a),
+        ).pack(side="left", ipadx=6)
+        ttk.Button(
+            btns, text="No", bootstyle="danger-outline",
+            command=lambda a=appt: self._on_no(a),
+        ).pack(side="left", padx=(8, 0), ipadx=6)
+
+    # ------------------------------------------------------- xử lý nút Yes/No
+    def _on_yes(self, appt):
+        """Đã phản hồi → xóa khỏi bảng, lần sau không hiện."""
+        self._dismiss(appt)
+
+    def _on_no(self, appt):
+        """Chưa phản hồi → hỏi có gửi phản hồi ngay không."""
+        self._open_confirm(appt)
+
+    # ------------------------------------------------------------- popup: confirm
+    def _open_confirm(self, appt):
+        parent = self._parent.winfo_toplevel()
+        dlg = tk.Toplevel(parent)
+        dlg.title("Xác nhận")
+        dlg.configure(bg=theme.CONTENT_BG)
+        dlg.geometry("460x200")
+        dlg.transient(parent)
+        dlg.grab_set()
+
+        tk.Label(
+            dlg, text="Gửi phản hồi kết quả phỏng vấn ngay bây giờ?",
+            bg=theme.CONTENT_BG, fg=theme.TEXT,
+            font=(theme.FONT_FAMILY, 12, "bold"), wraplength=400, justify="left",
+        ).pack(anchor="w", padx=24, pady=(28, 6))
+        tk.Label(
+            dlg, text=appt["subject"], bg=theme.CONTENT_BG, fg=theme.MUTED,
+            font=(theme.FONT_FAMILY, 9), wraplength=400, justify="left",
+        ).pack(anchor="w", padx=24)
+
+        actions = tk.Frame(dlg, bg=theme.CONTENT_BG)
+        actions.pack(side="bottom", fill="x", padx=24, pady=20)
+
+        def yes():
+            dlg.destroy()
+            self._open_compose(appt)
+
+        def no():
+            dlg.destroy()
+            self._open_schedule(appt)
+
+        ttk.Button(actions, text="Yes — Soạn mail", bootstyle="primary",
+                   command=yes).pack(side="left", ipadx=8, ipady=2)
+        ttk.Button(actions, text="No — Đặt lịch nhắc khác",
+                   bootstyle="secondary-outline",
+                   command=no).pack(side="left", padx=(10, 0), ipady=2)
+
+    # ------------------------------------------------------------- popup: soạn mail
+    def _eligible_recipients(self, appt):
+        exclude = self.var_exclude.get().strip().lower()
+        out = []
+        for e in appt.get("attendees", []):
+            domain = e.split("@")[-1].lower() if "@" in e else ""
+            if exclude and exclude in domain:
+                continue
+            out.append(e)
+        return out
+
+    def _open_compose(self, appt):
+        parent = self._parent.winfo_toplevel()
+        dlg = tk.Toplevel(parent)
+        dlg.title("Soạn mail phản hồi")
+        dlg.configure(bg=theme.CONTENT_BG)
+        dlg.geometry("760x640")
+        dlg.transient(parent)
+        dlg.grab_set()
+
+        wrap = tk.Frame(dlg, bg=theme.CONTENT_BG)
+        wrap.pack(fill="both", expand=True, padx=22, pady=20)
+
+        tk.Label(
+            wrap, text="Soạn mail phản hồi ứng viên", bg=theme.CONTENT_BG,
+            fg=theme.TEXT, font=(theme.FONT_FAMILY, 14, "bold"),
+        ).pack(anchor="w", pady=(0, 10))
+
+        def field(label, value, single=True, height=10):
+            tk.Label(
+                wrap, text=label, bg=theme.CONTENT_BG, fg=theme.TEXT,
+                font=(theme.FONT_FAMILY, 9),
+            ).pack(anchor="w", pady=(8, 3))
+            if single:
+                var = tk.StringVar(value=value)
+                ttk.Entry(wrap, textvariable=var).pack(fill="x", ipady=3)
+                return var
+            box = tk.Text(
+                wrap, height=height, wrap="word", relief="solid", bd=1,
+                font=(theme.FONT_FAMILY, 10), bg="#ffffff", fg=theme.TEXT,
+                highlightthickness=1, highlightbackground=theme.BORDER,
+                padx=8, pady=6,
+            )
+            box.pack(fill="both", expand=True)
+            box.insert("1.0", value)
+            return box
+
+        to_var = field("Đến", "; ".join(self._eligible_recipients(appt)))
+        subject_var = field(
+            "Tiêu đề", _fill_template(self.var_subject.get().strip(), appt))
+        body_box = field(
+            "Nội dung", _fill_template(self.body_box.get("1.0", "end-1c"), appt),
+            single=False, height=12)
+
+        if not self._eligible_recipients(appt):
+            widgets.hint(
+                wrap,
+                "⚠ Không tìm thấy email ứng viên (ngoài domain nội bộ) trong lịch "
+                "này — vui lòng nhập tay ở ô 'Đến'.", bg=theme.CONTENT_BG,
+            )
+
+        actions = tk.Frame(wrap, bg=theme.CONTENT_BG)
+        actions.pack(fill="x", pady=(16, 0))
+
+        def do_send():
+            to_value = to_var.get().strip()
+            if not to_value:
+                messagebox.showwarning(
+                    "Thiếu người nhận", "Vui lòng nhập email người nhận.",
+                    parent=dlg)
+                return
+            try:
+                outlook.send_mail(
+                    to_value, subject_var.get().strip(),
+                    body_box.get("1.0", "end-1c"))
+            except Exception as exc:        # noqa: BLE001
+                messagebox.showerror(
+                    "Lỗi gửi mail", f"Không gửi được:\n{exc}", parent=dlg)
+                return
+            dlg.destroy()
+            self._dismiss(appt)             # gửi xong -> bỏ khỏi bảng như bấm Yes
+            messagebox.showinfo("Đã gửi", "Đã gửi mail phản hồi ✅")
+
+        ttk.Button(actions, text="Gửi mail", bootstyle="primary",
+                   command=do_send).pack(side="left", ipadx=10, ipady=3)
+        ttk.Button(actions, text="Hủy", bootstyle="secondary-outline",
+                   command=dlg.destroy).pack(side="left", padx=(10, 0), ipady=3)
+
+    # ------------------------------------------------------- popup: đặt lịch nhắc
+    def _open_schedule(self, appt):
+        parent = self._parent.winfo_toplevel()
+        dlg = tk.Toplevel(parent)
+        dlg.title("Đặt lịch nhắc khác")
+        dlg.configure(bg=theme.CONTENT_BG)
+        dlg.geometry("480x420")
+        dlg.transient(parent)
+        dlg.grab_set()
+
+        wrap = tk.Frame(dlg, bg=theme.CONTENT_BG)
+        wrap.pack(fill="both", expand=True, padx=22, pady=20)
+
+        tk.Label(
+            wrap, text="Đặt lịch nhắc phản hồi", bg=theme.CONTENT_BG,
+            fg=theme.TEXT, font=(theme.FONT_FAMILY, 14, "bold"),
+        ).pack(anchor="w", pady=(0, 4))
+        tk.Label(
+            wrap, text=appt["subject"], bg=theme.CONTENT_BG, fg=theme.MUTED,
+            font=(theme.FONT_FAMILY, 9), wraplength=420, justify="left",
+        ).pack(anchor="w", pady=(0, 10))
+
+        # mặc định: ngày mai 09:00
+        default_dt = (datetime.datetime.now() + datetime.timedelta(days=1)).replace(
+            hour=9, minute=0, second=0, microsecond=0)
+
+        def entry(label, value):
+            tk.Label(
+                wrap, text=label, bg=theme.CONTENT_BG, fg=theme.TEXT,
+                font=(theme.FONT_FAMILY, 9),
+            ).pack(anchor="w", pady=(8, 3))
+            var = tk.StringVar(value=value)
+            ttk.Entry(wrap, textvariable=var).pack(fill="x", ipady=3)
+            return var
+
+        date_var = entry("Ngày nhắc (dd/mm/yyyy)", default_dt.strftime("%d/%m/%Y"))
+        time_var = entry("Giờ nhắc (HH:MM)", default_dt.strftime("%H:%M"))
+        subj_var = entry("Tiêu đề lời nhắc",
+                         f"Phản hồi PV: {_extract_name(appt['subject'])}")
+
+        actions = tk.Frame(wrap, bg=theme.CONTENT_BG)
+        actions.pack(fill="x", pady=(20, 0))
+
+        def do_create():
+            try:
+                start = datetime.datetime.strptime(
+                    f"{date_var.get().strip()} {time_var.get().strip()}",
+                    "%d/%m/%Y %H:%M")
+            except ValueError:
+                messagebox.showwarning(
+                    "Sai định dạng",
+                    "Ngày phải là dd/mm/yyyy và giờ là HH:MM.", parent=dlg)
+                return
+            recipients = ", ".join(self._eligible_recipients(appt))
+            body = (
+                f"Nhắc gửi phản hồi kết quả phỏng vấn.\n\n"
+                f"Lịch gốc: {appt['subject']}\n"
+                f"Ứng viên: {recipients or '(chưa rõ email)'}"
+            )
+            try:
+                outlook.create_appointment(
+                    subj_var.get().strip(), start, duration_minutes=30,
+                    body=body, reminder_minutes=15)
+            except Exception as exc:        # noqa: BLE001
+                messagebox.showerror(
+                    "Lỗi tạo lịch", f"Không tạo được lịch nhắc:\n{exc}",
+                    parent=dlg)
+                return
+            dlg.destroy()
+            messagebox.showinfo(
+                "Đã đặt lịch",
+                f"Đã tạo lời nhắc lúc {start.strftime('%d/%m/%Y %H:%M')} ✅")
+
+        ttk.Button(actions, text="Tạo lịch nhắc", bootstyle="primary",
+                   command=do_create).pack(side="left", ipadx=10, ipady=3)
+        ttk.Button(actions, text="Hủy", bootstyle="secondary-outline",
+                   command=dlg.destroy).pack(side="left", padx=(10, 0), ipady=3)
