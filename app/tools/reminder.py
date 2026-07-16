@@ -149,8 +149,8 @@ class ReminderTool(BaseTool):
         self._table_holder = tk.Frame(parent, bg=theme.CARD_BG)
         self._table_holder.pack(fill="x", pady=(2, 0))
 
-        # Quét ngay khi mở tool để có sẵn dữ liệu (im lặng nếu không có Outlook)
-        self._interviews = self._fetch_interviews()
+        # KHÔNG quét ngay khi mở tool (quét calendar đồng bộ sẽ chặn UI, gây đơ).
+        # Người dùng bấm "🔄 Quét lịch" — nút đã có hiệu ứng loading.
         self._render_table()
 
     # -------------------------------------------------------------- config

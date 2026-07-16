@@ -146,8 +146,23 @@ def appointments_between(start_date, end_date):
         calendar = ns.GetDefaultFolder(_OL_FOLDER_CALENDAR)
 
         items = calendar.Items
-        items.IncludeRecurrences = True
         items.Sort("[Start]")
+        items.IncludeRecurrences = True
+
+        # Giới hạn theo khoảng ngày để KHÔNG phải duyệt toàn bộ lịch (nhanh hơn
+        # rất nhiều — lịch lặp có thể nở ra hàng nghìn instance). Nếu Restrict
+        # lỗi (định dạng ngày theo locale…) thì lùi về duyệt toàn bộ.
+        start_dt = datetime.datetime.combine(start_date, datetime.time.min)
+        end_dt = datetime.datetime.combine(end_date, datetime.time.max)
+        fmt = "%m/%d/%Y %I:%M %p"
+        restriction = (
+            "[Start] <= '" + end_dt.strftime(fmt) + "' AND "
+            "[End] >= '" + start_dt.strftime(fmt) + "'"
+        )
+        try:
+            items = items.Restrict(restriction)
+        except Exception:
+            pass
 
         result = []
         for item in items:
