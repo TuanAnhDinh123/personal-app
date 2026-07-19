@@ -46,10 +46,7 @@ _DEFAULTS = {
         "TRP\nPhep nam\nBHXH\nIncentive\nNVXS-NVTB\nReimburesement"
     ),
     # Cột F2: đường dẫn file lương mặc định
-    "source": (
-        r"G:\HR\1- Personnel Management\16 - Datalogic\0 - OUTSOURCING PAYROLL"
-        r"\2026\4. Apr\Seasonal_PaymentMonthly_Apr2026(All).xlsx"
-    ),
+    "source": "",
     "output_dir": "",
 }
 
