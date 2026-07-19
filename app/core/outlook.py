@@ -216,8 +216,13 @@ def create_appointment(subject, start, duration_minutes=30, body="",
         pythoncom.CoUninitialize()
 
 
-def send_mail(to, subject, body, cc=""):
-    """Tạo và GỬI một mail qua Outlook (dùng tài khoản mặc định)."""
+def send_mail(to, subject, body, cc="", html=""):
+    """Tạo và GỬI một mail qua Outlook (dùng tài khoản mặc định).
+
+    Nếu truyền `html`, mail sẽ gửi dạng HTML (có định dạng) qua HTMLBody;
+    `body` khi đó dùng làm bản thuần (fallback). Không có `html` thì gửi
+    thuần như cũ.
+    """
     import pythoncom
     import win32com.client
 
@@ -229,7 +234,10 @@ def send_mail(to, subject, body, cc=""):
         if cc:
             mail.CC = cc
         mail.Subject = subject
-        mail.Body = body
+        if html:
+            mail.HTMLBody = html
+        else:
+            mail.Body = body
         mail.Send()
     finally:
         pythoncom.CoUninitialize()

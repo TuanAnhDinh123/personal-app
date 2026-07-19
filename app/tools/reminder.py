@@ -1,9 +1,10 @@
 """Nhắc phản hồi kết quả phỏng vấn cho ứng viên.
 
 Luồng hoạt động:
-  • Quét lịch Outlook từ HÔM NAY lùi về 1 tháng, lấy các sự kiện có tiêu đề
-    chứa từ khóa phỏng vấn ("interview", "interview invitation"…). Cấu hình
-    (từ khóa, mẫu mail) giống tính năng "Gửi mail theo lịch".
+  • Bấm "🔄 Quét lịch" để quét lịch Outlook từ HÔM NAY lùi về 1 tháng, lấy các
+    sự kiện có tiêu đề chứa từ khóa phỏng vấn ("interview", "interview
+    invitation"…). Cấu hình (từ khóa, mẫu mail) giống tính năng "Gửi mail theo
+    lịch". Không quét tự động khi mở app (tránh chặn/đơ lúc khởi động).
   • Hiển thị các lịch đó thành 1 bảng: cột 1 là tiêu đề (subject) của lịch,
     cột 2 có 2 nút Yes / No cho câu hỏi "đã phản hồi ứng viên hay chưa?".
         - Bấm YES  → coi như đã phản hồi: xóa khỏi bảng, lần sau không hiện nữa.
@@ -24,7 +25,7 @@ import ttkbootstrap as ttk
 
 from app.core import config, outlook
 from app.core.base_tool import BaseTool
-from app.ui import theme, widgets
+from app.ui import richtext, theme, widgets
 
 SECTION = "reminder"
 
@@ -43,8 +44,6 @@ DEFAULTS = {
         "Should you have any questions, please feel free to contact us.\n\n"
         "Best regards,\n"
     ),
-    "auto": True,
-    "last_scan": "",
     "dismissed": [],      # EntryID các lịch đã xử lý (đã phản hồi / đã gửi mail)
 }
 
@@ -95,7 +94,6 @@ class ReminderTool(BaseTool):
     icon = "🔔"
     category = "Văn phòng"
     order = 6
-    auto_startup = True
 
     # ------------------------------------------------------------------ UI
     def build(self, parent):
@@ -136,15 +134,16 @@ class ReminderTool(BaseTool):
         self.var_subject = widgets.text_row(
             parent, "Tiêu đề", placeholder=cfg["subject"],
         )
-        self.body_box = widgets.text_area(
+        tk.Label(
             parent,
-            "Nội dung  (dùng được {name}, {position}, {subject}, {date}, {time})",
-            value=cfg["body"], height=11,
-        )
-
-        self.var_auto = widgets.checkbox(
-            parent, "Tự động quét khi mở app", checked=cfg["auto"],
-        )
+            text="Nội dung  (dùng được {name}, {position}, {subject}, {date}, "
+                 "{time} — bôi đen chữ rồi bấm B/I/U/màu để định dạng)",
+            bg=theme.CARD_BG, fg=theme.TEXT, font=(theme.FONT_FAMILY, 9),
+            justify="left", wraplength=620, anchor="w",
+        ).pack(anchor="w", pady=(6, 4))
+        self.body_editor = richtext.RichText(parent, height=11)
+        self.body_editor.pack(fill="x", pady=(0, 10))
+        self.body_editor.set_html(cfg["body"])
 
         row = tk.Frame(parent, bg=theme.CARD_BG)
         row.pack(fill="x", pady=(6, 0))
@@ -174,18 +173,15 @@ class ReminderTool(BaseTool):
         self._render_table()
 
     # -------------------------------------------------------------- config
-    def _collect(self, keep_runtime=True):
+    def _collect(self):
         cfg = config.load(SECTION, DEFAULTS)
-        data = {
+        return {
             "keywords": self.var_keywords.get().strip(),
             "exclude_domain": self.var_exclude.get().strip(),
             "subject": self.var_subject.get().strip(),
-            "body": self.body_box.get("1.0", "end-1c"),
-            "auto": bool(self.var_auto.get()),
-            "last_scan": cfg.get("last_scan", ""),
+            "body": self.body_editor.get_html(),
             "dismissed": cfg.get("dismissed", []),
         }
-        return data
 
     def _save_config(self):
         config.save(SECTION, self._collect())
@@ -261,23 +257,6 @@ class ReminderTool(BaseTool):
             messagebox.showinfo(
                 "Không có lịch",
                 "Không tìm thấy lịch phỏng vấn nào trong 1 tháng gần đây.")
-
-    def startup(self, window):
-        """Tự chạy khi mở app — mỗi ngày một lần, có lịch thì mở tool ra."""
-        cfg = config.load(SECTION, DEFAULTS)
-        if not cfg.get("auto") or not outlook.available():
-            return
-        today = datetime.date.today().isoformat()
-        if cfg.get("last_scan") == today:
-            return
-        self._save_runtime(last_scan=today)
-        if self._fetch_interviews():
-            try:
-                window.deiconify()
-                window.lift()
-                window.show_tool(self)   # kích hoạt build_body → tự quét & hiện bảng
-            except Exception:
-                pass
 
     # ----------------------------------------------------------- bảng dữ liệu
     def _render_table(self):
@@ -445,31 +424,26 @@ class ReminderTool(BaseTool):
             fg=theme.TEXT, font=(theme.FONT_FAMILY, 15, "bold"),
         ).pack(anchor="w", pady=(0, 10))
 
-        def field(label, value, single=True, height=10):
+        def entry_field(label, value):
             tk.Label(
                 wrap, text=label, bg=theme.CONTENT_BG, fg=theme.TEXT,
                 font=(theme.FONT_FAMILY, 9),
             ).pack(anchor="w", pady=(8, 3))
-            if single:
-                var = tk.StringVar(value=value)
-                ttk.Entry(wrap, textvariable=var).pack(fill="x", ipady=3)
-                return var
-            box = tk.Text(
-                wrap, height=height, wrap="word", relief="solid", bd=1,
-                font=(theme.FONT_FAMILY, 10), bg="#ffffff", fg=theme.TEXT,
-                highlightthickness=1, highlightbackground=theme.BORDER,
-                padx=8, pady=6,
-            )
-            box.pack(fill="x")
-            box.insert("1.0", value)
-            return box
+            var = tk.StringVar(value=value)
+            ttk.Entry(wrap, textvariable=var).pack(fill="x", ipady=3)
+            return var
 
-        to_var = field("Đến", "; ".join(self._eligible_recipients(appt)))
-        subject_var = field(
+        to_var = entry_field("Đến", "; ".join(self._eligible_recipients(appt)))
+        subject_var = entry_field(
             "Tiêu đề", _fill_template(self.var_subject.get().strip(), appt))
-        body_box = field(
-            "Nội dung", _fill_template(self.body_box.get("1.0", "end-1c"), appt),
-            single=False, height=18)
+
+        tk.Label(
+            wrap, text="Nội dung  (bôi đen chữ rồi bấm B/I/U/màu để định dạng)",
+            bg=theme.CONTENT_BG, fg=theme.TEXT, font=(theme.FONT_FAMILY, 9),
+        ).pack(anchor="w", pady=(8, 3))
+        body_editor = richtext.RichText(wrap, height=18, bg=theme.CONTENT_BG)
+        body_editor.pack(fill="x")
+        body_editor.set_html(_fill_template(self.body_editor.get_html(), appt))
 
         if not self._eligible_recipients(appt):
             widgets.hint(
@@ -488,7 +462,7 @@ class ReminderTool(BaseTool):
             try:
                 outlook.send_mail(
                     to_value, subject_var.get().strip(),
-                    body_box.get("1.0", "end-1c"))
+                    body_editor.get_text(), html=body_editor.get_html())
             except Exception as exc:        # noqa: BLE001
                 messagebox.showerror(
                     "Lỗi gửi mail", f"Không gửi được:\n{exc}", parent=dlg)

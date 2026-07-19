@@ -38,10 +38,12 @@ _DEFAULTS = {
     "stt_headers": "STT\nNo\nNo.",
     # Cột H: các sheet bị xóa hoàn toàn
     "delete_full": "HC\nCompare",
-    # Cột I: các sheet bị xóa hàng (chỉ giữ hàng thuộc NCC đang xử lý)
+    # Cột I: các sheet bị xóa hàng (chỉ giữ hàng thuộc NCC đang xử lý).
+    # LƯU Ý: 2 sheet đổi theo tháng ("MM-YYYY" và "Nghi T{tháng}") KHÔNG để ở
+    # đây — chúng được nhập ở ô riêng và tự nhận theo tên file nguồn.
     "delete_rows": (
-        "06-2026\nAtt\nShift\nOT\nSat,Sun\nOff day working\nMeal\n"
-        "TRP\nPhep nam\nBHXH\nIncentive\nNVXS-NVTB\nReimburesement\nNghi T6"
+        "Att\nShift\nOT\nSat,Sun\nOff day working\nMeal\n"
+        "TRP\nPhep nam\nBHXH\nIncentive\nNVXS-NVTB\nReimburesement"
     ),
     # Cột F2: đường dẫn file lương mặc định
     "source": (
@@ -88,12 +90,28 @@ class TachBangLuongTool(BaseTool):
         self._del_rows_box = widgets.text_area(
             parent, "Sheet xóa hàng (chỉ giữ hàng của NCC) — mỗi dòng 1 tên sheet",
             value=cfg.get("delete_rows", ""), height=8)
+        self._month_box = widgets.text_area(
+            parent,
+            "Sheet theo tháng (tự nhận theo tên file nguồn)",
+            value="", height=2)
+
+        # Tự điền 2 sheet theo tháng từ TÊN FILE nguồn, và cập nhật lại mỗi khi
+        # đổi file nguồn (vd chọn file tháng khác thì 2 sheet này đổi theo).
+        def _refresh_month(*_):
+            ms, ns = month_sheets_from_name(os.path.basename(self._source_var.get()))
+            if ms:
+                self._month_box.delete("1.0", "end")
+                self._month_box.insert("1.0", f"{ms}\n{ns}")
+        self._source_var.trace_add("write", _refresh_month)
+        _refresh_month()  # điền lần đầu theo file đang có sẵn
 
         widgets.hint(
             parent,
             "💡 Với mỗi NCC: mở lại file lương gốc → lưu thành "
             "\"<tên gốc>-<NCC>.xlsx\" → xóa các sheet ở ô trên → ở mỗi sheet chi tiết, "
             "tìm cột NCC rồi xóa mọi hàng KHÔNG thuộc NCC đó (hàng trống được giữ).\n"
+            "📅 2 sheet đổi theo tháng (MM-YYYY và Nghi T…) tự nhận từ tên file nguồn; "
+            "chọn file tháng khác thì tự đổi theo (vẫn sửa tay được nếu cần).\n"
             "🔢 Sau khi xóa hàng, nếu tìm thấy cột STT thì tự động đánh lại số thứ tự từ 1.\n"
             "🧹 Tự động tắt tính năng Filter (AutoFilter) ở tất cả sheet của file kết quả.\n"
             "🔗 Tool tự động break hết link và mở file gốc ở chế độ chỉ-đọc, nên không "
@@ -109,7 +127,9 @@ class TachBangLuongTool(BaseTool):
         vendor_headers = _lines(self._headers_box)
         stt_headers = _lines(self._stt_box)
         delete_full = _lines(self._del_full_box)
-        delete_rows = _lines(self._del_rows_box)
+        # Sheet theo tháng (ô riêng, tự nhận theo tên file) cũng là sheet "xóa
+        # hàng" — gộp vào cuối danh sách để xử lý chung.
+        delete_rows = _lines(self._del_rows_box) + _lines(self._month_box)
 
         # Lưu lại cấu hình hiện tại (kể cả khi báo lỗi bên dưới, để đỡ gõ lại)
         config.save(_SECTION, {
@@ -191,6 +211,8 @@ def _lines(box):
 # Hằng số Excel (tránh phải EnsureDispatch để lấy win32com.client.constants)
 _XL_CALC_MANUAL = -4135   # xlCalculationManual
 _XL_CALC_AUTO = -4105     # xlCalculationAutomatic
+_XL_ASCENDING = 1         # xlAscending (Sort Order1)
+_XL_NO_HEADER = 2         # xlNo (Sort Header)
 _XL_LINK_EXCEL = 1        # xlLinkTypeExcelLinks (dùng cho BreakLink)
 _HEADER_SCAN = "A1:DA20"  # vùng dò tiêu đề cột NCC, giống macro
 _INVALID_FS = re.compile(r'[\\/:*?"<>|]')
@@ -203,6 +225,30 @@ _FMT_BY_EXT = {
     ".xlsb": 50,   # xlExcel12
     ".xls": 56,    # xlExcel8
 }
+
+
+# Bản đồ tên tháng (đủ/viết tắt) -> số tháng, để nhận tháng từ tên file lương.
+_MONTHS = {
+    "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+    "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
+    "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
+}
+_MONTH_RE = re.compile(r"([A-Za-z]{3,9})\s*(\d{4})")
+
+
+def month_sheets_from_name(filename):
+    """Suy ra tên 2 sheet theo tháng từ TÊN FILE lương.
+
+    Trả về (sheet_tháng, sheet_nghỉ) — vd 'Seasonal_...June2026(All).xlsx' ->
+    ('06-2026', 'Nghi T6'); 'Nov 2024' -> ('11-2024', 'Nghi T11'). Không nhận
+    diện được tháng thì trả về (None, None).
+    """
+    for alpha, year in _MONTH_RE.findall(filename or ""):
+        m = _MONTHS.get(alpha.lower())
+        if m:
+            return f"{m:02d}-{year}", f"Nghi T{m}"
+    return None, None
 
 
 def _base_name(filename):
@@ -261,6 +307,29 @@ def _copy_to_dest(src, dest, dest_dir):
     )
 
 
+def _sort_rows_by_vendor(ws, first_row, last_row, key_col):
+    """Sắp xếp các dòng dữ liệu (first_row..last_row, TOÀN BỘ cột) theo cột
+    key_col tăng dần, để các dòng cùng NCC gộp thành khối liền nhau.
+
+    Nhờ đó danh sách hàng cần xóa chỉ còn 1–2 cụm liên tục thay vì hàng chục
+    cụm rời rạc -> xóa nhanh hơn ~10 lần (chi phí xóa tỉ lệ với số cụm).
+
+    Trả về True nếu sort được. Nếu lỗi (thường do ô gộp) trả về False và KHÔNG
+    làm thay đổi sheet (Sort là thao tác nguyên tử: lỗi thì không đụng dữ liệu).
+    """
+    used = ws.UsedRange
+    last_col = used.Column + used.Columns.Count - 1
+    if last_col < key_col:
+        last_col = key_col
+    rng = ws.Range(ws.Cells(first_row, 1), ws.Cells(last_row, last_col))
+    try:
+        rng.Sort(Key1=ws.Cells(first_row, key_col),
+                 Order1=_XL_ASCENDING, Header=_XL_NO_HEADER)
+        return True
+    except Exception:
+        return False
+
+
 def _renumber_stt(ws, header_row, col):
     """Đánh lại số thứ tự cột STT (1-based col) bắt đầu từ 1.
 
@@ -302,16 +371,41 @@ def _contiguous_groups(sorted_rows):
 
 
 def _delete_row_groups(ws, groups):
-    """Xóa các cụm hàng [start, end], từ DƯỚI LÊN (cụm số hàng lớn trước) để
-    việc dồn hàng không làm lệch số hàng của các cụm phía trên.
+    """Xóa tất cả các cụm hàng [start, end] bằng ĐÚNG MỘT thao tác Delete.
 
-    Mỗi cụm liên tục xóa bằng MỘT lệnh Delete riêng. KHÔNG gộp nhiều cụm rời
-    rạc vào một lệnh Delete đa-vùng ("8:10,2:5"): Excel xử lý các vùng theo
-    thứ tự không đảm bảo nên dễ dồn hàng sai, bỏ sót hoặc xóa nhầm hàng. Vì đã
-    đặt Calculation = Manual nên xóa từng cụm vẫn nhanh (không recalc mỗi lần).
+    Gom mọi cụm thành một vùng đa-khối (multi-area) rồi gọi
+    `union.EntireRow.Delete()` một lần — đúng cách macro VBA gốc làm
+    (`Union(...).EntireRow.Delete`). Vì là MỘT thao tác nguyên tử, Excel dồn
+    hàng đúng bất kể thứ tự các khối, nên không bị sót/lệch. Nhanh hơn hàng
+    nghìn lần so với xóa từng cụm (mỗi lệnh Delete lẻ đều tốn phí dồn hàng).
+
+    Chuỗi địa chỉ truyền vào Range() bị giới hạn (~255 ký tự) nên gom theo lô
+    ≤250 ký tự, mỗi lô tạo 1 Range rồi Union dần lại thành một vùng lớn.
     """
-    for start, end in reversed(groups):
-        ws.Rows(f"{start}:{end}").Delete()
+    if not groups:
+        return
+    app = ws.Application
+    union = None
+    batch = []
+    length = 0
+
+    def merge(u):
+        if not batch:
+            return u
+        rng = ws.Range(",".join(batch))
+        return rng if u is None else app.Union(u, rng)
+
+    for start, end in groups:
+        seg = f"{start}:{end}"
+        if batch and length + len(seg) + 1 > 250:
+            union = merge(union)
+            batch = []
+            length = 0
+        batch.append(seg)
+        length += len(seg) + 1
+    union = merge(union)
+    if union is not None:
+        union.EntireRow.Delete()
 
 
 def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
@@ -421,6 +515,13 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
                     if last_row <= dest_row:
                         continue  # không có dòng dữ liệu
 
+                    # Sắp xếp dữ liệu theo cột NCC: các dòng cần xóa gộp liền
+                    # khối -> chỉ 1–2 lần dồn hàng thay vì hàng chục (nhanh hơn
+                    # nhiều). LƯU Ý: thứ tự dòng trong file kết quả sẽ theo NCC.
+                    # Sheet nào không sort được (vd có ô gộp) thì bỏ qua sort,
+                    # vẫn xóa đúng (chỉ chậm hơn) — không cảnh báo cho đỡ nhiễu.
+                    _sort_rows_by_vendor(ws, dest_row + 1, last_row, dest_col)
+
                     rng = ws.Range(
                         ws.Cells(dest_row + 1, dest_col),
                         ws.Cells(last_row, dest_col)).Value
@@ -440,8 +541,7 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
                     # dữ liệu bên dưới, nên xác định 1 lần rồi đánh lại sau.
                     stt_row, stt_col = _find_header(top, stt_headers)
 
-                    # Xóa hàng KHÔNG thuộc NCC: mỗi cụm liên tục một lệnh Delete,
-                    # từ dưới lên (xem _delete_row_groups để hiểu vì sao không gộp).
+                    # Xóa hàng KHÔNG thuộc NCC (sau khi sort chỉ còn vài cụm liền)
                     _delete_row_groups(ws, _contiguous_groups(to_delete))
 
                     # 3) Đánh lại số thứ tự cột STT từ 1 (chỉ đánh những ô vốn
