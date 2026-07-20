@@ -31,19 +31,19 @@ from app.ui import widgets
 
 _SECTION = "thuong_quy"
 
-# Quý -> 3 sheet tháng (lịch dương chuẩn)
+# Quý -> 3 sheet tháng (lịch tài chính lệch 1 tháng: Q1 bắt đầu từ T12)
 QUARTER_MONTHS = {
-    "Q1": ["T1", "T2", "T3"],
-    "Q2": ["T4", "T5", "T6"],
-    "Q3": ["T7", "T8", "T9"],
-    "Q4": ["T10", "T11", "T12"],
+    "Q1": ["T12", "T1", "T2"],
+    "Q2": ["T3", "T4", "T5"],
+    "Q3": ["T6", "T7", "T8"],
+    "Q4": ["T9", "T10", "T11"],
 }
 
 # --- Giá trị mặc định (tên cột lấy đúng từ sheet Thuong_Quy của file .xlsm) ---
 _DEFAULTS = {
     "source": "",
     "quarter": "Q4",
-    "month_sheets": "T10, T11, T12",
+    "month_sheets": "T9, T10, T11",
     "year": "2024",                   # năm (dùng để tính thứ trong tuần cho acc 40)
     "header_f": "Quên quét thẻ",      # cột cho mã 'F...'
     "header_e": "Thiếudữ liệu chấm công",  # cột cho mã 'E...'
@@ -220,6 +220,20 @@ def _num_str(v):
     return str(v)
 
 
+def _msnv_key(v):
+    """Chuẩn hóa MSNV thành khóa so khớp, KHÔNG phụ thuộc kiểu ô Excel.
+
+    Excel/COM trả `.Value` theo định dạng ô: ô Number -> float ('15001174.0'),
+    ô Text -> str ('15001174'). Nếu sheet tháng lưu số còn sheet quý lưu text
+    (hoặc ngược lại) thì str() thô sẽ tạo 2 khóa khác nhau và không khớp được.
+    Ép float nguyên về int để '15001174.0' và '15001174' cho cùng một khóa."""
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v).strip()
+
+
 def _find_col(header_vals, text):
     """Tìm cột (1-based) trong dòng tiêu đề mà ô CHỨA `text` (không phân biệt
     hoa thường, đã bỏ khoảng trắng đầu/cuối) — mô phỏng .Find LookAt=xlPart."""
@@ -271,7 +285,7 @@ def _aggregate_quarter(source_path, month_sheets, target_sheet, year,
     import win32com.client as win32
 
     warnings = []
-    not_found = set()
+    not_found = {}  # msnv -> "sheet!dòng" (nơi xuất hiện ĐẦU TIÊN ở sheet tháng)
     results = {}  # (row, col) -> [labels]
 
     pythoncom.CoInitialize()
@@ -307,7 +321,7 @@ def _aggregate_quarter(source_path, month_sheets, target_sheet, year,
             for idx, val in enumerate(msnv_col_vals):
                 if val is None:
                     continue
-                key = str(val).strip()
+                key = _msnv_key(val)
                 if key and key not in msnv_to_row:
                     msnv_to_row[key] = idx + 1
 
@@ -348,12 +362,12 @@ def _aggregate_quarter(source_path, month_sheets, target_sheet, year,
                 for j in range(_MONTH_DATA_ROW, end_row + 1):
                     row = block[j - 1]
                     msnv_val = row[_MONTH_MSNV_COL - 1]
-                    msnv = "" if msnv_val is None else str(msnv_val).strip()
+                    msnv = _msnv_key(msnv_val)
                     if not msnv:
                         continue
                     trow = msnv_to_row.get(msnv)
                     if trow is None:
-                        not_found.add(msnv)
+                        not_found.setdefault(msnv, f"{sheet_name}!{j}")
                         continue
 
                     acct_val = row[_MONTH_ACCT_COL - 1]
@@ -421,6 +435,7 @@ def _aggregate_quarter(source_path, month_sheets, target_sheet, year,
     return {
         "cells_written": len(results),
         "employees_hit": employees_hit,
-        "not_found": sorted(not_found),
+        # Kèm vị trí "sheet!dòng" để dễ tra ngược trong file gốc
+        "not_found": [f"{m} ({loc})" for m, loc in sorted(not_found.items())],
         "warnings": warnings,
     }
