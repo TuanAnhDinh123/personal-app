@@ -343,7 +343,7 @@ class ReminderTool(BaseTool):
         dlg = tk.Toplevel(parent)
         dlg.title("Xác nhận")
         dlg.configure(bg=theme.CONTENT_BG)
-        dlg.geometry("460x200")
+        dlg.geometry("460x400")
         dlg.transient(parent)
         dlg.grab_set()
 
