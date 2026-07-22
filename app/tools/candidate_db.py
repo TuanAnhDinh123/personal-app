@@ -143,8 +143,8 @@ def _open_entity_form(root, title, specs, current, on_save, height=660):
                 if p:
                     v.set(p)
 
-            ttk.Button(row, text="Chọn…", bootstyle="secondary-outline",
-                       command=_pick).pack(side="left", padx=(6, 0))
+            widgets.button(row, text="Chọn…", variant="neutral", icon="folder",
+                           command=_pick).pack(side="left", padx=(6, 0))
             getters[key] = lambda v=var: v.get().strip() or None
 
         elif kind == "dropdown":
@@ -187,10 +187,10 @@ def _open_entity_form(root, title, specs, current, on_save, height=660):
             return
         dlg.destroy()
 
-    ttk.Button(acts, text="💾 Lưu", bootstyle="success",
-               command=save).pack(side="left", ipadx=10, ipady=3)
-    ttk.Button(acts, text="Hủy", bootstyle="secondary-outline",
-               command=dlg.destroy).pack(side="left", padx=(8, 0), ipady=3)
+    widgets.button(acts, text="Lưu", variant="success", icon="save",
+                   command=save).pack(side="left")
+    widgets.button(acts, text="Hủy", variant="neutral", icon="x",
+                   command=dlg.destroy).pack(side="left", padx=(8, 0))
 
 
 def _dept_options():
@@ -216,14 +216,14 @@ class _MasterTab(tk.Frame):
 
         bar = tk.Frame(self, bg=bg)
         bar.pack(fill="x", padx=14, pady=(12, 8))
-        ttk.Button(bar, text="➕ Thêm", bootstyle="success",
-                   command=self._add).pack(side="left", ipady=2)
-        ttk.Button(bar, text="✏️ Sửa", bootstyle="info-outline",
-                   command=self._edit).pack(side="left", padx=(6, 0), ipady=2)
-        ttk.Button(bar, text="🗑️ Xóa", bootstyle="danger-outline",
-                   command=self._delete).pack(side="left", padx=(6, 0), ipady=2)
-        ttk.Button(bar, text="🔄 Tải lại", bootstyle="secondary-outline",
-                   command=self.reload).pack(side="right", ipady=2)
+        widgets.button(bar, text="Thêm", variant="success", icon="plus",
+                       command=self._add).pack(side="left")
+        widgets.button(bar, text="Sửa", variant="info", icon="pencil",
+                       command=self._edit).pack(side="left", padx=(6, 0))
+        widgets.button(bar, text="Xóa", variant="danger", icon="trash",
+                       command=self._delete).pack(side="left", padx=(6, 0))
+        widgets.button(bar, text="Refresh", variant="neutral", icon="refresh",
+                       command=self.reload).pack(side="right")
 
         frm = tk.Frame(self, bg=bg)
         frm.pack(fill="both", expand=True, padx=14, pady=(0, 12))
@@ -302,13 +302,11 @@ def _master_specs():
             "update": repo.update_department, "delete": repo.delete_department,
             "columns": [
                 ("department_id", "ID", 50),
-                ("department_code", "Mã", 90),
                 ("department_name", "Tên bộ phận", 200),
                 ("manager_name", "Quản lý", 150),
                 ("description", "Mô tả", 220),
             ],
             "form": [
-                {"key": "department_code", "label": "Mã bộ phận", "kind": "text"},
                 {"key": "department_name", "label": "Tên bộ phận (*)",
                  "kind": "text", "required": True},
                 {"key": "manager_name", "label": "Người quản lý", "kind": "text"},
@@ -350,7 +348,6 @@ def _master_specs():
                 ("jd_id", "ID", 50),
                 ("jd_title", "Tiêu đề JD", 230),
                 ("position_title", "Vị trí", 180),
-                ("salary_range", "Mức lương", 130),
                 ("created_at", "Ngày tạo", 140),
             ],
             "form": [
@@ -358,13 +355,10 @@ def _master_specs():
                  "options": _position_options},
                 {"key": "jd_title", "label": "Tiêu đề JD (*)",
                  "kind": "text", "required": True},
-                {"key": "summary", "label": "Tóm tắt", "kind": "textarea", "height": 3},
-                {"key": "requirements", "label": "Yêu cầu", "kind": "textarea", "height": 4},
-                {"key": "salary_range", "label": "Khoảng lương", "kind": "text"},
                 {"key": "jd_file_path", "label": "File JD (đường dẫn trên máy)",
                  "kind": "file"},
             ],
-            "form_height": 640,
+            "form_height": 520,
         },
     }
 
@@ -427,7 +421,7 @@ class JobDescriptionTool(_MasterPageTool):
 class CandidateDbTool(BaseTool):
     name = "Quản lý CV ứng viên"
     description = "Tìm kiếm ứng viên, quản lý bộ phận/vị trí/JD, nhập hàng loạt (SQLite)."
-    icon = "🗂️"
+    icon = "🙋"
     category = "Tuyển dụng"
     order = 10
     fills_height = True   # chiếm full chiều cao khi phóng to cửa sổ
@@ -460,48 +454,57 @@ class CandidateDbTool(BaseTool):
     # ------------------------------------------------------------- tìm kiếm
     def _build_search_bar(self, parent):
         widgets.section_label(parent, "Tìm kiếm ứng viên")
+        # Chuẩn hóa chiều cao: input / selectbox / nút cùng ~33px (style riêng
+        # cho trang này, không đụng widget ở tool khác).
+        style = ttk.Style.get_instance()
+        style.configure("Cand.TEntry", padding=(8, 7))
+        widgets.polish_comboboxes("Cand.TCombobox", pad_y=7)
+
         bar = tk.Frame(parent, bg=theme.CARD_BG)
         bar.pack(fill="x", pady=(0, 10))
 
         self.var_kw = tk.StringVar()
-        ent = ttk.Entry(bar, textvariable=self.var_kw)
-        ent.pack(side="left", fill="x", expand=True, ipady=4)
+        ent = ttk.Entry(bar, textvariable=self.var_kw, style="Cand.TEntry")
+        ent.pack(side="left", fill="x", expand=True)
         ent.bind("<Return>", lambda _e: self._reload())
 
         self.var_pos = tk.StringVar(value=_ALL_POS)
-        self.cb_pos = ttk.Combobox(bar, textvariable=self.var_pos,
+        self.cb_pos = ttk.Combobox(bar, textvariable=self.var_pos, style="Cand.TCombobox",
                                    state="readonly", width=20)
-        self.cb_pos.pack(side="left", padx=(8, 0), ipady=2)
+        self.cb_pos.pack(side="left", padx=(8, 0))
 
         self.var_status = tk.StringVar(value="Tất cả")
-        ttk.Combobox(bar, textvariable=self.var_status, state="readonly", width=13,
+        ttk.Combobox(bar, textvariable=self.var_status, style="Cand.TCombobox",
+                     state="readonly", width=13,
                      values=["Tất cả"] + cv_schema.STATUS_CHOICES).pack(
-            side="left", padx=(8, 0), ipady=2)
+            side="left", padx=(8, 0))
 
-        ttk.Button(bar, text="🔍 Tìm", bootstyle="primary",
-                   command=self._reload).pack(side="left", padx=(8, 0), ipady=2)
-        ttk.Button(bar, text="✖", bootstyle="secondary-outline",
-                   command=self._clear_filters, width=3).pack(
-            side="left", padx=(6, 0), ipady=2)
+        # nút tìm / xóa lọc — nút chuẩn của app.
+        widgets.button(bar, text="Tìm", variant="primary", icon="search",
+                       command=self._reload).pack(side="left", padx=(8, 0))
+        widgets.button(bar, variant="neutral", icon="x", icon_only=True,
+                       command=self._clear_filters).pack(side="left", padx=(6, 0))
 
         widgets.hint(parent, "Gõ tên / email / SĐT rồi Enter. Lọc thêm theo vị "
                              "trí và trạng thái.")
 
     def _build_toolbar(self, parent):
+        # Nút hành động — nút chuẩn của app (bo góc + màu variant + icon vector).
         bar = tk.Frame(parent, bg=theme.CARD_BG)
         bar.pack(fill="x", pady=(4, 10))
-        ttk.Button(bar, text="➕ Thêm mới", bootstyle="success",
-                   command=self._add).pack(side="left", ipady=2)
-        ttk.Button(bar, text="✏️ Sửa", bootstyle="info-outline",
-                   command=self._edit).pack(side="left", padx=(6, 0), ipady=2)
-        ttk.Button(bar, text="🗑️ Xóa", bootstyle="danger-outline",
-                   command=self._delete).pack(side="left", padx=(6, 0), ipady=2)
-        ttk.Button(bar, text="📂 Mở CV", bootstyle="info-outline",
-                   command=self._open_cv).pack(side="left", padx=(6, 0), ipady=2)
-        ttk.Button(bar, text="📥 Nhập từ Excel", bootstyle="secondary",
-                   command=self._batch_import).pack(side="left", padx=(6, 0), ipady=2)
-        ttk.Button(bar, text="🔄 Tải lại", bootstyle="secondary-outline",
-                   command=self._reload).pack(side="right", ipady=2)
+        B = widgets.button
+        B(bar, text="Thêm mới", variant="success", icon="plus",
+          command=self._add).pack(side="left")
+        B(bar, text="Sửa", variant="info", icon="pencil",
+          command=self._edit).pack(side="left", padx=(6, 0))
+        B(bar, text="Xóa", variant="danger", icon="trash",
+          command=self._delete).pack(side="left", padx=(6, 0))
+        B(bar, text="Mở CV", variant="warning", icon="folder",
+          command=self._open_cv).pack(side="left", padx=(6, 0))
+        B(bar, text="Nhập từ Excel", variant="primary", icon="download",
+          command=self._batch_import).pack(side="left", padx=(6, 0))
+        B(bar, text="Refresh", variant="neutral", icon="refresh",
+          command=self._reload).pack(side="right")
 
     def _build_table(self, parent):
         frm = tk.Frame(parent, bg=theme.CARD_BG)
@@ -810,11 +813,12 @@ class CandidateDbTool(BaseTool):
         result = {"ok": False}
         acts = tk.Frame(dlg, bg=theme.CONTENT_BG)
         acts.pack(fill="x", padx=18, pady=14)
-        ttk.Button(acts, text="✅ Vẫn nhập các bản trùng", bootstyle="success",
-                   command=lambda: (result.update(ok=True), dlg.destroy())).pack(
-            side="left", ipadx=6, ipady=3)
-        ttk.Button(acts, text="🚫 Bỏ qua", bootstyle="secondary-outline",
-                   command=dlg.destroy).pack(side="left", padx=(8, 0), ipady=3)
+        widgets.button(acts, text="Vẫn nhập các bản trùng", variant="success",
+                       icon="check",
+                       command=lambda: (result.update(ok=True), dlg.destroy())
+                       ).pack(side="left")
+        widgets.button(acts, text="Bỏ qua", variant="neutral", icon="ban",
+                       command=dlg.destroy).pack(side="left", padx=(8, 0))
         dlg.wait_window()
         return result["ok"]
 

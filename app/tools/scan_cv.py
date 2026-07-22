@@ -348,8 +348,8 @@ class ScanCvTool(BaseTool):
         )
         save_row = tk.Frame(shared, bg=theme.CARD_BG)
         save_row.pack(fill="x", pady=(4, 0))
-        ttk.Button(
-            save_row, text="💾 Lưu cấu hình", bootstyle="secondary-outline",
+        widgets.button(
+            save_row, text="Lưu cấu hình", variant="neutral", icon="save",
             command=self._save_config,
         ).pack(side="left")
 
@@ -422,10 +422,10 @@ class ScanCvTool(BaseTool):
 
         act = tk.Frame(parent, bg=theme.CARD_BG)
         act.pack(fill="x", pady=(16, 0))
-        ttk.Button(
-            act, text="📝 Đổi tên file CV", bootstyle="success",
+        widgets.button(
+            act, text="Đổi tên file CV", variant="success", icon="pencil",
             command=self.run,
-        ).pack(side="left", ipadx=12, ipady=5)
+        ).pack(side="left")
 
     # ----- Tab 2: Trích xuất Excel -----
 
@@ -459,10 +459,10 @@ class ScanCvTool(BaseTool):
 
         act = tk.Frame(parent, bg=theme.CARD_BG)
         act.pack(fill="x", pady=(16, 0))
-        ttk.Button(
-            act, text="📊 Trích xuất ra Excel", bootstyle="primary",
+        widgets.button(
+            act, text="Trích xuất ra Excel", variant="primary", icon="file",
             command=self._run_extract,
-        ).pack(side="left", ipadx=12, ipady=5)
+        ).pack(side="left")
 
     def build_body(self, parent):
         # Không dùng — đã ghi đè build(). Bắt buộc cài đặt vì là abstract.
@@ -729,13 +729,14 @@ class ScanCvTool(BaseTool):
 
             btn_row = tk.Frame(popup, bg=theme.CONTENT_BG)
             btn_row.pack(fill="x", padx=14, pady=(18, 14))
-            ttk.Button(
-                btn_row, text="OK", bootstyle="primary", command=_save,
-            ).pack(side="left", ipadx=10, ipady=3)
-            ttk.Button(
-                btn_row, text="Hủy", bootstyle="secondary-outline",
+            widgets.button(
+                btn_row, text="OK", variant="primary", icon="check",
+                command=_save,
+            ).pack(side="left")
+            widgets.button(
+                btn_row, text="Hủy", variant="neutral", icon="x",
                 command=popup.destroy,
-            ).pack(side="left", padx=(8, 0), ipady=3)
+            ).pack(side="left", padx=(8, 0))
 
         tree.bind("<Double-1>", _on_double_click)
 
@@ -770,11 +771,11 @@ class ScanCvTool(BaseTool):
             else:
                 messagebox.showinfo("Hoàn thành ✅", msg)
 
-        ttk.Button(
-            acts, text="✅ Đổi tên tất cả",
-            bootstyle="success", command=do_rename,
-        ).pack(side="left", ipadx=14, ipady=5)
-        ttk.Button(
-            acts, text="Hủy",
-            bootstyle="secondary-outline", command=dlg.destroy,
-        ).pack(side="left", padx=(10, 0), ipady=5)
+        widgets.button(
+            acts, text="Đổi tên tất cả", variant="success", icon="check",
+            command=do_rename,
+        ).pack(side="left")
+        widgets.button(
+            acts, text="Hủy", variant="neutral", icon="x",
+            command=dlg.destroy,
+        ).pack(side="left", padx=(10, 0))

@@ -13,11 +13,10 @@ import sqlite3
 from app.core import cv_schema
 
 # Cột được phép ghi cho từng bảng (chặn khóa lạ lọt vào câu INSERT/UPDATE).
-DEPARTMENT_FIELDS = ["department_code", "department_name", "manager_name", "description"]
+DEPARTMENT_FIELDS = ["department_name", "manager_name", "description"]
 POSITION_FIELDS = ["department_id", "position_code", "position_title", "level",
                    "headcount", "status"]
-JD_FIELDS = ["position_id", "jd_title", "summary", "requirements", "salary_range",
-             "jd_file_path"]
+JD_FIELDS = ["position_id", "jd_title", "jd_file_path"]
 CANDIDATE_FIELDS = [
     "full_name", "email", "phone", "date_of_birth", "gender", "address",
     "position_id", "years_experience", "education", "applied_at", "status",
@@ -125,6 +124,7 @@ def init_db() -> None:
             except sqlite3.OperationalError:
                 pass  # thường là "duplicate column" — đã thêm rồi, bỏ qua
         _migrate_document_files(conn)
+        _backfill_timestamps(conn)
 
 
 def _table_exists(conn, name) -> bool:
@@ -173,6 +173,22 @@ def _copy_legacy_data(conn: sqlite3.Connection) -> None:
                 f"INSERT INTO {table} ({new_list}) SELECT {old_list} FROM {legacy}")
 
         conn.execute(f"DROP TABLE {legacy}")
+
+
+def _backfill_timestamps(conn: sqlite3.Connection) -> None:
+    """Điền created_at/updated_at cho bản ghi CŨ đang NULL (sau khi ALTER TABLE).
+
+    Cột thêm qua ALTER TABLE không có default động nên bản ghi cũ để NULL. Điền
+    một lần bằng thời gian hiện tại để giao diện không hiển thị ô trống; bản ghi
+    tạo mới về sau đã có sẵn giá trị từ DEFAULT của schema.
+    """
+    for table in cv_schema._MANAGED_TABLES:
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for col in ("created_at", "updated_at"):
+            if col in cols:
+                conn.execute(
+                    f"UPDATE {table} SET {col} = datetime('now', 'localtime') "
+                    f"WHERE {col} IS NULL")
 
 
 def _migrate_document_files(conn: sqlite3.Connection) -> None:
@@ -230,7 +246,9 @@ def _update(table: str, allowed: list[str], row_id: int, data: dict) -> None:
     d = {k: data[k] for k in allowed if k in data}
     if not d:
         return
+    # updated_at luôn được cập nhật ở đây (SQLite không tự động làm việc này).
     sets = ", ".join(f"{c} = ?" for c in d)
+    sets += ", updated_at = datetime('now', 'localtime')"
     params = [d[c] for c in d] + [row_id]
     with get_connection() as conn:
         conn.execute(f"UPDATE {table} SET {sets} WHERE {_PK[table]} = ?", params)

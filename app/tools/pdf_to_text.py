@@ -173,8 +173,8 @@ class PdfToTextTool(BaseTool):
             if path:
                 self._file_var.set(path)
 
-        ttk.Button(pick, text="Chọn…", bootstyle="secondary-outline",
-                   command=browse).pack(side="left", padx=(8, 0))
+        widgets.button(pick, text="Chọn…", variant="neutral", icon="folder",
+                       command=browse).pack(side="left", padx=(8, 0))
 
         # Hàng tùy chọn OCR
         opts = tk.Frame(card, bg=theme.CARD_BG)
@@ -201,10 +201,10 @@ class PdfToTextTool(BaseTool):
         # Nút trích + trạng thái
         bar = tk.Frame(card, bg=theme.CARD_BG)
         bar.pack(fill="x", pady=(14, 0))
-        self._run_btn = ttk.Button(
-            bar, text=self.action_label, bootstyle="primary",
+        self._run_btn = widgets.button(
+            bar, text=self.action_label, variant="primary", icon="play",
             command=self._start_extract)
-        self._run_btn.pack(side="left", ipadx=10, ipady=3)
+        self._run_btn.pack(side="left")
         self._status = tk.Label(
             bar, text="", bg=theme.CARD_BG, fg=theme.MUTED,
             font=(theme.FONT_FAMILY, 9))
@@ -230,12 +230,12 @@ class PdfToTextTool(BaseTool):
         nav.pack(fill="x", padx=10, pady=8)
         tk.Label(nav, text="Bản gốc", bg=theme.CARD_BG, fg=theme.TEXT,
                  font=(theme.FONT_FAMILY, 10, "bold")).pack(side="left")
-        self._prev_btn = ttk.Button(nav, text="◀", width=3,
-                                    bootstyle="secondary-outline",
-                                    command=lambda: self._go(-1))
-        self._next_btn = ttk.Button(nav, text="▶", width=3,
-                                    bootstyle="secondary-outline",
-                                    command=lambda: self._go(1))
+        self._prev_btn = widgets.button(nav, variant="neutral",
+                                        icon="chevron_left", icon_only=True,
+                                        command=lambda: self._go(-1))
+        self._next_btn = widgets.button(nav, variant="neutral",
+                                        icon="chevron_right", icon_only=True,
+                                        command=lambda: self._go(1))
         self._page_lbl = tk.Label(nav, text="– / –", bg=theme.CARD_BG,
                                   fg=theme.MUTED, font=(theme.FONT_FAMILY, 9))
         self._src_badge = ttk.Label(nav, text="", bootstyle="secondary")
@@ -277,14 +277,14 @@ class PdfToTextTool(BaseTool):
     def _build_footer(self, parent):
         bar = tk.Frame(parent, bg=theme.CONTENT_BG)
         bar.pack(fill="x", pady=(12, 0))
-        self._copy_btn = ttk.Button(bar, text="📋 Sao chép trang này",
-                                   bootstyle="secondary",
-                                   command=self._copy_current)
-        self._copy_btn.pack(side="left", ipady=2)
-        self._save_btn = ttk.Button(bar, text="💾 Lưu toàn bộ ra .txt",
-                                   bootstyle="success",
-                                   command=self._save_txt)
-        self._save_btn.pack(side="left", padx=10, ipady=2)
+        self._copy_btn = widgets.button(bar, text="Sao chép trang này",
+                                        variant="neutral", icon="copy",
+                                        command=self._copy_current)
+        self._copy_btn.pack(side="left")
+        self._save_btn = widgets.button(bar, text="Lưu toàn bộ ra .txt",
+                                        variant="success", icon="save",
+                                        command=self._save_txt)
+        self._save_btn.pack(side="left", padx=10)
 
     # ----- Trích xuất (chạy nền) -----
     def _start_extract(self):

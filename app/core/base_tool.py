@@ -21,7 +21,8 @@ class BaseTool(ABC):
     category: str = "Khác"
     order: int = 100              # thứ tự hiển thị trong cùng một nhóm
     action_label: str = "Thực hiện"
-    action_style: str = "primary"  # bootstyle của nút chính
+    action_style: str = "primary"  # variant màu của nút chính (xem widgets.BUTTON_VARIANTS)
+    action_icon: str = "play"      # icon vector của nút chính (xem widgets._ICON_DRAWERS)
     auto_startup: bool = False     # nếu True, MainWindow gọi startup() khi mở app
     show_on_home: bool = True      # False → ẩn thẻ ở Trang chủ (vẫn hiện ở sidebar)
     fills_height: bool = False     # True → trang chiếm full chiều cao (không bọc scroll)
@@ -43,10 +44,10 @@ class BaseTool(ABC):
 
         actions = tk.Frame(inner, bg=theme.CARD_BG)
         actions.pack(fill="x", pady=(22, 0))
-        ttk.Button(
-            actions, text=self.action_label, bootstyle=self.action_style,
-            command=self.run,
-        ).pack(side="left", ipadx=10, ipady=3)
+        widgets.button(
+            actions, text=self.action_label, variant=self.action_style,
+            icon=self.action_icon, command=self.run,
+        ).pack(side="left")
 
         return outer
 

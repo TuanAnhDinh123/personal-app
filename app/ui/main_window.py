@@ -6,7 +6,7 @@ import tkinter as tk
 import ttkbootstrap as ttk
 
 from app.core.registry import discover_tools
-from app.ui import theme, widgets
+from app.ui import settings_page, theme, widgets
 
 
 def _resource(name):
@@ -197,6 +197,14 @@ class MainWindow(ttk.Window):
                 fill="x", padx=18, pady=(14, 2))
             self._build_nav_group(col, master_tools)
 
+        # Cài đặt: luôn nằm cuối cùng trong sidebar, tách khỏi các nhóm tool.
+        tk.Frame(col, bg=theme.SIDEBAR_BG_HOVER, height=1).pack(
+            fill="x", padx=18, pady=(14, 2))
+        settings_item = NavItem(
+            col, "⚙", "Cài đặt", theme.ACCENT, self.show_settings)
+        settings_item.pack(fill="x")
+        self.nav_items["settings"] = settings_item
+
         tk.Label(
             col, text="v0.1.0", bg=theme.SIDEBAR_BG, fg=theme.SIDEBAR_MUTED,
             font=(theme.FONT_FAMILY, 8),
@@ -259,6 +267,36 @@ class MainWindow(ttk.Window):
             card.grid(row=r, column=c, sticky="nsew", padx=9, pady=9)
         for c in range(cols):
             grid.columnconfigure(c, weight=1, uniform="cards")
+
+    # ----- Màn hình Cài đặt -----
+    def show_settings(self):
+        self._set_active("settings")
+        self._clear_content()
+
+        header = tk.Frame(self.content, bg=theme.CONTENT_BG)
+        header.pack(fill="x", padx=40, pady=(32, 0))
+        title = tk.Frame(header, bg=theme.CONTENT_BG)
+        title.pack(fill="x")
+        widgets.icon_badge(
+            title, "⚙", theme.ACCENT, theme.CONTENT_BG,
+            size=44, radius=13, font_size=20,
+        ).pack(side="left", padx=(0, 14))
+        title_texts = tk.Frame(title, bg=theme.CONTENT_BG)
+        title_texts.pack(side="left", fill="x", expand=True)
+        tk.Label(
+            title_texts, text="Cài đặt", bg=theme.CONTENT_BG, fg=theme.TEXT,
+            font=(theme.FONT_FAMILY, 18, "bold"), anchor="w",
+        ).pack(anchor="w")
+        tk.Label(
+            title_texts, text="Thiết lập dùng chung cho toàn bộ ứng dụng.",
+            bg=theme.CONTENT_BG, fg=theme.MUTED, font=(theme.FONT_FAMILY, 10),
+            anchor="w", justify="left",
+        ).pack(anchor="w", pady=(2, 0))
+
+        sf = widgets.ScrollableFrame(self.content, bg=theme.CONTENT_BG)
+        sf.pack(fill="both", expand=True)
+        body = settings_page.build(sf.inner)
+        body.pack(fill="both", expand=True, padx=40, pady=22)
 
     # ----- Màn hình một tool -----
     def show_tool(self, tool):

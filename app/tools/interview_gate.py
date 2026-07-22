@@ -46,6 +46,7 @@ class InterviewGateTool(BaseTool):
     category = "Văn phòng"
     order = 5
     action_label = "Quét lịch hôm nay"
+    action_icon = "search"
     auto_startup = True
 
     # ------------------------------------------------------------------ UI
@@ -87,8 +88,8 @@ class InterviewGateTool(BaseTool):
 
         row = tk.Frame(parent, bg=theme.CARD_BG)
         row.pack(fill="x", pady=(6, 0))
-        ttk.Button(
-            row, text="💾 Lưu cấu hình", bootstyle="secondary-outline",
+        widgets.button(
+            row, text="Lưu cấu hình", variant="neutral", icon="save",
             command=self._save_config,
         ).pack(side="left")
         if not outlook.available():
@@ -302,10 +303,11 @@ class InterviewGateTool(BaseTool):
             dlg.destroy()
             messagebox.showinfo("Đã gửi", "Đã gửi mail✅")
 
-        ttk.Button(
-            actions, text="Gửi mail", bootstyle="primary", command=do_send,
-        ).pack(side="left", ipadx=10, ipady=3)
-        ttk.Button(
-            actions, text="Hủy", bootstyle="secondary-outline",
+        widgets.button(
+            actions, text="Gửi mail", variant="primary", icon="mail",
+            command=do_send,
+        ).pack(side="left")
+        widgets.button(
+            actions, text="Hủy", variant="neutral", icon="x",
             command=dlg.destroy,
-        ).pack(side="left", padx=(10, 0), ipady=3)
+        ).pack(side="left", padx=(10, 0))

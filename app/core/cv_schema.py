@@ -39,10 +39,11 @@ SCHEMA_SQL = """
 -- ───────────────────────── MASTER: PHÒNG BAN ─────────────────────────
 CREATE TABLE IF NOT EXISTS departments (
     department_id   INTEGER PRIMARY KEY AUTOINCREMENT,
-    department_code VARCHAR,
     department_name VARCHAR,
     manager_name    VARCHAR,
-    description     TEXT
+    description     TEXT,
+    created_at      DATETIME DEFAULT (datetime('now', 'localtime')),
+    updated_at      DATETIME DEFAULT (datetime('now', 'localtime'))
 );
 
 -- ───────────────────────── MASTER: VỊ TRÍ TUYỂN DỤNG ─────────────────
@@ -53,7 +54,9 @@ CREATE TABLE IF NOT EXISTS positions (
     position_title VARCHAR,
     level          VARCHAR,             -- cấp bậc (Junior/Senior/Lead…)
     headcount      INT,                 -- số lượng cần tuyển
-    status         VARCHAR              -- Đang tuyển / Tạm dừng / Đã đóng
+    status         VARCHAR,             -- Đang tuyển / Tạm dừng / Đã đóng
+    created_at     DATETIME DEFAULT (datetime('now', 'localtime')),
+    updated_at     DATETIME DEFAULT (datetime('now', 'localtime'))
 );
 
 -- ───────────────────────── MASTER: MÔ TẢ CÔNG VIỆC (JD) ──────────────
@@ -61,11 +64,9 @@ CREATE TABLE IF NOT EXISTS job_descriptions (
     jd_id        INTEGER PRIMARY KEY AUTOINCREMENT,
     position_id  INT,                   -- tham chiếu mềm → positions.position_id
     jd_title     VARCHAR,
-    summary      TEXT,
-    requirements TEXT,
-    salary_range VARCHAR,
     jd_file_path VARCHAR,                 -- đường dẫn file JD trên máy
-    created_at   DATETIME DEFAULT (datetime('now', 'localtime'))
+    created_at   DATETIME DEFAULT (datetime('now', 'localtime')),
+    updated_at   DATETIME DEFAULT (datetime('now', 'localtime'))
 );
 
 -- ───────────────────────── ỨNG VIÊN ─────────────────────────────────
@@ -88,7 +89,9 @@ CREATE TABLE IF NOT EXISTS candidates (
     strengths        TEXT,
     weaknesses       TEXT,
     cv_file_path     VARCHAR,           -- đường dẫn file CV trên máy
-    note             TEXT
+    note             TEXT,
+    created_at       DATETIME DEFAULT (datetime('now', 'localtime')),
+    updated_at       DATETIME DEFAULT (datetime('now', 'localtime'))
 );
 
 -- ───────────────────────── CHỈ MỤC (tăng tốc tìm kiếm) ───────────────
@@ -109,6 +112,24 @@ MIGRATIONS: list[str] = [
     # Bỏ bảng document_files → lưu đường dẫn file thẳng vào candidates & jd.
     "ALTER TABLE candidates ADD COLUMN cv_file_path VARCHAR",
     "ALTER TABLE job_descriptions ADD COLUMN jd_file_path VARCHAR",
+    # Dấu thời gian tạo / cập nhật cho MỌI bảng. Lưu ý: SQLite không cho dùng
+    # default động (datetime('now')) trong ALTER TABLE → cột thêm cho bảng CŨ sẽ
+    # NULL; bản ghi TẠO MỚI sau đó được điền qua init_db()._backfill_timestamps
+    # và logic ghi (INSERT dùng DEFAULT của schema, UPDATE tự set updated_at).
+    "ALTER TABLE departments ADD COLUMN created_at DATETIME",
+    "ALTER TABLE departments ADD COLUMN updated_at DATETIME",
+    "ALTER TABLE positions ADD COLUMN created_at DATETIME",
+    "ALTER TABLE positions ADD COLUMN updated_at DATETIME",
+    "ALTER TABLE job_descriptions ADD COLUMN created_at DATETIME",
+    "ALTER TABLE job_descriptions ADD COLUMN updated_at DATETIME",
+    "ALTER TABLE candidates ADD COLUMN created_at DATETIME",
+    "ALTER TABLE candidates ADD COLUMN updated_at DATETIME",
+    # Bỏ các cột không dùng nữa (SQLite ≥ 3.35 hỗ trợ DROP COLUMN; DB mới đã
+    # không có sẵn các cột này nên câu lệnh sẽ bị bỏ qua an toàn).
+    "ALTER TABLE departments DROP COLUMN department_code",
+    "ALTER TABLE job_descriptions DROP COLUMN summary",
+    "ALTER TABLE job_descriptions DROP COLUMN requirements",
+    "ALTER TABLE job_descriptions DROP COLUMN salary_range",
 ]
 
 # Gợi ý cho các ô chọn ở giao diện (sửa tùy ý).

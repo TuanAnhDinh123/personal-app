@@ -28,7 +28,7 @@ from tkinter import messagebox
 import tkinter as tk
 import ttkbootstrap as ttk
 
-from app.core import config
+from app.core import config, settings
 from app.core.base_tool import BaseTool
 from app.ui import widgets, theme
 
@@ -39,11 +39,11 @@ except ImportError:
     _OPENPYXL_OK = False
 
 SECTION = "ai_scan_cv"
+# API key & model nay là thiết lập CHUNG (màn hình Cài đặt) — xem app/core/settings.py.
+# Tool này chỉ còn giữ đường dẫn vào/ra và JD của riêng nó.
 DEFAULTS = {
-    "api_key": "",
     "folder":  "",
     "output":  "",
-    "model":   "gemini-3.6-flash",
     "jd":      "",
 }
 
@@ -235,31 +235,29 @@ class AiScanCvTool(BaseTool):
     icon = "🤖"
     category = "Tệp & Tài liệu"
     order = 11
-    action_label = "🤖 Quét CV bằng AI"
+    action_label = "Quét CV bằng AI"
     action_style = "success"
+    action_icon = "sparkles"
 
     def build_body(self, parent):
         self._parent = parent
         cfg = config.load(SECTION, DEFAULTS)
 
-        widgets.section_label(parent, "Cấu hình Gemini")
-        self.var_key = widgets.text_row(parent, "API key Gemini", cfg["api_key"])
-        widgets.hint(
-            parent,
-            "Lấy key miễn phí tại https://aistudio.google.com/apikey — "
-            "key được lưu lại trong máy để lần sau khỏi nhập.",
-        )
+        gen = settings.load()
 
-        self.var_model = widgets.text_row(parent, "Model", cfg["model"])
-        widgets.hint(
-            parent,
-            "Mặc định 'gemini-3.6-flash'. Free tier giới hạn theo TỪNG model "
-            "(vd 5 request/phút, 20/ngày) — nếu 1 model báo lỗi 429/503 do "
-            "chạm trần, đổi sang model khác (gemini-3.5-flash, gemini-2.5-flash) "
-            "để dùng hạn ngạch riêng của nó.",
-        )
+        # Hàng đầu: tiêu đề mục bên trái + chip model AI nhỏ nép ở góc phải trên.
+        header = tk.Frame(parent, bg=theme.CARD_BG)
+        header.pack(fill="x", pady=(2, 8))
+        tk.Label(
+            header, text="Đầu vào / đầu ra", bg=theme.CARD_BG, fg=theme.TEXT,
+            font=(theme.FONT_FAMILY, 10, "bold"),
+        ).pack(side="left")
+        tk.Label(
+            header, text=f"🤖  {gen['ai_model']}",
+            bg=theme.SIDEBAR_BG_ACTIVE, fg=theme.ACCENT,
+            font=(theme.FONT_FAMILY, 8, "bold"), padx=10, pady=4,
+        ).pack(side="right")
 
-        widgets.section_label(parent, "Đầu vào / đầu ra")
         self.var_folder = widgets.file_row(parent, "Thư mục chứa CV (PDF)", mode="folder")
         if cfg["folder"]:
             self.var_folder.set(cfg["folder"])
@@ -285,11 +283,10 @@ class AiScanCvTool(BaseTool):
     # ------------------------------------------------------------------ config
 
     def _collect(self):
+        """Cấu hình riêng của tool (đường dẫn + JD). API key/model lấy từ Cài đặt."""
         return {
-            "api_key": self.var_key.get().strip(),
             "folder":  self.var_folder.get().strip(),
             "output":  self.var_output.get().strip(),
-            "model":   self.var_model.get().strip() or DEFAULTS["model"],
             "jd":      self.jd_box.get("1.0", "end-1c"),
         }
 
@@ -303,8 +300,17 @@ class AiScanCvTool(BaseTool):
             return
 
         cfg = self._collect()
+
+        # API key & model là thiết lập chung (màn hình Cài đặt) — nạp vào cfg
+        # để phần tiến trình/luồng nền bên dưới dùng như trước.
+        gen = settings.load()
+        cfg["api_key"] = gen.get("api_key", "").strip()
+        cfg["model"] = gen.get("ai_model", "").strip() or settings.DEFAULTS["ai_model"]
         if not cfg["api_key"]:
-            messagebox.showwarning("Thiếu API key", "Vui lòng nhập API key Gemini.")
+            messagebox.showwarning(
+                "Thiếu API key",
+                "Chưa cấu hình API key Gemini.\n\n"
+                "Vào màn hình ⚙️ Cài đặt (cuối thanh bên) để nhập API key.")
             return
         if not cfg["folder"] or not os.path.isdir(cfg["folder"]):
             messagebox.showwarning("Thiếu thư mục", "Vui lòng chọn thư mục chứa CV.")
@@ -331,7 +337,9 @@ class AiScanCvTool(BaseTool):
                 "Không có file", "Không tìm thấy file PDF nào trong thư mục đã chọn.")
             return
 
-        config.save(SECTION, cfg)
+        # Chỉ lưu cấu hình RIÊNG của tool (không ghi api_key/model — đó là
+        # thiết lập chung, đã lưu ở section "general").
+        config.save(SECTION, {k: cfg[k] for k in DEFAULTS})
         self._open_progress(files, cfg, out)
 
     # ----------------------------------------------------------------- tiến trình
@@ -369,8 +377,8 @@ class AiScanCvTool(BaseTool):
 
         btns = tk.Frame(dlg, bg=theme.CONTENT_BG)
         btns.pack(fill="x", padx=20, pady=12)
-        close_btn = ttk.Button(
-            btns, text="Hủy", bootstyle="secondary-outline",
+        close_btn = widgets.button(
+            btns, text="Hủy", variant="neutral", icon="x",
             command=lambda: state.update(cancel=True),
         )
         close_btn.pack(side="right")

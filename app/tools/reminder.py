@@ -147,13 +147,13 @@ class ReminderTool(BaseTool):
 
         row = tk.Frame(parent, bg=theme.CARD_BG)
         row.pack(fill="x", pady=(6, 0))
-        ttk.Button(
-            row, text="💾 Lưu cấu hình", bootstyle="secondary-outline",
+        widgets.button(
+            row, text="Lưu cấu hình", variant="neutral", icon="save",
             command=self._save_config,
         ).pack(side="left")
-        ttk.Button(
-            row, text="🔄 Quét lịch (1 tháng gần đây)", bootstyle="primary",
-            command=self._scan_clicked,
+        widgets.button(
+            row, text="Quét lịch (1 tháng gần đây)", variant="primary",
+            icon="refresh", command=self._scan_clicked,
         ).pack(side="left", padx=(10, 0))
 
         if not outlook.available():
@@ -318,14 +318,14 @@ class ReminderTool(BaseTool):
 
         btns = tk.Frame(rowf, bg=theme.CARD_BG)
         btns.grid(row=0, column=1, sticky="e", padx=12, pady=6)
-        ttk.Button(
-            btns, text="Yes", bootstyle="success",
+        widgets.button(
+            btns, text="Yes", variant="success", icon="check",
             command=lambda a=appt: self._on_yes(a),
-        ).pack(side="left", ipadx=6)
-        ttk.Button(
-            btns, text="No", bootstyle="danger-outline",
+        ).pack(side="left")
+        widgets.button(
+            btns, text="No", variant="danger", icon="x",
             command=lambda a=appt: self._on_no(a),
-        ).pack(side="left", padx=(8, 0), ipadx=6)
+        ).pack(side="left", padx=(8, 0))
         return rowf
 
     # ------------------------------------------------------- xử lý nút Yes/No
@@ -368,11 +368,11 @@ class ReminderTool(BaseTool):
             dlg.destroy()
             self._open_schedule(appt)
 
-        ttk.Button(actions, text="Yes — Soạn mail", bootstyle="primary",
-                   command=yes).pack(side="left", ipadx=8, ipady=2)
-        ttk.Button(actions, text="No — Đặt lịch nhắc khác",
-                   bootstyle="secondary-outline",
-                   command=no).pack(side="left", padx=(10, 0), ipady=2)
+        widgets.button(actions, text="Yes — Soạn mail", variant="primary",
+                       icon="mail", command=yes).pack(side="left")
+        widgets.button(actions, text="No — Đặt lịch nhắc khác",
+                       variant="neutral", icon="calendar",
+                       command=no).pack(side="left", padx=(10, 0))
 
     # ------------------------------------------------------------- popup: soạn mail
     def _eligible_recipients(self, appt):
@@ -471,10 +471,10 @@ class ReminderTool(BaseTool):
             self._dismiss(appt)             # gửi xong -> bỏ khỏi bảng như bấm Yes
             messagebox.showinfo("Đã gửi", "Đã gửi mail phản hồi ✅")
 
-        ttk.Button(actions, text="Gửi mail", bootstyle="primary",
-                   command=do_send).pack(side="left", ipadx=10, ipady=3)
-        ttk.Button(actions, text="Hủy", bootstyle="secondary-outline",
-                   command=dlg.destroy).pack(side="left", padx=(10, 0), ipady=3)
+        widgets.button(actions, text="Gửi mail", variant="primary", icon="mail",
+                       command=do_send).pack(side="left")
+        widgets.button(actions, text="Hủy", variant="neutral", icon="x",
+                       command=dlg.destroy).pack(side="left", padx=(10, 0))
 
     # ------------------------------------------------------- popup: đặt lịch nhắc
     def _open_schedule(self, appt):
@@ -549,7 +549,8 @@ class ReminderTool(BaseTool):
                 "Đã đặt lịch",
                 f"Đã tạo lời nhắc lúc {start.strftime('%d/%m/%Y %H:%M')} ✅")
 
-        ttk.Button(actions, text="Tạo lịch nhắc", bootstyle="primary",
-                   command=do_create).pack(side="left", ipadx=10, ipady=3)
-        ttk.Button(actions, text="Hủy", bootstyle="secondary-outline",
-                   command=dlg.destroy).pack(side="left", padx=(10, 0), ipady=3)
+        widgets.button(actions, text="Tạo lịch nhắc", variant="primary",
+                       icon="calendar",
+                       command=do_create).pack(side="left")
+        widgets.button(actions, text="Hủy", variant="neutral", icon="x",
+                       command=dlg.destroy).pack(side="left", padx=(10, 0))
