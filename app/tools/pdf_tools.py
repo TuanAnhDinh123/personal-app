@@ -9,6 +9,7 @@ class PdfTool(BaseTool):
     category = "Tệp & Tài liệu"
     order = 20
     action_label = "Xử lý PDF"
+    show_on_home = False   # chưa gắn logic → tạm ẩn ở Trang chủ
 
     def build_body(self, parent):
         widgets.dropdown(parent, "Chế độ", ["Gộp nhiều PDF", "Tách theo trang"])

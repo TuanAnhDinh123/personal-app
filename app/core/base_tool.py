@@ -23,6 +23,8 @@ class BaseTool(ABC):
     action_label: str = "Thực hiện"
     action_style: str = "primary"  # bootstyle của nút chính
     auto_startup: bool = False     # nếu True, MainWindow gọi startup() khi mở app
+    show_on_home: bool = True      # False → ẩn thẻ ở Trang chủ (vẫn hiện ở sidebar)
+    fills_height: bool = False     # True → trang chiếm full chiều cao (không bọc scroll)
 
     def build(self, parent) -> tk.Frame:
         """Dựng giao diện của tool — khung chung, hiếm khi cần ghi đè."""

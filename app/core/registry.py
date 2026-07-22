@@ -45,6 +45,7 @@ def discover_tools():
                 issubclass(obj, BaseTool)
                 and obj is not BaseTool
                 and obj.__module__ == module.__name__
+                and not obj.__name__.startswith("_")  # bỏ lớp cơ sở private
             )
             if is_tool:
                 found.append(obj())

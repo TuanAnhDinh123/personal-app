@@ -24,6 +24,7 @@ CATEGORY_COLORS = {
     "Tệp & Tài liệu": "#3b82f6",      # xanh dương
     "Dữ liệu": "#10b981",             # xanh lá
     "Văn phòng": "#f59e0b",           # cam
+    "Tuyển dụng": "#8b5cf6",          # tím
 }
 CATEGORY_DEFAULT_COLOR = "#64748b"    # xám xanh
 

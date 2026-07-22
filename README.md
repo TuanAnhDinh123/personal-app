@@ -115,6 +115,54 @@ sinh, email, SĐT, **điểm phù hợp (0–100)** + nhận xét, **ưu điểm
 >   (`gemini-3.5-flash`, `gemini-2.5-flash`) để dùng hạn ngạch riêng, hoặc bật
 >   billing để nâng giới hạn. Tool tự thử lại tối đa 4 lần khi gặp 429/5xx.
 
+## Tool: Quản lý CV ứng viên 🗂️
+
+`app/tools/candidate_db.py` — quản lý hồ sơ ứng viên + danh mục tuyển dụng,
+lưu bằng **SQLite** ngay trên máy (`%APPDATA%\PersonalToolbox\candidates.sqlite`).
+
+Màn hình chính (ỨNG VIÊN): **thanh tìm kiếm** (tên / email / SĐT + lọc vị trí +
+trạng thái), **bảng kết quả** (double-click để sửa), và các nút **Thêm mới ·
+Sửa · Xóa · Mở CV · Nhập từ Excel · Tải lại**.
+
+- **Chống trùng**: khi Thêm mới (hoặc Sửa) ứng viên, nếu **trùng email hoặc SĐT**
+  với người đã có, tool cảnh báo và cho quyết định vẫn lưu hay không. Khi *Nhập
+  từ Excel* có thể chọn **bỏ qua các bản trùng** (email/SĐT — cả trong file lẫn
+  so với DB).
+- **Master data** tách thành nhóm **Master Data** riêng ở sidebar, gồm 3 trang:
+  **Bộ phận · Vị trí tuyển dụng · Mô tả công việc (JD)** — mỗi trang thêm/sửa/xóa
+  riêng. (Các trang này không hiện thẻ ở Trang chủ.)
+- Nút **📥 Nhập từ Excel** đọc thẳng file kết quả do tool *Quét CV bằng AI* xuất
+  ra (tự khớp cột theo tiêu đề), ghi hàng loạt vào DB. Có thể chọn thư mục chứa
+  CV để lưu **đường dẫn đầy đủ** vào cột `cv_file_path`.
+- Nút **📂 Mở CV** mở file CV của ứng viên đang chọn. Nếu file đã bị **di chuyển
+  / đổi tên** (đường dẫn trong DB không còn đúng), tool mời chọn lại vị trí và
+  **tự lưu đường dẫn mới** vào DB để lần sau khỏi hỏi.
+
+**Đường dẫn file** lưu thẳng vào cột `candidates.cv_file_path` và
+`job_descriptions.jd_file_path` (không dùng bảng riêng — file thực tế đã nằm sẵn
+trên máy). Xem thảo luận về xử lý đường dẫn bị lệch ở cuối mục.
+
+> Cờ ở `BaseTool`: `show_on_home=False` để ẩn thẻ khỏi Trang chủ (vẫn hiện ở
+> sidebar), `fills_height=True` để trang chiếm full chiều cao khi phóng to cửa
+> sổ. Tool chưa gắn logic (`clean_data`, `pdf_tools`) đã đặt `show_on_home=False`.
+
+Thiết kế cơ sở dữ liệu tách riêng để dễ chỉnh:
+
+| File | Vai trò |
+|------|---------|
+| `app/core/cv_schema.py` | **Thiết kế DB** — 4 bảng dưới dạng SQL (`SCHEMA_SQL`) kèm chú thích. Sửa cấu trúc DB ở đây; có sẵn mục `MIGRATIONS` để thêm cột an toàn cho DB đã có dữ liệu. |
+| `app/core/cv_repository.py` | **Tầng truy cập dữ liệu** — kết nối SQLite + CRUD generic cho cả 4 bảng. Giao diện chỉ gọi hàm, không đụng SQL. |
+| `app/tools/candidate_db.py` | **Giao diện** tool + form nhập liệu tổng quát. |
+
+**4 bảng** (quan hệ mềm, không dùng khóa ngoại; mọi cột cho phép NULL trừ PK):
+`departments` (phòng ban) → `positions` (vị trí) → `job_descriptions` (JD, có
+`jd_file_path`) & `candidates` (ứng viên, có `cv_file_path`). Đường dẫn file lưu
+thẳng vào 2 cột này — không có bảng file riêng.
+
+> Vì thiết kế cố tình **không dùng khóa ngoại**, các cột `*_id` chỉ là tham
+> chiếu mềm — ứng dụng tự đảm bảo liên kết. `init_db()` tự tạo bảng khi mở tool;
+> nếu bảng cũ đang **trống** mà lệch cấu trúc, nó tự dựng lại (không mất dữ liệu).
+
 ## Đóng gói thành .exe
 
 ```bash

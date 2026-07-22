@@ -149,12 +149,19 @@ class MainWindow(ttk.Window):
                 pass   # một tool lỗi không được làm hỏng cả app
 
     # ----- Thanh bên -----
+    MASTER_CATEGORY = "Master Data"
+
     def _build_sidebar(self):
         sb = tk.Frame(self, bg=theme.SIDEBAR_BG, width=252)
         sb.pack(side="left", fill="y")
         sb.pack_propagate(False)
 
-        brand = tk.Frame(sb, bg=theme.SIDEBAR_BG)
+        # Toàn bộ sidebar nằm trong một vùng cuộn dọc.
+        scroll = widgets.ScrollableFrame(sb, bg=theme.SIDEBAR_BG)
+        scroll.pack(fill="both", expand=True)
+        col = scroll.inner
+
+        brand = tk.Frame(col, bg=theme.SIDEBAR_BG)
         brand.pack(fill="x", pady=(20, 14), padx=18)
         widgets.icon_badge(
             brand, "🧰", theme.ACCENT, theme.SIDEBAR_BG,
@@ -172,36 +179,46 @@ class MainWindow(ttk.Window):
         ).pack(anchor="w")
 
         # đường kẻ ngăn cách mảnh
-        tk.Frame(sb, bg=theme.SIDEBAR_BG_HOVER, height=1).pack(
+        tk.Frame(col, bg=theme.SIDEBAR_BG_HOVER, height=1).pack(
             fill="x", padx=18, pady=(2, 6))
 
-        nav = tk.Frame(sb, bg=theme.SIDEBAR_BG)
-        nav.pack(fill="both", expand=True)
+        # Cụm Master Data luôn xếp cuối cùng, dưới các nhóm còn lại.
+        master_tools = [t for t in self.tools if t.category == self.MASTER_CATEGORY]
+        other_tools = [t for t in self.tools if t.category != self.MASTER_CATEGORY]
 
-        home = NavItem(nav, "🏠", "Trang chủ", theme.ACCENT, self.show_home)
+        home = NavItem(col, "🏠", "Trang chủ", theme.ACCENT, self.show_home)
         home.pack(fill="x")
         self.nav_items["home"] = home
 
+        self._build_nav_group(col, other_tools)
+
+        if master_tools:
+            tk.Frame(col, bg=theme.SIDEBAR_BG_HOVER, height=1).pack(
+                fill="x", padx=18, pady=(14, 2))
+            self._build_nav_group(col, master_tools)
+
+        tk.Label(
+            col, text="v0.1.0", bg=theme.SIDEBAR_BG, fg=theme.SIDEBAR_MUTED,
+            font=(theme.FONT_FAMILY, 8),
+        ).pack(pady=12)
+
+    def _build_nav_group(self, parent, tools):
+        """Dựng các mục nav cho một nhóm tool, kèm tiêu đề mỗi khi đổi nhóm."""
         current_cat = None
-        for tool in self.tools:
+        for tool in tools:
             if tool.category != current_cat:
                 current_cat = tool.category
                 tk.Label(
-                    nav, text=current_cat.upper(), bg=theme.SIDEBAR_BG,
+                    parent, text=current_cat.upper(), bg=theme.SIDEBAR_BG,
                     fg=theme.SIDEBAR_MUTED, font=(theme.FONT_FAMILY, 8, "bold"),
                     anchor="w",
                 ).pack(fill="x", padx=18, pady=(16, 4))
             item = NavItem(
-                nav, tool.icon, tool.name, theme.category_color(tool.category),
+                parent, tool.icon, tool.name, theme.category_color(tool.category),
                 lambda t=tool: self.show_tool(t),
             )
             item.pack(fill="x")
             self.nav_items[tool.name] = item
-
-        tk.Label(
-            sb, text="v0.1.0", bg=theme.SIDEBAR_BG, fg=theme.SIDEBAR_MUTED,
-            font=(theme.FONT_FAMILY, 8),
-        ).pack(side="bottom", pady=12)
 
     def _set_active(self, key):
         for k, item in self.nav_items.items():
@@ -234,7 +251,9 @@ class MainWindow(ttk.Window):
         grid = tk.Frame(wrap, bg=theme.CONTENT_BG)
         grid.pack(fill="both", expand=True)
         cols = 3
-        for i, tool in enumerate(self.tools):
+        # Chỉ hiện tool bật show_on_home (ẩn trang master & tool chưa có logic).
+        home_tools = [t for t in self.tools if getattr(t, "show_on_home", True)]
+        for i, tool in enumerate(home_tools):
             card = ToolCard(grid, tool, self.show_tool)
             r, c = divmod(i, cols)
             card.grid(row=r, column=c, sticky="nsew", padx=9, pady=9)
@@ -267,7 +286,13 @@ class MainWindow(ttk.Window):
             anchor="w", justify="left",
         ).pack(anchor="w", pady=(2, 0))
 
-        sf = widgets.ScrollableFrame(self.content, bg=theme.CONTENT_BG)
-        sf.pack(fill="both", expand=True)
-        body = tool.build(sf.inner)
-        body.pack(fill="both", expand=True, padx=40, pady=22)
+        if getattr(tool, "fills_height", False):
+            # Trang tự quản lý cuộn (vd có bảng riêng) → gắn thẳng để chiếm
+            # full chiều cao khi phóng to cửa sổ, không bọc trong scroll dọc.
+            body = tool.build(self.content)
+            body.pack(fill="both", expand=True, padx=40, pady=22)
+        else:
+            sf = widgets.ScrollableFrame(self.content, bg=theme.CONTENT_BG)
+            sf.pack(fill="both", expand=True)
+            body = tool.build(sf.inner)
+            body.pack(fill="both", expand=True, padx=40, pady=22)

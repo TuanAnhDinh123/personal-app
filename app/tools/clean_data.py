@@ -9,6 +9,7 @@ class CleanDataTool(BaseTool):
     category = "Dữ liệu"
     order = 10
     action_label = "Làm sạch"
+    show_on_home = False   # chưa gắn logic → tạm ẩn ở Trang chủ
 
     def build_body(self, parent):
         widgets.file_row(parent, "File cần làm sạch", mode="file")
