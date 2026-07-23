@@ -36,7 +36,7 @@ def _filter_str(filetypes):
 
 
 class FormDialog(QDialog):
-    def __init__(self, parent, title, specs, current=None, on_save=None):
+    def __init__(self, parent, title, specs, current=None, on_save=None, on_delete=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -44,6 +44,7 @@ class FormDialog(QDialog):
         self._specs = specs
         self._current = current
         self._on_save = on_save
+        self._on_delete = on_delete
         self._getters = {}
         self._required = {}
         self._saved = False
@@ -93,6 +94,9 @@ class FormDialog(QDialog):
         foot.addWidget(widgets.button(card, "Hủy", variant="neutral", icon="x",
                                       command=self.reject))
         foot.addStretch(1)
+        if on_delete is not None:
+            foot.addWidget(widgets.button(card, "Xóa", variant="danger", icon="trash",
+                                          command=self._delete))
         lay.addLayout(foot)
 
     # ------------------------------------------------------------- dựng field
@@ -202,6 +206,11 @@ class FormDialog(QDialog):
         self._data = data
         self._saved = True
         self.accept()
+
+    def _delete(self):
+        # on_delete tự lo xác nhận + xóa; trả về False để giữ form mở (vd hủy xác nhận).
+        if self._on_delete is not None and self._on_delete() is not False:
+            self.reject()
 
     # kéo di chuyển
     def mousePressEvent(self, e):

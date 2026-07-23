@@ -18,6 +18,7 @@ Cần: một API key Gemini (https://aistudio.google.com/apikey) và kết nối
 import base64
 import json
 import os
+import shutil
 import threading
 import time
 import urllib.error
@@ -37,10 +38,14 @@ SECTION = "ai_scan_cv"
 # API key & model nay là thiết lập CHUNG (màn hình Cài đặt) — xem app/core/settings.py.
 # Tool này chỉ còn giữ đường dẫn vào/ra và JD của riêng nó.
 DEFAULTS = {
-    "folder":  "",
-    "output":  "",
-    "jd":      "",
+    "folder":       "",
+    "output":       "",
+    "jd_file":      "",   # đường dẫn tới file JD (PDF/DOCX/TXT) — thay cho ô dán JD cũ
+    "extra_prompt": "",   # yêu cầu bổ sung người dùng gửi kèm cho AI
 }
+
+# Tên folder (ngang cấp) chứa các CV đã quét xong, để lần sau không quét lại.
+_DONE_SUFFIX = "_da_quet"
 
 _API_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -80,16 +85,45 @@ _COLUMNS = [
 ]
 
 
-def _build_prompt(jd: str) -> str:
-    """Câu lệnh gửi kèm mỗi CV. JD là yêu cầu công việc do người dùng nhập."""
+def read_jd_file(path: str) -> str:
+    """Đọc nội dung JD từ file PDF / DOCX / TXT thành text thuần.
+
+    Dùng lại bộ trích text của tool "Quét CV" cho PDF/DOCX; .txt đọc trực tiếp.
+    """
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(f"Không tìm thấy file JD: {path}")
+    suffix = p.suffix.lower()
+    if suffix == ".txt":
+        return p.read_text(encoding="utf-8", errors="ignore")
+    # PDF/DOCX → dùng chung logic với app.core.cv_scan (tránh phụ thuộc vòng).
+    from app.core.cv_scan import _extract_cv_text
+    return _extract_cv_text(p)
+
+
+def _build_prompt(jd: str, extra: str = "") -> str:
+    """Câu lệnh gửi kèm mỗi CV.
+
+    jd    — nội dung mô tả công việc (đọc từ file JD người dùng chọn).
+    extra — yêu cầu bổ sung tùy ý người dùng nhập thêm cho AI.
+    """
     jd = jd.strip() or "(Không có mô tả công việc cụ thể — hãy đánh giá tổng quát.)"
+    extra = extra.strip()
+    extra_block = ""
+    if extra:
+        extra_block = (
+            "\n=== YÊU CẦU BỔ SUNG TỪ NGƯỜI DÙNG ===\n"
+            f"{extra}\n"
+            "=== HẾT YÊU CẦU BỔ SUNG ===\n"
+        )
     return (
         "Bạn là chuyên viên tuyển dụng. Hãy đọc kỹ CV trong file PDF đính kèm "
         "và trích xuất thông tin ứng viên, đồng thời đánh giá mức độ phù hợp với "
         "mô tả công việc (JD) dưới đây.\n\n"
         "=== MÔ TẢ CÔNG VIỆC (JD) ===\n"
         f"{jd}\n"
-        "=== HẾT JD ===\n\n"
+        "=== HẾT JD ===\n"
+        f"{extra_block}\n"
         "Yêu cầu:\n"
         "- Trả lời hoàn toàn bằng tiếng Việt.\n"
         "- 'fit_score' là số nguyên 0-100 thể hiện độ khớp giữa CV và JD.\n"
@@ -106,7 +140,7 @@ _RETRY_BASE_DELAY = 4     # giây; chờ tăng dần: 4s, 8s, 16s…
 
 
 def _call_gemini(api_key: str, model: str, jd: str, pdf_bytes: bytes,
-                 timeout: int = 180, on_retry=None) -> dict:
+                 timeout: int = 180, on_retry=None, extra: str = "") -> dict:
     """Gửi 1 file PDF cho Gemini, trả về dict theo _RESPONSE_SCHEMA.
 
     Tự động thử lại khi gặp lỗi tạm thời (429/5xx, ví dụ HTTP 503 "high
@@ -117,7 +151,7 @@ def _call_gemini(api_key: str, model: str, jd: str, pdf_bytes: bytes,
     last_error = ""
     for attempt in range(1, _MAX_RETRIES + 1):
         try:
-            return _call_gemini_once(api_key, model, jd, pdf_bytes, timeout)
+            return _call_gemini_once(api_key, model, jd, pdf_bytes, timeout, extra)
         except _TransientError as exc:
             last_error = str(exc)
             if attempt == _MAX_RETRIES:
@@ -134,12 +168,12 @@ class _TransientError(Exception):
 
 
 def _call_gemini_once(api_key: str, model: str, jd: str, pdf_bytes: bytes,
-                      timeout: int) -> dict:
+                      timeout: int, extra: str = "") -> dict:
     """Một lần gọi API. Ném _TransientError nếu lỗi có thể thử lại."""
     body = {
         "contents": [{
             "parts": [
-                {"text": _build_prompt(jd)},
+                {"text": _build_prompt(jd, extra)},
                 {"inline_data": {
                     "mime_type": "application/pdf",
                     "data": base64.b64encode(pdf_bytes).decode("ascii"),
@@ -193,32 +227,79 @@ def _call_gemini_once(api_key: str, model: str, jd: str, pdf_bytes: bytes,
         raise RuntimeError("Mô hình trả về không đúng JSON.")
 
 
-def _write_excel(rows: list[dict], out_path: str) -> None:
-    """Ghi danh sách kết quả ra file .xlsx với tiêu đề in đậm + auto-width."""
-    from openpyxl.styles import Alignment, Font, PatternFill
+_SHEET_TITLE = "AI CV Scan"
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "AI CV Scan"
+
+def _write_header(ws) -> None:
+    """Kẻ hàng tiêu đề in đậm + đặt độ rộng cột."""
+    from openpyxl.styles import Alignment, Font, PatternFill
 
     header_font = Font(name="Segoe UI", size=11, bold=True, color="FFFFFF")
     header_fill = PatternFill("solid", fgColor="6366F1")
-    cell_font   = Font(name="Segoe UI", size=11)
-    wrap        = Alignment(vertical="top", wrap_text=True)
-
     for col, (_, title, width) in enumerate(_COLUMNS, start=1):
         c = ws.cell(row=1, column=col, value=title)
         c.font = header_font
         c.fill = header_fill
         c.alignment = Alignment(vertical="center", horizontal="center")
         ws.column_dimensions[c.column_letter].width = width
+    ws.freeze_panes = "A2"
 
-    for r, row in enumerate(rows, start=2):
+
+def append_rows_to_excel(rows: list[dict], out_path: str) -> None:
+    """Ghi NỐI TIẾP các dòng kết quả vào file .xlsx.
+
+    • Nếu file chưa tồn tại → tạo mới kèm hàng tiêu đề.
+    • Nếu đã tồn tại → mở ra và ghi tiếp phía dưới các record cũ, nhờ vậy
+      nhiều lần quét (mỗi lần dừng do hết hạn mức key free) vẫn dồn chung một
+      file thay vì đè lên nhau.
+    """
+    from openpyxl.styles import Alignment, Font
+
+    if os.path.exists(out_path):
+        wb = openpyxl.load_workbook(out_path)
+        ws = wb[_SHEET_TITLE] if _SHEET_TITLE in wb.sheetnames else wb.active
+        if ws.max_row < 1 or ws.cell(row=1, column=1).value is None:
+            _write_header(ws)
+        start = ws.max_row + 1
+    else:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = _SHEET_TITLE
+        _write_header(ws)
+        start = 2
+
+    cell_font = Font(name="Segoe UI", size=11)
+    wrap      = Alignment(vertical="top", wrap_text=True)
+    for r, row in enumerate(rows, start=start):
         for col, (key, _, _) in enumerate(_COLUMNS, start=1):
-            value = row.get(key, "")
-            c = ws.cell(row=r, column=col, value=value)
+            c = ws.cell(row=r, column=col, value=row.get(key, ""))
             c.font = cell_font
             c.alignment = wrap
-
-    ws.freeze_panes = "A2"
     wb.save(out_path)
+
+
+# Giữ tên cũ cho tương thích; mặc định giờ là ghi nối tiếp.
+_write_excel = append_rows_to_excel
+
+
+# --------------------------------------------------------------- folder "đã quét"
+def done_folder_for(folder: str) -> Path:
+    """Trả về đường dẫn folder (ngang cấp) chứa CV đã quét — chưa tạo trên đĩa."""
+    src = Path(folder)
+    return src.parent / f"{src.name}{_DONE_SUFFIX}"
+
+
+def move_to_done(path: Path, done_dir: Path) -> Path:
+    """Chuyển 1 file CV đã quét xong sang folder 'đã quét'.
+
+    Tự tạo folder đích nếu chưa có; nếu trùng tên thì thêm hậu tố _1, _2…
+    Trả về đường dẫn mới của file.
+    """
+    done_dir.mkdir(parents=True, exist_ok=True)
+    target = done_dir / path.name
+    i = 1
+    while target.exists():
+        target = done_dir / f"{path.stem}_{i}{path.suffix}"
+        i += 1
+    shutil.move(str(path), str(target))
+    return target

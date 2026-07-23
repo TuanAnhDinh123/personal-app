@@ -373,6 +373,31 @@ QProgressBar::chunk {
 }
 #DialogClose:hover { background: {{--input-bg}}; color: {{--text}}; }
 
+/* --- Modal xem chi tiết ứng viên --- */
+#DetailCard {
+    background: {{--card-bg}};
+    border: 1px solid {{--border-strong}};
+    border-radius: 12px;
+}
+#DetailName { font-size: 15px; font-weight: 700; color: {{--text}}; background: transparent; }
+#DetailMeta { font-size: 12px; color: {{--text-muted}}; background: transparent; }
+#AIBox {
+    background: {{--accent-soft}};
+    border: 1px solid {{--border}};
+    border-radius: 10px;
+}
+#AIHeader { font-size: 13px; font-weight: 700; color: {{--accent}}; background: transparent; }
+#AILabel  { font-size: 12px; font-weight: 600; color: {{--text-muted}}; background: transparent; }
+#AIText   { font-size: 13px; color: {{--text}}; background: transparent; line-height: 150%; }
+#AIEmpty  { font-size: 12px; color: {{--text-faint}}; background: transparent; font-style: italic; }
+#CopyChip {
+    background: {{--input-bg}};
+    border: 1px solid {{--border}};
+    border-radius: 9px;
+}
+#CopyChip:hover { background: {{--neutral-hover}}; border: 1px solid {{--border-strong}}; }
+#CopyChipText { font-size: 12px; color: {{--text}}; background: transparent; }
+
 /* ============================================================
    HỘP THOẠI HỆ THỐNG (dự phòng)
    ============================================================ */

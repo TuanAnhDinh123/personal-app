@@ -4,9 +4,10 @@ Dùng lại cho mọi tool cần hiển thị bảng (ứng viên, master data, 
 Mỗi dòng là sqlite3.Row hoặc dict; cột khai báo bằng list (key, title, width, align).
 """
 from PySide6.QtCore import QAbstractTableModel, Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFont, QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHeaderView, QStyle, QStyledItemDelegate, QTableView,
+    QAbstractItemView, QApplication, QHeaderView, QMenu, QStyle,
+    QStyledItemDelegate, QTableView,
 )
 
 from app_qt import theme
@@ -28,12 +29,14 @@ def _cell(row, key):
 
 
 class DictTableModel(QAbstractTableModel):
-    def __init__(self, columns, rows=None, pk=None):
+    def __init__(self, columns, rows=None, pk=None, link_keys=None):
         super().__init__()
-        # columns: list of (key, title, width, align)
+        # columns: list of (key, title, width, align[, formatter])
+        # formatter (tùy chọn): callable(value) -> str để đổi cách hiển thị ô.
         self.columns = columns
         self.rows = list(rows or [])
         self.pk = pk
+        self.link_keys = set(link_keys or ())
 
     def rowCount(self, _parent=None):
         return len(self.rows)
@@ -41,15 +44,28 @@ class DictTableModel(QAbstractTableModel):
     def columnCount(self, _parent=None):
         return len(self.columns)
 
+    def _text(self, index):
+        col = self.columns[index.column()]
+        val = _cell(self.rows[index.row()], col[0])
+        fmt = col[4] if len(col) > 4 else None
+        return fmt(val) if fmt else str(val)
+
     def data(self, index, role=Qt.DisplayRole):
         if not index.isValid():
             return None
         col = self.columns[index.column()]
         if role == Qt.DisplayRole:
-            return str(_cell(self.rows[index.row()], col[0]))
+            return self._text(index)
         if role == Qt.TextAlignmentRole:
             align = col[3] if len(col) > 3 else "w"
             return _ALIGN.get(align, _ALIGN["w"])
+        if col[0] in self.link_keys and self._text(index):
+            if role == Qt.ForegroundRole:
+                return QColor(theme.PALETTE["--info"])
+            if role == Qt.FontRole:
+                font = QFont()
+                font.setUnderline(True)
+                return font
         return None
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
@@ -89,11 +105,15 @@ class _RowHoverDelegate(QStyledItemDelegate):
 class DataTable(QTableView):
     """QTableView đã cấu hình sẵn: chọn/hover theo cả hàng, ẩn số dòng."""
 
-    def __init__(self, columns, pk=None, stretch_key=None, on_double=None, parent=None):
+    def __init__(self, columns, pk=None, stretch_key=None, on_double=None,
+                 link_keys=None, on_link=None, parent=None):
         super().__init__(parent)
         self.hover_row = -1
-        self._model = DictTableModel(columns, pk=pk)
+        self._model = DictTableModel(columns, pk=pk, link_keys=link_keys)
         self.setModel(self._model)
+        self._link_cols = {i for i, c in enumerate(columns)
+                           if c[0] in self._model.link_keys}
+        self._on_link = on_link
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setSelectionMode(QAbstractItemView.SingleSelection)
         self.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -118,6 +138,11 @@ class DataTable(QTableView):
 
         if on_double:
             self.doubleClicked.connect(lambda idx: on_double(self._model.id_at(idx.row())))
+        if self._on_link:
+            self.clicked.connect(self._maybe_link)
+
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._context_menu)
 
     def set_rows(self, rows):
         self._model.set_rows(rows)
@@ -133,8 +158,43 @@ class DataTable(QTableView):
             self.hover_row = row
             self.viewport().update()
 
+    def _is_link_cell(self, index):
+        return (index.isValid() and index.column() in self._link_cols
+                and bool(self._model._text(index)))
+
+    def _maybe_link(self, index):
+        if self._is_link_cell(index):
+            row = self._model.row_at(index.row())
+            key = self._model.columns[index.column()][0]
+            self._on_link(row, key)
+
+    # -------------------------------------------------------------- sao chép
+    @staticmethod
+    def _copy(value):
+        QApplication.clipboard().setText(str(value))
+
+    def keyPressEvent(self, e):
+        if e.matches(QKeySequence.Copy):
+            idx = self.currentIndex()
+            if idx.isValid():
+                self._copy(self._model._text(idx))
+            return
+        super().keyPressEvent(e)
+
+    def _context_menu(self, pos):
+        idx = self.indexAt(pos)
+        if not idx.isValid():
+            return
+        menu = QMenu(self)
+        act = menu.addAction("Copy", lambda: self._copy(self._model._text(idx)))
+        act.setShortcut(QKeySequence.Copy)
+        menu.exec(self.viewport().mapToGlobal(pos))
+
     def mouseMoveEvent(self, e):
-        self._set_hover(self.indexAt(e.position().toPoint()).row())
+        idx = self.indexAt(e.position().toPoint())
+        self._set_hover(idx.row())
+        self.viewport().setCursor(
+            Qt.PointingHandCursor if self._is_link_cell(idx) else Qt.ArrowCursor)
         super().mouseMoveEvent(e)
 
     def leaveEvent(self, e):

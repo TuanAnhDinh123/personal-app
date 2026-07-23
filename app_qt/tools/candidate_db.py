@@ -8,14 +8,15 @@ app.core.cv_schema) dùng lại 100% — chỉ dựng lại giao diện bằng Q
 import os
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QVBoxLayout, QWidget,
+    QApplication, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel,
+    QLineEdit, QToolTip, QVBoxLayout, QWidget,
 )
 
 from app.core import cv_repository as repo
 from app.core import cv_schema
-from app_qt import dialogs, widgets
+from app_qt import dialogs, theme, widgets
 from app_qt.base_tool import BaseTool
 from app_qt.components.crud_panel import CrudTablePanel
 from app_qt.components.form_dialog import FormDialog
@@ -34,13 +35,15 @@ _ALL_POS = "— Mọi vị trí —"
 _CAND_COLUMNS = [
     ("candidate_id",    "ID",         50,  "center"),
     ("full_name",       "Họ tên",     180, "w"),
-    ("date_of_birth",   "Ngày sinh",  95,  "center"),
     ("email",           "Email",      210, "w"),
-    ("phone",           "SĐT",        115, "w"),
-    ("position_title",  "Vị trí",     160, "w"),
-    ("department_name", "Bộ phận",    140, "w"),
+    ("phone",           "SĐT",        120, "w"),
+    ("position_title",  "Vị trí",     100, "w"),
     ("fit_score",       "Điểm",       60,  "center"),
+    ("cv_file_path",    "CV",   160, "w",
+     lambda v: os.path.basename(str(v)) if v else ""),
+    ("department_name", "Bộ phận",    140, "w"),
     ("status",          "Trạng thái", 100, "center"),
+    ("date_of_birth",   "Ngày sinh",  95,  "center"),
     ("applied_at",      "Ngày nộp",   105, "center"),
 ]
 
@@ -75,6 +78,61 @@ def _dept_options():
 def _position_options():
     return {p["position_title"] or f"#{p['position_id']}": p["position_id"]
             for p in repo.list_positions()}
+
+
+def _txt(row, key):
+    """Đọc row[key] an toàn (sqlite3.Row/dict) → chuỗi đã strip, None → ''."""
+    try:
+        v = row[key]
+    except (KeyError, IndexError):
+        return ""
+    return "" if v is None else str(v).strip()
+
+
+def _score_color(score):
+    """Màu chip điểm phù hợp: cao→xanh, trung bình→cam, thấp→đỏ."""
+    try:
+        s = float(score)
+    except (TypeError, ValueError):
+        return theme.PALETTE["--text-muted"]
+    if s >= 80:
+        return theme.PALETTE["--success"]
+    if s >= 50:
+        return theme.PALETTE["--warning"]
+    return theme.PALETTE["--danger"]
+
+
+def _chip(parent, text, color):
+    """Nhãn pill nhỏ: nền tông nhạt của `color`, chữ `color`."""
+    lbl = QLabel(text, parent)
+    r, g, b = widgets._hex_to_rgb(color)
+    lbl.setStyleSheet(
+        f"background: rgba({r},{g},{b},0.15); color:{color}; border-radius:10px;"
+        " padding:3px 10px; font-size:12px; font-weight:600;")
+    return lbl
+
+
+def _copy_chip(parent, value):
+    """Chip hiển thị `value` + icon copy; bấm để sao chép vào clipboard."""
+    chip = QFrame(parent)
+    chip.setObjectName("CopyChip")
+    chip.setCursor(Qt.PointingHandCursor)
+    h = QHBoxLayout(chip)
+    h.setContentsMargins(9, 3, 9, 3)
+    h.setSpacing(5)
+    ico = QLabel(chip)
+    ico.setPixmap(widgets.svg_pixmap("copy", theme.PALETTE["--text-muted"], 13))
+    h.addWidget(ico)
+    txt = QLabel(value, chip)
+    txt.setObjectName("CopyChipText")
+    h.addWidget(txt)
+
+    def _do_copy(_e):
+        QApplication.clipboard().setText(value)
+        QToolTip.showText(QCursor.pos(), "Đã sao chép", chip)
+
+    chip.mousePressEvent = _do_copy
+    return chip
 
 
 # ═══════════════════════════ MASTER DATA specs ══════════════════════════
@@ -198,6 +256,186 @@ class JobDescriptionTool(_MasterPageTool):
     spec_key = "jd"
 
 
+# ═════════════════════ MODAL XEM CHI TIẾT ỨNG VIÊN ══════════════════════
+class _CandidateDetailDialog(QDialog):
+    """Modal lớn xem chi tiết toàn bộ ứng viên trong danh sách hiện tại.
+
+    Mỗi ứng viên là một thẻ; phần nổi bật nhất là NHẬN XÉT CỦA AI
+    (điểm phù hợp, nhận xét, ưu điểm, nhược điểm) từ bước quét CV.
+    """
+
+    def __init__(self, parent, rows):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
+        self._drag = None
+
+        shell = QVBoxLayout(self)
+        shell.setContentsMargins(24, 24, 24, 24)
+        card = QFrame(self)
+        card.setObjectName("Dialog")
+        card.setMinimumSize(920, 620)
+        shell.addWidget(card)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(22, 20, 22, 18)
+        lay.setSpacing(12)
+
+        head = QHBoxLayout()
+        title = QLabel(f"Chi tiết ứng viên · {len(rows)} người")
+        title.setObjectName("DialogTitle")
+        head.addWidget(title, 1)
+        close = QLabel("✕")
+        close.setObjectName("DialogClose")
+        close.setFixedSize(24, 24)
+        close.setAlignment(Qt.AlignCenter)
+        close.setCursor(Qt.PointingHandCursor)
+        close.mousePressEvent = lambda _e: self.reject()
+        head.addWidget(close, 0, Qt.AlignTop)
+        lay.addLayout(head)
+
+        body = QWidget()
+        col = QVBoxLayout(body)
+        col.setContentsMargins(0, 0, 8, 0)
+        col.setSpacing(12)
+        if not rows:
+            empty = QLabel("Danh sách hiện tại đang trống.")
+            empty.setObjectName("DialogMsg")
+            col.addWidget(empty)
+        for row in rows:
+            col.addWidget(self._card(body, row))
+        col.addStretch(1)
+        lay.addWidget(widgets.scroll_area(body), 1)
+
+        foot = QHBoxLayout()
+        foot.addStretch(1)
+        foot.addWidget(widgets.button(card, "Đóng", variant="neutral", icon="x",
+                                      command=self.reject))
+        lay.addLayout(foot)
+
+        self.resize(1000, 760)
+
+    # ------------------------------------------------------------- thẻ 1 ứng viên
+    def _card(self, parent, row):
+        box = QFrame(parent)
+        box.setObjectName("DetailCard")
+        v = QVBoxLayout(box)
+        v.setContentsMargins(16, 14, 16, 14)
+        v.setSpacing(8)
+
+        # Hàng tiêu đề: tên + chip điểm/trạng thái
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        cid = _txt(row, "candidate_id")
+        name = QLabel(f"#{cid}  {_txt(row, 'full_name') or '(chưa có tên)'}", box)
+        name.setObjectName("DetailName")
+        head.addWidget(name, 1)
+        score = _txt(row, "fit_score")
+        if score:
+            head.addWidget(_chip(box, f"Điểm {score}", _score_color(score)))
+        status = _txt(row, "status")
+        if status:
+            head.addWidget(_chip(box, status, theme.PALETTE["--info"]))
+        v.addLayout(head)
+
+        # Hàng thông tin phụ (bôi-chọn được để copy tay nếu cần)
+        meta = " · ".join(p for p in (
+            _txt(row, "position_title"), _txt(row, "department_name"),
+            (f"NS: {_txt(row, 'date_of_birth')}" if _txt(row, "date_of_birth") else ""),
+            (f"Nộp: {_txt(row, 'applied_at')}" if _txt(row, "applied_at") else ""),
+        ) if p)
+        if meta:
+            lbl = QLabel(meta, box)
+            lbl.setObjectName("DetailMeta")
+            lbl.setWordWrap(True)
+            lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            v.addWidget(lbl)
+
+        # Email / SĐT: chip bấm-để-sao-chép
+        email, phone = _txt(row, "email"), _txt(row, "phone")
+        if email or phone:
+            chips = QHBoxLayout()
+            chips.setSpacing(8)
+            if email:
+                chips.addWidget(_copy_chip(box, email))
+            if phone:
+                chips.addWidget(_copy_chip(box, phone))
+            chips.addStretch(1)
+            v.addLayout(chips)
+
+        v.addWidget(self._ai_box(box, row))
+
+        note = _txt(row, "note")
+        if note:
+            v.addLayout(self._para(box, "Ghi chú", note))
+        return box
+
+    # ----------------------------------------------------- hộp nhận xét của AI
+    def _ai_box(self, parent, row):
+        box = QFrame(parent)
+        box.setObjectName("AIBox")
+        v = QVBoxLayout(box)
+        v.setContentsMargins(14, 12, 14, 12)
+        v.setSpacing(6)
+
+        header = QHBoxLayout()
+        header.setSpacing(6)
+        ico = QLabel(box)
+        ico.setPixmap(widgets.svg_pixmap("sparkles", theme.PALETTE["--accent"], 16))
+        header.addWidget(ico, 0, Qt.AlignVCenter)
+        h = QLabel("Nhận xét của AI", box)
+        h.setObjectName("AIHeader")
+        header.addWidget(h, 1)
+        v.addLayout(header)
+
+        summary = _txt(row, "fit_summary")
+        strengths = _txt(row, "strengths")
+        weaknesses = _txt(row, "weaknesses")
+
+        if not any((summary, strengths, weaknesses)):
+            empty = QLabel("Chưa có nhận xét từ AI cho ứng viên này.", box)
+            empty.setObjectName("AIEmpty")
+            v.addWidget(empty)
+            return box
+
+        if summary:
+            v.addLayout(self._para(box, "Nhận xét phù hợp", summary))
+        if strengths or weaknesses:
+            two = QHBoxLayout()
+            two.setSpacing(12)
+            two.addLayout(self._para(box, "Ưu điểm", strengths or "—"), 1)
+            two.addLayout(self._para(box, "Nhược điểm", weaknesses or "—"), 1)
+            v.addLayout(two)
+        return box
+
+    @staticmethod
+    def _para(parent, label, value):
+        """Khối nhãn nhỏ + đoạn văn bản (wrap). Trả về QVBoxLayout."""
+        col = QVBoxLayout()
+        col.setSpacing(2)
+        lbl = QLabel(label, parent)
+        lbl.setObjectName("AILabel")
+        col.addWidget(lbl)
+        txt = QLabel(value, parent)
+        txt.setObjectName("AIText")
+        txt.setWordWrap(True)
+        txt.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        col.addWidget(txt)
+        return col
+
+    # kéo di chuyển (frameless)
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._drag = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, e):
+        if self._drag is not None and e.buttons() & Qt.LeftButton:
+            self.move(e.globalPosition().toPoint() - self._drag)
+
+    def mouseReleaseEvent(self, e):
+        self._drag = None
+
+
 # ═══════════════════════════════ TOOL CHÍNH ═════════════════════════════
 class CandidateDbTool(BaseTool):
     name = "Quản lý CV ứng viên"
@@ -221,7 +459,8 @@ class CandidateDbTool(BaseTool):
         self._build_toolbar(lay)
 
         self.table = DataTable(_CAND_COLUMNS, pk="candidate_id",
-                               stretch_key="email", on_double=lambda _id: self._edit())
+                               stretch_key="email", on_double=self._edit,
+                               link_keys={"cv_file_path"}, on_link=self._on_file_link)
         lay.addWidget(self.table, 1)
 
         self.count_lbl = QLabel("")
@@ -264,9 +503,8 @@ class CandidateDbTool(BaseTool):
         bar.setSpacing(6)
         B = widgets.button
         bar.addWidget(B(None, "Thêm mới", variant="success", icon="plus", command=self._add))
-        bar.addWidget(B(None, "Sửa", variant="info", icon="pencil", command=self._edit))
-        bar.addWidget(B(None, "Xóa", variant="danger", icon="trash", command=self._delete))
-        bar.addWidget(B(None, "Mở CV", variant="warning", icon="folder", command=self._open_cv))
+        bar.addWidget(B(None, "Xem chi tiết", variant="info", icon="sparkles",
+                        command=self._show_details))
         bar.addWidget(B(None, "Nhập từ Excel", variant="primary", icon="download",
                         command=self._batch_import))
         bar.addStretch(1)
@@ -289,6 +527,7 @@ class CandidateDbTool(BaseTool):
         status = "" if status == "Tất cả" else status
 
         rows = repo.search_candidates(self.ent_kw.text(), pos_id, status)
+        self._rows = rows
         self.table.set_rows(rows)
         self.count_lbl.setText(
             f"Hiển thị {len(rows)} ứng viên · Tổng trong DB: {repo.count_candidates()}")
@@ -304,6 +543,9 @@ class CandidateDbTool(BaseTool):
         if cid is None:
             dialogs.info(self._root, "Chưa chọn", "Vui lòng chọn một ứng viên trong bảng.")
         return cid
+
+    def _show_details(self):
+        _CandidateDetailDialog(self._root, getattr(self, "_rows", [])).exec()
 
     # ------------------------------------------------------------- form specs
     def _candidate_form_specs(self):
@@ -346,8 +588,9 @@ class CandidateDbTool(BaseTool):
         FormDialog(self._root, "Thêm ứng viên mới",
                    self._candidate_form_specs(), None, on_save=_save).run()
 
-    def _edit(self):
-        cid = self._selected_id()
+    def _edit(self, cid=None):
+        if cid is None:
+            cid = self._selected_id()
         if cid is None:
             return
         current = repo.get_candidate(cid)
@@ -360,7 +603,8 @@ class CandidateDbTool(BaseTool):
             self._reload()
 
         FormDialog(self._root, "Sửa ứng viên",
-                   self._candidate_form_specs(), current, on_save=_save).run()
+                   self._candidate_form_specs(), current,
+                   on_save=_save, on_delete=lambda: self._delete(cid)).run()
 
     def _confirm_duplicate(self, dups) -> bool:
         lines = "\n".join(
@@ -374,22 +618,25 @@ class CandidateDbTool(BaseTool):
             f"{lines}{more}\n\nVẫn lưu ứng viên này?",
             ok_label="Vẫn lưu", cancel_label="Hủy")
 
-    def _delete(self):
-        cid = self._selected_id()
-        if cid is None:
-            return
+    def _delete(self, cid):
+        """Xóa ứng viên; trả về False nếu người dùng hủy xác nhận (giữ form mở)."""
         row = repo.get_candidate(cid)
         name = row["full_name"] if row else f"#{cid}"
-        if dialogs.confirm(self._root, "Xác nhận xóa",
-                           f'Xóa ứng viên "{name}" khỏi DB?', ok_label="Xóa"):
-            repo.delete_candidate(cid)
-            self._reload()
+        if not dialogs.confirm(self._root, "Xác nhận xóa",
+                               f'Xóa ứng viên "{name}" khỏi DB?', ok_label="Xóa"):
+            return False
+        repo.delete_candidate(cid)
+        self._reload()
+        return True
 
     # ------------------------------------------------------------- mở file CV
-    def _open_cv(self):
-        cid = self._selected_id()
-        if cid is None:
-            return
+    def _on_file_link(self, row, _key):
+        """Click vào tên file trong bảng → mở file CV của ứng viên đó."""
+        cid = row["candidate_id"]
+        if cid is not None:
+            self._open_cv(cid)
+
+    def _open_cv(self, cid):
         row = repo.get_candidate(cid)
         path = (row["cv_file_path"] or "").strip() if row else ""
         if path and os.path.isfile(path):
