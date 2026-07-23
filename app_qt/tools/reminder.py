@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core import config, outlook
-from app.tools.reminder import (
+from app.core.reminder_logic import (
     DEFAULTS, _extract_name, _fill_template, _month_ago,
 )
 from app_qt import dialogs, richtext, widgets

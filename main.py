@@ -1,7 +1,6 @@
 """Personal Toolbox — điểm khởi động (giao diện PySide6).
 
 Chạy:  python main.py
-Giao diện cũ (Tkinter) vẫn còn ở:  python main_tk.py
 """
 import sys
 

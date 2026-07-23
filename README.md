@@ -17,8 +17,7 @@ git pull origin main
 
 ```bash
 pip install -r requirements.txt
-python main.py          # giao diện MỚI (PySide6)
-python main_tk.py       # giao diện CŨ (Tkinter) — để đối chiếu
+python main.py
 ```
 
 ```bash
@@ -27,17 +26,17 @@ python main_tk.py       # giao diện CŨ (Tkinter) — để đối chiếu
 
 ## Giao diện (PySide6)
 
-Từ bản này giao diện được dựng lại bằng **PySide6 (Qt)** — phong cách dashboard
-sáng, sidebar tối làm điểm nhấn, style bằng **QSS** (gần giống CSS).
+Giao diện dựng bằng **PySide6 (Qt)** — phong cách dashboard sáng, sidebar tối làm
+điểm nhấn, style bằng **QSS** (gần giống CSS).
 
 - **Đổi giao diện toàn app**: sửa `app_qt/theme.py` (bảng màu) hoặc
-  `app_qt/theme.qss` ("CSS" của app). Icon vector ở `app_qt/assets/`.
-- **Kiến trúc giữ nguyên triết lý cũ**: mỗi tool là 1 file trong `app_qt/tools/`
-  kế thừa `app_qt.base_tool.BaseTool`; `app_qt/registry.py` tự phát hiện.
-- **Logic nghiệp vụ KHÔNG viết lại**: các tool Qt *import lại* logic thuần
-  (openpyxl / Excel COM / Gemini / SQLite / Outlook) từ `app/core` và
-  `app/tools/*` — giao diện chỉ là lớp vỏ. Vì vậy `app/` (kể cả UI Tkinter cũ)
-  vẫn còn để dùng lại code và để chạy `main_tk.py`.
+  `app_qt/theme.qss` ("CSS" của app). Icon line (SVG) ở `app_qt/assets/icons/`.
+- **Mỗi tool = 1 file** trong `app_qt/tools/` kế thừa `app_qt.base_tool.BaseTool`;
+  `app_qt/registry.py` tự phát hiện — thêm 1 file là có 1 tool.
+- **Tách bạch UI ↔ logic**: giao diện ở `app_qt/`, còn **logic nghiệp vụ thuần
+  Python** (openpyxl / Excel COM / Gemini / SQLite / Outlook / OCR) nằm ở
+  `app/core/` — hoàn toàn không phụ thuộc giao diện. Tool Qt chỉ là lớp vỏ gọi
+  vào `app/core`.
 - **Component dùng chung** ở `app_qt/components/`: `table` (bảng), `form_dialog`
   (form nhập liệu), `crud_panel` (CRUD master data), `progress_dialog` &
   `task` (chạy nền QThread), `dialog_base` (khung hộp thoại).
@@ -46,38 +45,32 @@ sáng, sidebar tối làm điểm nhấn, style bằng **QSS** (gần giống CS
 
 ```
 personal-app/
-├── main.py                  # Điểm khởi động (giao diện PySide6)
-├── main_tk.py               # Điểm khởi động giao diện cũ (Tkinter)
+├── main.py                  # Điểm khởi động (PySide6)
 ├── requirements.txt
 ├── icon_app.ico
-├── app_qt/                  # GIAO DIỆN MỚI (PySide6)
-│   ├── theme.py / theme.qss # Bảng màu + "CSS" của app
-│   ├── widgets.py           # Widget dựng sẵn (giữ API .get()/.set())
-│   ├── base_tool.py         # Lớp cha tool (Qt)
+├── app_qt/                  # GIAO DIỆN (PySide6)
+│   ├── theme.py / theme.qss # Bảng màu + "CSS" (QSS)
+│   ├── widgets.py           # Widget dựng sẵn (API .get()/.set()) + icon SVG
+│   ├── base_tool.py         # Lớp cha tool
 │   ├── registry.py          # Tự phát hiện tool
-│   ├── main_window.py       # Cửa sổ chính: sidebar + top bar + nội dung
+│   ├── main_window.py       # Cửa sổ chính (frameless): sidebar + nội dung
 │   ├── dialogs.py           # Hộp thoại tùy biến (info/error/confirm)
 │   ├── settings_page.py     # Trang Cài đặt
-│   ├── assets/              # Icon vector (svg)
+│   ├── icons.py             # Map emoji → tên icon line
+│   ├── richtext.py          # Ô soạn thảo rich text (QTextEdit)
+│   ├── assets/icons/        # Bộ icon line (SVG)
 │   ├── components/          # table · form_dialog · crud_panel · progress_dialog · task · dialog_base
-│   └── tools/               # MỖI FILE = 1 TÁC VỤ (giao diện; logic import từ app/)
-└── app/                     # LOGIC + giao diện Tkinter cũ (dùng lại)
-    ├── core/
-    │   ├── base_tool.py     # Lớp cha của mọi tool (+ hook startup tự chạy)
-    │   ├── config.py        # Lưu/đọc cấu hình tool (JSON dùng chung)
-    │   ├── outlook.py       # Đọc lịch & gửi mail qua Outlook (Windows)
-    │   └── registry.py      # Tự động phát hiện tool
-    ├── ui/
-    │   ├── theme.py         # Màu sắc & font (đổi giao diện ở đây)
-    │   ├── widgets.py       # Widget dựng sẵn (ô chọn file, checkbox...)
-    │   └── main_window.py   # Cửa sổ chính: sidebar + nội dung
-    └── tools/               # MỖI FILE = 1 TÁC VỤ
-        ├── merge_excel.py
-        ├── pdf_tools.py
-        ├── clean_data.py
-        ├── scan_cv.py
-        ├── ai_scan_cv.py       # Quét CV bằng AI (Gemini) → Excel đánh giá
-        └── send_mail.py
+│   └── tools/               # MỖI FILE = 1 TÁC VỤ (giao diện)
+└── app/core/                # LOGIC NGHIỆP VỤ (thuần Python, KHÔNG dính UI)
+    ├── config.py · settings.py          # cấu hình
+    ├── cv_repository.py · cv_schema.py   # SQLite quản lý CV ứng viên
+    ├── outlook.py                        # Outlook COM (đọc lịch + gửi mail)
+    ├── payroll_split.py                  # Tách bảng lương (Excel COM)
+    ├── quarter_bonus.py                  # Thưởng quý (Excel COM)
+    ├── ai_cv_scan.py                     # Quét CV bằng Gemini
+    ├── cv_scan.py                        # Quét CV (regex) + template Excel
+    ├── pdf_text.py                       # PDF → Text (+ OCR Tesseract)
+    └── reminder_logic.py                 # Helper nhắc phản hồi phỏng vấn
 ```
 
 ## Thêm một tác vụ mới

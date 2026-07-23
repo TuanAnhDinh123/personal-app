@@ -1,12 +1,12 @@
 """Tách bảng lương theo Nhà cung cấp — bản PySide6.
 
-Logic điều khiển Excel qua COM (_split_payroll) dùng lại nguyên từ module Tk cũ
-(app.tools.tach_luong) — chỉ dựng lại giao diện bằng Qt.
+Logic điều khiển Excel qua COM (_split_payroll) tách riêng ở app.core.payroll_split
+— file này chỉ dựng giao diện bằng Qt.
 """
 import os
 
 from app.core import config
-from app.tools.tach_luong import _split_payroll, month_sheets_from_name
+from app.core.payroll_split import _split_payroll, month_sheets_from_name
 from app_qt import dialogs, widgets
 from app_qt.base_tool import BaseTool
 

@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QScrollArea, QSplitter, QTextEdit, QVBoxLayout, QWidget,
 )
 
-from app.tools.pdf_to_text import (
+from app.core.pdf_text import (
     _OCR_DPI_OPTIONS, extract_pages, tesseract_available,
 )
 from app_qt import dialogs, theme, widgets

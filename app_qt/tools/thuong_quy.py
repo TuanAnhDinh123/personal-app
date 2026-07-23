@@ -1,12 +1,12 @@
 """Tổng hợp lỗi chấm công theo quý (Thưởng Quý) — bản PySide6.
 
-Logic điều khiển Excel qua COM (_aggregate_quarter) dùng lại nguyên từ module Tk
-cũ (app.tools.thuong_quy) — chỉ dựng lại giao diện bằng Qt.
+Logic điều khiển Excel qua COM (_aggregate_quarter) tách riêng ở
+app.core.quarter_bonus — file này chỉ dựng giao diện bằng Qt.
 """
 import os
 
 from app.core import config
-from app.tools.thuong_quy import QUARTER_MONTHS, _aggregate_quarter
+from app.core.quarter_bonus import QUARTER_MONTHS, _aggregate_quarter
 from app_qt import dialogs, widgets
 from app_qt.base_tool import BaseTool
 

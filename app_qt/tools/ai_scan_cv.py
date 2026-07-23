@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from app.core import config, settings
-from app.tools.ai_scan_cv import _call_gemini, _write_excel
+from app.core.ai_cv_scan import _call_gemini, _write_excel
 from app_qt import dialogs, theme, widgets
 from app_qt.base_tool import BaseTool
 from app_qt.components.progress_dialog import ProgressDialog

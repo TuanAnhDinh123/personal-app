@@ -1,7 +1,7 @@
 """Quét CV: đổi tên hàng loạt + trích xuất Email/SĐT ra Excel — bản PySide6.
 
 Toàn bộ logic (đọc PDF/DOCX, regex email/SĐT, tách tên/ID, ghi template Excel)
-dùng lại nguyên từ module Tk cũ (app.tools.scan_cv). Chỉ dựng lại giao diện Qt:
+tách riêng ở app.core.cv_scan. Chỉ dựng lại giao diện Qt:
 2 tab (Đổi tên / Trích xuất), bảng xem trước sửa được, trích xuất chạy luồng nền.
 """
 import datetime
@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core import config
-from app.tools.scan_cv import (
+from app.core.cv_scan import (
     DEFAULTS, SECTION, _CV_EXTENSIONS, _batch_from_folder, _build_filename,
     _extract_cv_text, _extract_name, _find_email, _find_phone,
     _open_existing_workbook, _open_template_workbook, _parse_noise,

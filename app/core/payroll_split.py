@@ -19,12 +19,8 @@ Khác biệt nhỏ so với macro (đều là cải tiến an toàn):
 """
 import os
 import re
-import tkinter as tk
-from tkinter import messagebox
 
 from app.core import config
-from app.core.base_tool import BaseTool
-from app.ui import widgets
 
 _SECTION = "tach_luong"
 
@@ -49,142 +45,6 @@ _DEFAULTS = {
     "source": "",
     "output_dir": "",
 }
-
-
-class TachBangLuongTool(BaseTool):
-    name = "Tách bảng lương"
-    description = "Tách 1 file lương tổng thành nhiều file riêng cho từng Nhà cung cấp."
-    icon = "💰"
-    category = "Tệp & Tài liệu"
-    order = 15
-    action_label = "Tách file"
-
-    def build_body(self, parent):
-        cfg = config.load(_SECTION, _DEFAULTS)
-
-        widgets.section_label(parent, "Nguồn & Đích")
-        self._source_var = widgets.file_row(
-            parent, "File bảng lương tổng (.xlsx/)", mode="file")
-        self._source_var.set(cfg.get("source", ""))
-        self._output_var = widgets.file_row(
-            parent, "Thư mục lưu file kết quả (để trống = cùng thư mục file nguồn)",
-            mode="folder")
-        self._output_var.set(cfg.get("output_dir", ""))
-
-        widgets.section_label(parent, "Cấu hình")
-        self._suppliers_box = widgets.text_area(
-            parent, "Nhà cung cấp — mỗi dòng 1 NCC (mỗi NCC = 1 file kết quả)",
-            value=cfg.get("suppliers", ""), height=4)
-        self._headers_box = widgets.text_area(
-            parent, "Tên tiêu đề cột chứa NCC — mỗi dòng 1 tên (khớp cái nào trước dùng cái đó)",
-            value=cfg.get("vendor_headers", ""), height=6)
-        self._stt_box = widgets.text_area(
-            parent, "Tên tiêu đề cột STT — mỗi dòng 1 tên (tìm thấy sẽ đánh lại số từ 1; để trống = bỏ qua)",
-            value=cfg.get("stt_headers", ""), height=3)
-        self._del_full_box = widgets.text_area(
-            parent, "Sheet xóa hoàn toàn — mỗi dòng 1 tên sheet",
-            value=cfg.get("delete_full", ""), height=3)
-        self._del_rows_box = widgets.text_area(
-            parent, "Sheet xóa hàng (chỉ giữ hàng của NCC) — mỗi dòng 1 tên sheet",
-            value=cfg.get("delete_rows", ""), height=8)
-        self._month_box = widgets.text_area(
-            parent,
-            "Sheet theo tháng (tự nhận theo tên file nguồn)",
-            value="", height=2)
-
-        # Tự điền 2 sheet theo tháng từ TÊN FILE nguồn, và cập nhật lại mỗi khi
-        # đổi file nguồn (vd chọn file tháng khác thì 2 sheet này đổi theo).
-        def _refresh_month(*_):
-            ms, ns = month_sheets_from_name(os.path.basename(self._source_var.get()))
-            if ms:
-                self._month_box.delete("1.0", "end")
-                self._month_box.insert("1.0", f"{ms}\n{ns}")
-        self._source_var.trace_add("write", _refresh_month)
-        _refresh_month()  # điền lần đầu theo file đang có sẵn
-
-        widgets.hint(
-            parent,
-            "💡 Với mỗi NCC: mở lại file lương gốc → lưu thành "
-            "\"<tên gốc>-<NCC>.xlsx\" → xóa các sheet ở ô trên → ở mỗi sheet chi tiết, "
-            "tìm cột NCC rồi xóa mọi hàng KHÔNG thuộc NCC đó (hàng trống được giữ).\n"
-            "📅 2 sheet đổi theo tháng (MM-YYYY và Nghi T…) tự nhận từ tên file nguồn; "
-            "chọn file tháng khác thì tự đổi theo (vẫn sửa tay được nếu cần).\n"
-            "🔢 Sau khi xóa hàng, nếu tìm thấy cột STT thì tự động đánh lại số thứ tự từ 1.\n"
-            "🧹 Tự động tắt tính năng Filter (AutoFilter) ở tất cả sheet của file kết quả.\n"
-            "🔗 Tool tự động break hết link và mở file gốc ở chế độ chỉ-đọc, nên không "
-            "cần tắt file lương gốc trước khi chạy.\n"
-            "📌 Cấu hình sẽ được lưu lại mỗi lần bấm Tách file."
-        )
-
-    # ------------------------------------------------------------------
-    def run(self):
-        source = self._source_var.get().strip()
-        output_dir = self._output_var.get().strip()
-        suppliers = _lines(self._suppliers_box)
-        vendor_headers = _lines(self._headers_box)
-        stt_headers = _lines(self._stt_box)
-        delete_full = _lines(self._del_full_box)
-        # Sheet theo tháng (ô riêng, tự nhận theo tên file) cũng là sheet "xóa
-        # hàng" — gộp vào cuối danh sách để xử lý chung.
-        delete_rows = _lines(self._del_rows_box) + _lines(self._month_box)
-
-        # Lưu lại cấu hình hiện tại (kể cả khi báo lỗi bên dưới, để đỡ gõ lại)
-        config.save(_SECTION, {
-            "source": source,
-            "output_dir": output_dir,
-            "suppliers": _text(self._suppliers_box),
-            "vendor_headers": _text(self._headers_box),
-            "stt_headers": _text(self._stt_box),
-            "delete_full": _text(self._del_full_box),
-            "delete_rows": _text(self._del_rows_box),
-        })
-
-        if not source or not os.path.isfile(source):
-            messagebox.showerror("Lỗi", "Vui lòng chọn file bảng lương tổng hợp lệ.")
-            return
-        if not suppliers:
-            messagebox.showerror("Lỗi", "Chưa có Nhà cung cấp nào (danh sách trống).")
-            return
-        if not vendor_headers:
-            messagebox.showerror("Lỗi", "Chưa khai báo tên tiêu đề cột chứa NCC.")
-            return
-
-        try:
-            import win32com.client  # noqa: F401
-        except ImportError:
-            messagebox.showerror(
-                "Thiếu thư viện",
-                "Cần pywin32 để điều khiển Excel:\n  pip install pywin32")
-            return
-
-        out_dir = output_dir or os.path.dirname(source)
-        if not os.path.isdir(out_dir):
-            messagebox.showerror("Lỗi", f"Thư mục lưu không tồn tại:\n{out_dir}")
-            return
-
-        try:
-            created, warnings = _split_payroll(
-                source_path=source,
-                output_dir=out_dir,
-                suppliers=suppliers,
-                vendor_headers=vendor_headers,
-                stt_headers=stt_headers,
-                delete_full=delete_full,
-                delete_rows=delete_rows,
-            )
-        except Exception as exc:
-            messagebox.showerror("Lỗi", f"Có lỗi xảy ra khi tách file:\n{exc}")
-            return
-
-        lines = [f"✅ Đã tạo {len(created)} file:"]
-        lines += [f"   • {os.path.basename(p)}" for p in created]
-        if warnings:
-            lines.append("")
-            lines.append("⚠ Cảnh báo:")
-            lines += [f"   • {w}" for w in warnings[:12]]
-            if len(warnings) > 12:
-                lines.append(f"   • (+{len(warnings) - 12} cảnh báo nữa)")
-        messagebox.showinfo("Kết quả tách bảng lương", "\n".join(lines))
 
 
 # ---------------------------------------------------------------------------
