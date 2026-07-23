@@ -1,0 +1,370 @@
+/* ============================================================
+   theme.qss — "CSS" của Personal Toolbox (PySide6 / Qt Style Sheet)
+   Cú pháp gần giống CSS. {{--token}} sẽ được theme.py thay bằng màu thật.
+   Đổi giao diện toàn app: sửa file này (hoặc palette trong theme.py).
+   ============================================================ */
+
+/* ----- Nền chung -----
+   KHÔNG đặt background cho QWidget chung: nếu đặt, mọi container con trong card
+   sẽ tự vẽ nền xám đè lên nền trắng của card. Thay vào đó chỉ tô nền ở các khối
+   cấu trúc bên dưới; container con để trong suốt → ăn theo nền cha (card trắng). */
+QWidget {
+    color: {{--text}};
+    font-family: "Segoe UI", "Segoe UI Variable", Arial, sans-serif;
+    font-size: 13px;
+}
+
+/* Khung ngoài bo góc + viền màu (frameless, nền cửa sổ trong suốt) */
+#AppShell {
+    background: {{--content-bg}};
+    border: 1px solid #9aa4bb;   /* xám vừa, đủ nổi trên desktop, không chói */
+    border-radius: 12px;
+}
+#Content {
+    background: {{--content-bg}};
+    border-bottom-right-radius: 12px;
+}
+
+/* ============================================================
+   SIDEBAR (nền tối — bộ chữ sáng riêng)
+   ============================================================ */
+#Sidebar, #Sidebar QWidget {
+    background: {{--sidebar-bg}};
+}
+#Sidebar {
+    border-right: 1px solid {{--sidebar-border}};
+    border-top-left-radius: 12px;
+    border-bottom-left-radius: 12px;
+}
+
+#Brand { border-radius: 12px; margin: 6px 12px; }
+#Brand:hover { background: {{--sidebar-hover}}; }   /* xám rõ khi hover */
+/* Nhãn trong brand phải trong suốt để hover/nền hiện qua (luật này phải THẮNG
+   '#Sidebar QWidget' — cùng độ ưu tiên nên đặt SAU để được ưu tiên). */
+#Brand QLabel { background: transparent; }
+#BrandName   { font-size: 15px; font-weight: 700; color: #ffffff; }
+#BrandSub    { font-size: 10px; color: {{--sidebar-muted}}; }
+
+/* Dải kéo + nút cửa sổ (nằm trên vùng content — nền SÁNG, không còn dải tối) */
+#TitleBar { background: {{--content-bg}}; border-top-right-radius: 12px; }
+#WinBtn, #WinClose { background: transparent; border: none; border-radius: 8px; margin: 3px 2px; }
+#WinBtn:hover  { background: #e6eaf2; }
+#WinClose:hover { background: #fbe0e6; }
+
+#NavSectionTitle {
+    color: {{--sidebar-title}};
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 16px 22px 6px 22px;
+    background: transparent;
+}
+
+/* Mỗi mục điều hướng là một QPushButton checkable */
+#NavItem {
+    text-align: left;
+    padding: 10px 14px;
+    margin: 2px 12px;
+    border: none;
+    border-radius: 10px;
+    color: {{--sidebar-text}};
+    font-size: 13px;
+    font-weight: 500;
+    background: transparent;
+}
+#NavItem:hover {
+    background: {{--sidebar-hover}};
+    color: #ffffff;
+}
+#NavItem:checked {
+    background: {{--accent}};
+    color: #ffffff;
+    font-weight: 600;
+}
+
+#SidebarVersion { color: {{--sidebar-title}}; font-size: 10px; padding: 12px; }
+#SidebarDivider { background: {{--sidebar-border}}; max-height: 1px; min-height: 1px; }
+
+/* ============================================================
+   TOP BAR (thanh trên vùng nội dung — nền trắng, viền dưới)
+   ============================================================ */
+#TopBar {
+    background: #ffffff;
+    border-bottom: 1px solid {{--border}};
+}
+#TopBarTitle { font-size: 15px; font-weight: 600; color: {{--text}}; background: transparent; }
+#TopBarDate  { font-size: 13px; color: {{--text-muted}}; background: transparent; }
+#TopBarUser  { font-size: 13px; color: {{--text-muted}}; background: transparent; }
+#Avatar {
+    background: {{--accent-soft}};
+    color: {{--accent}};
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+/* ============================================================
+   HEADER / TIÊU ĐỀ TRANG
+   ============================================================ */
+#HomeEyebrow  { font-size: 11px; font-weight: 700; color: {{--accent}}; letter-spacing: 1.5px; }
+#PageTitle    { font-size: 26px; font-weight: 800; color: {{--text}}; }
+#PageSubtitle { font-size: 13px; color: {{--text-muted}}; }
+#SectionLabel { font-size: 13px; font-weight: 600; color: {{--text}}; }
+#FieldLabel   { font-size: 12px; color: {{--text-muted}}; }
+#Hint         { font-size: 12px; color: {{--text-muted}}; }
+
+/* ============================================================
+   THẺ (CARD)
+   ============================================================ */
+#Card {
+    background: {{--card-bg}};
+    border: 1px solid {{--border}};
+    border-radius: 16px;
+}
+
+/* Thẻ công cụ ở Trang chủ (bấm được) */
+#ToolCard {
+    background: {{--card-bg}};
+    border: 1px solid {{--border}};
+    border-radius: 16px;
+}
+#ToolCard:hover {
+    background: {{--card-bg-hover}};
+    border: 1px solid {{--accent}};
+}
+#ToolCardName { font-size: 15px; font-weight: 600; color: {{--text}}; background: transparent; }
+#ToolCardDesc { font-size: 12px; color: {{--text-muted}}; background: transparent; }
+
+/* ============================================================
+   Ô NHẬP LIỆU
+   ============================================================ */
+QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox {
+    background: {{--input-bg}};
+    border: 1px solid {{--border-strong}};
+    border-radius: 10px;
+    padding: 9px 12px;
+    color: {{--text}};
+    selection-background-color: {{--accent}};
+    selection-color: white;
+}
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus,
+QComboBox:focus, QSpinBox:focus {
+    border: 1px solid {{--accent}};
+}
+QLineEdit:disabled, QComboBox:disabled {
+    color: {{--text-faint}};
+    background: {{--card-bg}};
+}
+QLineEdit::placeholder { color: {{--text-faint}}; }
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    border: none;
+    width: 30px;
+}
+QComboBox::down-arrow {
+    image: url("{{CHEVRON_ICON}}");
+    width: 14px;
+    height: 14px;
+}
+QComboBox QAbstractItemView {
+    background: {{--card-bg}};
+    border: 1px solid {{--border-strong}};
+    border-radius: 10px;
+    padding: 4px;
+    outline: none;
+    selection-background-color: {{--accent-soft}};
+    selection-color: {{--text}};
+}
+
+/* ============================================================
+   CHECKBOX / TOGGLE
+   ============================================================ */
+QCheckBox { spacing: 8px; color: {{--text}}; background: transparent; }
+QCheckBox::indicator {
+    width: 18px; height: 18px;
+    border-radius: 6px;
+    border: 1px solid {{--border-strong}};
+    background: {{--input-bg}};
+}
+QCheckBox::indicator:checked {
+    background: {{--accent}};
+    border: 1px solid {{--accent}};
+    image: url("{{CHECK_ICON}}");
+}
+QCheckBox::indicator:hover { border: 1px solid {{--accent}}; }
+
+/* ============================================================
+   NÚT BẤM — biến thể qua property "variant"
+   Dùng:  btn.setProperty("variant", "primary")
+   ============================================================ */
+QPushButton {
+    border: none;
+    border-radius: 10px;
+    padding: 9px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    color: white;
+    background: {{--accent}};
+}
+QPushButton:hover  { background: {{--accent-hover}}; }
+QPushButton:pressed { background: {{--accent-press}}; }
+QPushButton:disabled { background: {{--neutral}}; color: {{--text-faint}}; }
+
+QPushButton[variant="primary"] { background: {{--accent}};  color: white; }
+QPushButton[variant="primary"]:hover { background: {{--accent-hover}}; }
+
+QPushButton[variant="success"] { background: {{--success}}; color: white; }
+QPushButton[variant="success"]:hover { background: {{--success-hover}}; }
+
+QPushButton[variant="danger"]  { background: {{--danger}};  color: white; }
+QPushButton[variant="danger"]:hover  { background: {{--danger-hover}}; }
+
+QPushButton[variant="warning"] { background: {{--warning}}; color: white; }
+QPushButton[variant="warning"]:hover { background: {{--warning-hover}}; }
+
+QPushButton[variant="info"]    { background: {{--info}};    color: white; }
+QPushButton[variant="info"]:hover { background: {{--info-hover}}; }
+
+QPushButton[variant="neutral"] {
+    background: {{--neutral}};
+    color: {{--text}};
+    border: 1px solid {{--border-strong}};
+}
+QPushButton[variant="neutral"]:hover { background: {{--neutral-hover}}; }
+
+/* ============================================================
+   THANH CUỘN
+   ============================================================ */
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 2px;
+}
+QScrollBar::handle:vertical {
+    background: {{--border-strong}};
+    border-radius: 5px;
+    min-height: 30px;
+}
+QScrollBar::handle:vertical:hover { background: {{--text-faint}}; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 2px;
+}
+QScrollBar::handle:horizontal {
+    background: {{--border-strong}};
+    border-radius: 5px;
+    min-width: 30px;
+}
+QScrollBar::handle:horizontal:hover { background: {{--text-faint}}; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
+
+QScrollArea { border: none; background: transparent; }
+
+/* ============================================================
+   BẢNG (dùng cho các tool có bảng — chuẩn bị sẵn)
+   ============================================================ */
+QTableView {
+    background: {{--card-bg}};
+    alternate-background-color: {{--input-bg}};
+    gridline-color: {{--border}};
+    border: 1px solid {{--border}};
+    border-radius: 12px;
+    selection-background-color: {{--accent-soft}};
+    selection-color: {{--text}};
+    outline: none;
+}
+/* Cần rule tường minh: khi có stylesheet, chỉ selection-background-color không đủ
+   → ô trống không được tô, highlight bị ngắt quãng. */
+QTableView::item {
+    border: none;
+    padding: 4px 8px;
+}
+QTableView::item:selected {
+    background: {{--accent-soft}};
+    color: {{--text}};
+}
+QHeaderView::section {
+    background: {{--input-bg}};
+    color: {{--text-muted}};
+    padding: 8px;
+    border: none;
+    border-bottom: 1px solid {{--border}};
+    font-weight: 600;
+}
+
+/* ============================================================
+   TAB
+   ============================================================ */
+QTabWidget::pane {
+    border: 1px solid {{--border}};
+    border-radius: 12px;
+    top: -1px;
+    background: {{--card-bg}};
+}
+QTabBar::tab {
+    background: transparent;
+    color: {{--text-muted}};
+    padding: 9px 18px;
+    margin-right: 4px;
+    border: none;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    font-weight: 600;
+}
+QTabBar::tab:selected {
+    background: {{--card-bg}};
+    color: {{--accent}};
+    border: 1px solid {{--border}};
+    border-bottom: 2px solid {{--accent}};
+}
+QTabBar::tab:hover:!selected { color: {{--text}}; }
+
+/* ============================================================
+   THANH TIẾN TRÌNH
+   ============================================================ */
+QProgressBar {
+    background: {{--input-bg}};
+    border: 1px solid {{--border}};
+    border-radius: 5px;
+}
+QProgressBar::chunk {
+    background: {{--accent}};
+    border-radius: 5px;
+}
+
+/* ============================================================
+   HỘP THOẠI TÙY BIẾN (AppDialog)
+   ============================================================ */
+#Dialog {
+    background: {{--card-bg}};
+    border: 1px solid {{--border}};
+    border-radius: 16px;
+}
+#DialogTitle { font-size: 16px; font-weight: 700; color: {{--text}}; background: transparent; }
+#DialogMsg   { font-size: 13px; color: {{--text-muted}}; background: transparent; line-height: 150%; }
+#DialogClose {
+    color: {{--text-faint}};
+    font-size: 14px;
+    border-radius: 6px;
+    background: transparent;
+}
+#DialogClose:hover { background: {{--input-bg}}; color: {{--text}}; }
+
+/* ============================================================
+   HỘP THOẠI HỆ THỐNG (dự phòng)
+   ============================================================ */
+QMessageBox { background: {{--card-bg}}; }
+QToolTip {
+    background: {{--card-bg}};
+    color: {{--text}};
+    border: 1px solid {{--border-strong}};
+    border-radius: 6px;
+    padding: 6px 8px;
+}

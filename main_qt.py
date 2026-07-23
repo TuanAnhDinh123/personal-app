@@ -1,7 +1,7 @@
-"""Personal Toolbox — điểm khởi động (giao diện PySide6).
+"""Personal Toolbox — điểm khởi động bản giao diện PySide6 (POC).
 
-Chạy:  python main.py
-Giao diện cũ (Tkinter) vẫn còn ở:  python main_tk.py
+Chạy:  python main_qt.py
+(bản Tkinter cũ vẫn chạy song song bằng:  python main.py)
 """
 import sys
 
@@ -13,7 +13,7 @@ from app_qt.main_window import MainWindow
 
 def main():
     app = QApplication(sys.argv)
-    app.setStyleSheet(theme.build_stylesheet())   # nạp "CSS" (theme.qss) của app
+    app.setStyleSheet(theme.build_stylesheet())   # nạp "CSS" của app
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

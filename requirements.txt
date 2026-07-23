@@ -1,4 +1,8 @@
-# Bắt buộc để chạy giao diện
+# Giao diện CHÍNH (PySide6) — chạy bằng: python main.py
+PySide6>=6.6         # Qt hiện đại (light + sidebar tối), style bằng app_qt/theme.qss
+
+# Giao diện CŨ (Tkinter) — giữ để đối chiếu (python main_tk.py) và vì các module
+# logic dùng lại (app.tools.*) import chúng lúc nạp.
 ttkbootstrap>=1.10
 pillow>=10.0          # render icon mượt (khử răng cưa) + emoji màu
 
