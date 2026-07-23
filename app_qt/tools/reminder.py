@@ -43,9 +43,7 @@ class ReminderTool(BaseTool):
         self._interviews = []
         cfg = config.load(SECTION, DEFAULTS)
 
-        card = QFrame(parent)
-        card.setObjectName("Card")
-        widgets.add_shadow(card)
+        card = widgets.Card(parent)
         self._page = card
         lay = QVBoxLayout(card)
         lay.setContentsMargins(28, 24, 28, 24)

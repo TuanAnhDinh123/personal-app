@@ -9,8 +9,8 @@ Khác biệt với bản Tk: mỗi hàm nhận `parent` là QWidget CÓ SẴN la
 """
 import os
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
+from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFrame, QGraphicsDropShadowEffect,
@@ -54,15 +54,79 @@ def svg_icon(name, color, px=18):
     return QIcon(svg_pixmap(name, color, px))
 
 
-def add_shadow(widget, blur=28, dy=6, alpha=38):
-    """Đổ bóng mềm cho thẻ (QSS không hỗ trợ box-shadow → dùng hiệu ứng Qt)."""
+def add_shadow(widget, blur=48, dy=12, alpha=70):
+    """Đổ bóng mềm bằng QGraphicsDropShadowEffect (dùng cho HỘP THOẠI nổi trên
+    cửa sổ riêng — ở đó hiệu ứng render ổn). KHÔNG dùng cho thẻ trong trang: thẻ
+    dùng lớp Card (tự vẽ bóng) vì hiệu ứng này ra 'vệt xám' cứng trên Windows
+    HiDPI + cửa sổ frameless nền trong suốt."""
     eff = QGraphicsDropShadowEffect(widget)
     eff.setBlurRadius(blur)
     eff.setXOffset(0)
     eff.setYOffset(dy)
-    eff.setColor(QColor(31, 41, 55, alpha))   # xám xanh, độ mờ nhẹ
+    eff.setColor(QColor(31, 41, 55, alpha))
     widget.setGraphicsEffect(eff)
     return widget
+
+
+# Vùng đệm quanh thẻ để chứa bóng (px). Thẻ NHÌN THẤY thụt vào chừng này so với
+# mép widget → mọi thứ căn theo mép thẻ phải cộng thêm CARD_PAD.
+CARD_PAD = 20
+
+
+class Card(QFrame):
+    """Thẻ trắng bo góc + bóng đổ mềm, TỰ VẼ bằng QPainter (không QSS #Card).
+
+    Vì sao không dùng QGraphicsDropShadowEffect: trên Windows (cửa sổ frameless
+    nền trong suốt + màn hình HiDPI) hiệu ứng đó hay ra một 'vệt xám' cứng,
+    không đều — chỗ mềm chỗ cứng. Tự vẽ thì hiện GIỐNG NHAU ở mọi máy và không
+    bao giờ bị cắt. Đổi lại: widget chừa `pad` px mỗi phía để chứa bóng, nên
+    vùng nội dung (layout con) tự động nằm thụt vào `pad` — mọi thứ khác muốn
+    thẳng hàng mép thẻ phải cộng thêm `pad`.
+    """
+
+    def __init__(self, parent=None, *, pad=CARD_PAD, radius=16, dy=6,
+                 alpha=7, tint=(15, 23, 42), fill=None, border=None):
+        super().__init__(parent)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setAttribute(Qt.WA_StyledBackground, False)
+        self._pad = pad
+        self._radius = radius
+        self._dy = dy
+        self._alpha = alpha               # độ mờ MỖI lớp bóng (cộng dồn khi chồng)
+        self._spread = max(1, pad - dy)   # số lớp; +dy để lớp dưới cùng không lố pad
+        self._tint = tint
+        self._fill = QColor(fill or theme.CARD_BG)
+        self._border = QColor(border or theme.BORDER)
+        super().setContentsMargins(pad, pad, pad, pad)
+
+    def _card_rect(self):
+        r = self.rect()
+        return QRectF(r.adjusted(self._pad, self._pad, -self._pad, -self._pad))
+
+    def _colors(self):
+        """(fill, border) — tách riêng để lớp con đổi màu theo trạng thái."""
+        return self._fill, self._border
+
+    def paintEvent(self, _e):
+        r = self._card_rect()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(Qt.NoPen)
+        # Bóng: nhiều rounded-rect nở dần ra ngoài, mỗi lớp mờ nhẹ → chồng lên
+        # nhau thành gradient mềm (đậm sát thẻ, tan dần ra xa). Vẽ ngoài → trong.
+        tint = QColor(*self._tint)
+        for i in range(self._spread, 0, -1):
+            tint.setAlpha(self._alpha)
+            p.setBrush(tint)
+            rad = self._radius + i
+            p.drawRoundedRect(r.adjusted(-i, -i + self._dy, i, i + self._dy), rad, rad)
+        # Nền thẻ + viền 1px
+        fill, border = self._colors()
+        p.setBrush(fill)
+        pen = QPen(border)
+        pen.setWidthF(1.0)
+        p.setPen(pen)
+        p.drawRoundedRect(r, self._radius, self._radius)
 
 
 # ---------------------------------------------------------------- tiện ích

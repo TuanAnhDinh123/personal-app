@@ -43,13 +43,14 @@ class RichText(QWidget):
     def _tb(self, label, cmd, bold=False, italic=False, underline=False):
         b = QPushButton(label)
         b.setProperty("variant", "neutral")
+        b.setStyleSheet("padding: 4px 10px;")   # padding mặc định 9px cắt mất chữ ở chiều cao 30
         b.clicked.connect(lambda: cmd())
         f = b.font()
         f.setBold(bold)
         f.setItalic(italic)
         f.setUnderline(underline)
         b.setFont(f)
-        b.setFixedHeight(30)
+        b.setFixedHeight(32)
         return b
 
     # ---------------------------------------------------------- định dạng

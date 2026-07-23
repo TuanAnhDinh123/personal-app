@@ -149,9 +149,7 @@ def _master_specs():
 
 def _card(parent):
     """Thẻ trắng chiếm hết chỗ, có shadow — khung chung cho trang full-height."""
-    card = QFrame(parent)
-    card.setObjectName("Card")
-    widgets.add_shadow(card)
+    card = widgets.Card(parent)
     lay = QVBoxLayout(card)
     lay.setContentsMargins(22, 20, 22, 18)
     lay.setSpacing(10)

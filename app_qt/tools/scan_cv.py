@@ -33,9 +33,7 @@ except ImportError:
 
 
 def _card():
-    card = QFrame()
-    card.setObjectName("Card")
-    widgets.add_shadow(card)
+    card = widgets.Card()
     lay = QVBoxLayout(card)
     lay.setContentsMargins(24, 20, 24, 20)
     lay.setSpacing(6)
@@ -74,10 +72,16 @@ class ScanCvTool(BaseTool):
         outer.addWidget(shared)
 
         # ---- Tabs ----
+        # Thẻ "shared" tự chừa CARD_PAD cho bóng → tab (không phải thẻ) bọc trong
+        # container thêm lề ngang CARD_PAD để thẳng hàng mép thẻ nhìn thấy.
         tabs = QTabWidget()
         tabs.addTab(self._build_rename_tab(cfg), "Đổi tên file")
         tabs.addTab(self._build_extract_tab(), "Trích xuất Excel")
-        outer.addWidget(tabs)
+        tabs_holder = QWidget()
+        thl = QVBoxLayout(tabs_holder)
+        thl.setContentsMargins(widgets.CARD_PAD, 0, widgets.CARD_PAD, 0)
+        thl.addWidget(tabs)
+        outer.addWidget(tabs_holder)
         outer.addStretch(1)
         return page
 

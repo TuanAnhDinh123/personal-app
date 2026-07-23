@@ -6,9 +6,7 @@ from app_qt import dialogs, theme, widgets
 
 
 def _group_card(parent_layout):
-    card = QFrame()
-    card.setObjectName("Card")
-    widgets.add_shadow(card)
+    card = widgets.Card()
     inner = QWidget(card)
     lay = QVBoxLayout(card)
     lay.setContentsMargins(28, 24, 28, 24)
@@ -49,8 +47,10 @@ def build():
         "(gemini-3.5-flash, gemini-2.5-flash).")
 
     # ---- Nút lưu ----
+    # Thẻ tự chừa CARD_PAD cho bóng → nút (không phải thẻ) thêm lề trái CARD_PAD
+    # để thẳng hàng mép thẻ nhìn thấy.
     actions = QHBoxLayout()
-    actions.setContentsMargins(0, 4, 0, 0)
+    actions.setContentsMargins(widgets.CARD_PAD, 4, 0, 0)
 
     def save():
         values = {

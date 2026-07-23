@@ -29,8 +29,8 @@ class AiScanCvTool(BaseTool):
     name = "Quét CV bằng AI"
     description = "Dùng Gemini đọc PDF, đánh giá độ phù hợp với JD và xuất Excel."
     icon = "🤖"
-    category = "Tệp & Tài liệu"
-    order = 11
+    category = "Tuyển dụng"
+    order = 20
     action_label = "Quét CV bằng AI"
     action_style = "success"
     action_icon = "sparkles"

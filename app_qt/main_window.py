@@ -3,7 +3,7 @@ import os
 import sys
 
 from PySide6.QtCore import QEvent, QObject, Qt, QSize, QTimer, Signal
-from PySide6.QtGui import QCursor, QIcon, QPainterPath, QRegion
+from PySide6.QtGui import QColor, QCursor, QIcon
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
@@ -18,14 +18,19 @@ def _resource(name):
     return os.path.join(base, name)
 
 
-class ClickableCard(QFrame):
-    """Thẻ công cụ ở Trang chủ — bấm để mở tool."""
+class ClickableCard(widgets.Card):
+    """Thẻ công cụ ở Trang chủ — bấm để mở tool. Tự vẽ bóng + đổi màu khi hover
+    (dùng lại widgets.Card thay QSS #ToolCard để bóng đồng nhất, không bị 'vệt
+    xám' như QGraphicsDropShadowEffect trên Windows HiDPI)."""
     clicked = Signal()
+    PAD = 12   # bóng nhỏ hơn thẻ trang; cũng là khoảng cách giữa các thẻ trong lưới
 
     def __init__(self, tool, parent=None):
-        super().__init__(parent)
-        self.setObjectName("ToolCard")
+        super().__init__(parent, pad=self.PAD, dy=5, alpha=6)
         self.setCursor(Qt.PointingHandCursor)
+        self._hover = False
+        self._hover_fill = QColor(theme.PALETTE["--card-bg-hover"])
+        self._hover_border = QColor(theme.ACCENT)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(20, 20, 20, 20)
         lay.setSpacing(10)
@@ -43,7 +48,21 @@ class ClickableCard(QFrame):
         desc.setWordWrap(True)
         lay.addWidget(desc)
         lay.addStretch(1)
-        widgets.add_shadow(self, blur=22, dy=4, alpha=30)
+
+    def _colors(self):
+        if self._hover:
+            return self._hover_fill, self._hover_border
+        return super()._colors()
+
+    def enterEvent(self, event):
+        self._hover = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hover = False
+        self.update()
+        super().leaveEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -111,6 +130,10 @@ class MainWindow(QMainWindow):
         self.resize(1200, 760)
         self.setMinimumSize(1000, 640)
         self.setWindowFlag(Qt.FramelessWindowHint, True)   # bỏ title bar mặc định
+        # Nền cửa sổ trong suốt → góc bo do QSS (border-radius) vẽ, ĐƯỢC khử răng
+        # cưa (anti-alias). Trước đây dùng setMask: clip 1-bit, góc bị răng cưa và
+        # nhìn đẹp/xấu tùy màu desktop. Cùng cách với AppDialog (dialogs.py).
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
         try:
             self.setWindowIcon(QIcon(_resource("icon_app.ico")))
         except Exception:
@@ -127,6 +150,8 @@ class MainWindow(QMainWindow):
         # + vùng nội dung.
         shell = QFrame(self)
         shell.setObjectName("AppShell")
+        shell.setProperty("maxed", False)   # phóng to → bỏ bo góc (QSS)
+        self.shell = shell
         root = QHBoxLayout(shell)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -186,12 +211,9 @@ class MainWindow(QMainWindow):
                 handle.startSystemMove()
 
     def _toggle_max(self):
-        if self.isMaximized():
-            self.showNormal()
-            self._btn_max.setIcon(widgets.svg_icon("win-max", theme.TEXT_MUTED, 15))
-        else:
-            self.showMaximized()
-            self._btn_max.setIcon(widgets.svg_icon("win-restore", theme.TEXT_MUTED, 15))
+        # Đổi trạng thái; phần bo góc + icon nút do changeEvent cập nhật (bắt cả
+        # khi phóng to/khôi phục bằng phím tắt hệ điều hành).
+        self.showNormal() if self.isMaximized() else self.showMaximized()
 
     def _run_startup_tasks(self):
         for tool in self.tools:
@@ -202,16 +224,25 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass   # một tool lỗi không được làm hỏng cả app
 
-    def resizeEvent(self, e):
-        """Bo 4 góc cửa sổ bằng mask (clip mọi widget con). Phóng to → vuông."""
-        super().resizeEvent(e)
-        if self.isMaximized() or self.isFullScreen():
-            self.clearMask()
+    def changeEvent(self, e):
+        """Phóng to → vuông (bỏ bo góc + viền); khôi phục → bo góc lại."""
+        super().changeEvent(e)
+        if e.type() == QEvent.WindowStateChange:
+            # Trong lúc xử lý event, isMaximized() còn trả trạng thái CŨ → đọc ở
+            # vòng lặp sự kiện kế tiếp khi trạng thái đã ổn định.
+            QTimer.singleShot(0, self._sync_window_style)
+
+    def _sync_window_style(self):
+        maxed = self.isMaximized() or self.isFullScreen()
+        if self.shell.property("maxed") == maxed:
             return
-        r = 12
-        path = QPainterPath()
-        path.addRoundedRect(0, 0, self.width(), self.height(), r, r)
-        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
+        self.shell.setProperty("maxed", maxed)
+        # Đổi property động → cần polish lại để QSS [maximized] có hiệu lực.
+        # Nạp lại stylesheet của app = polish toàn bộ (đổi trạng thái hiếm → rẻ).
+        app = QApplication.instance()
+        app.setStyleSheet(app.styleSheet())
+        self._btn_max.setIcon(widgets.svg_icon(
+            "win-restore" if maxed else "win-max", theme.TEXT_MUTED, 15))
 
     # ----------------------------------------------------------- sidebar
     def _build_sidebar(self):
@@ -329,31 +360,40 @@ class MainWindow(QMainWindow):
         self._show(tool.name, builder=lambda: self._build_tool_page(tool))
 
     # ----------------------------------------------------------- khung trang
+    # Thẻ (widgets.Card) TỰ VẼ bóng và tự chừa CARD_PAD px mỗi phía cho bóng, nên
+    # KHÔNG cần holder/lề trang chừa thêm. Mép NHÌN THẤY của thẻ = mép widget +
+    # CARD_PAD, nên để thẻ nằm ở ~38px như cũ: lề trang = 38 − CARD_PAD; tiêu đề
+    # thụt thêm CARD_PAD để thẳng hàng mép thẻ nhìn thấy. Nội dung KHÔNG-phải-thẻ
+    # trong body (nút, tab, splitter…) cần tự thêm lề ngang CARD_PAD để cùng hàng.
+    CONTENT_EDGE = 38    # mép trái nội dung nhìn thấy, tính từ mép vùng nội dung
+
     def _page_shell(self, icon, color, title, subtitle, body, fills_height=False):
         """Khung trang: header (chip + tiêu đề) + body (bọc scroll nếu cần)."""
+        pad = widgets.CARD_PAD
+        side = self.CONTENT_EDGE - pad
         page = QWidget()
         lay = QVBoxLayout(page)
-        lay.setContentsMargins(40, 32, 40, 0)
+        lay.setContentsMargins(side, 8, side, 8)
         lay.setSpacing(0)
 
         header = QHBoxLayout()
+        header.setContentsMargins(pad, 0, pad, 0)   # thẳng hàng mép thẻ nhìn thấy
         header.setSpacing(14)
         header.addWidget(widgets.icon_badge(page, icon, color, size=46))
         texts = QVBoxLayout(); texts.setSpacing(2)
         t = QLabel(title); t.setObjectName("PageTitle")
-        st = QLabel(subtitle); st.setObjectName("PageSubtitle"); st.setWordWrap(True)
+        st = QLabel(subtitle); st.setObjectName("PageSubtitle"); st.setWordWrap(False)
         texts.addWidget(t); texts.addWidget(st)
         header.addLayout(texts); header.addStretch(1)
         lay.addLayout(header)
-        lay.addSpacing(22)
+        lay.addSpacing(2)   # + CARD_PAD (thẻ tự chừa trên) ≈ 22px cách tiêu đề
 
         if fills_height:
-            lay.setContentsMargins(40, 32, 40, 22)
             lay.addWidget(body, 1)
         else:
             holder = QWidget()
             hl = QVBoxLayout(holder)
-            hl.setContentsMargins(0, 0, 8, 22)
+            hl.setContentsMargins(0, 0, 0, 0)
             hl.addWidget(body)
             hl.addStretch(1)
             lay.addWidget(widgets.scroll_area(holder), 1)
@@ -374,23 +414,30 @@ class MainWindow(QMainWindow):
 
     # ----------------------------------------------------------- trang chủ
     def _build_home(self):
+        pad = ClickableCard.PAD              # thẻ tự chừa pad cho bóng
+        side = self.CONTENT_EDGE - pad
         page = QWidget()
         outer = QVBoxLayout(page)
-        outer.setContentsMargins(40, 36, 40, 0)
+        outer.setContentsMargins(side, 10, side, 8)
         outer.setSpacing(0)
 
+        # thụt pad để tiêu đề thẳng hàng mép trái lưới thẻ (thẻ cũng thụt pad)
         t = QLabel("Your everyday toolbox.")
         t.setObjectName("PageTitle")
+        t.setContentsMargins(pad, 0, 0, 0)
         outer.addWidget(t)
         s = QLabel("Chọn một công cụ bên dưới để bắt đầu.")
         s.setObjectName("PageSubtitle")
+        s.setContentsMargins(pad, 0, 0, 0)
         outer.addWidget(s)
-        outer.addSpacing(22)
+        outer.addSpacing(2)
 
         grid_holder = QWidget()
         grid = QGridLayout(grid_holder)
-        grid.setContentsMargins(0, 0, 8, 24)
-        grid.setSpacing(16)
+        # thẻ tự chừa pad cho bóng → khoảng cách thấy được giữa thẻ ≈ 2*pad;
+        # spacing lưới = 0 để không dôi thêm.
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(0)
         cols = 3
         home_tools = [t for t in self.tools if getattr(t, "show_on_home", True)]
         for i, tool in enumerate(home_tools):

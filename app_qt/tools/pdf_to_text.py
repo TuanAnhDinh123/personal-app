@@ -97,9 +97,7 @@ class PdfToTextTool(BaseTool):
         pass
 
     def _card(self):
-        card = QFrame()
-        card.setObjectName("Card")
-        widgets.add_shadow(card)
+        card = widgets.Card()
         lay = QVBoxLayout(card)
         lay.setContentsMargins(20, 16, 20, 16)
         lay.setSpacing(6)
@@ -189,10 +187,17 @@ class PdfToTextTool(BaseTool):
         split.addWidget(right)
 
         split.setSizes([500, 500])
-        outer.addWidget(split, 1)
+        # Thẻ điều khiển tự chừa CARD_PAD cho bóng → splitter (không phải thẻ) bọc
+        # thêm lề ngang CARD_PAD để thẳng hàng mép thẻ nhìn thấy.
+        split_holder = QWidget()
+        shl = QVBoxLayout(split_holder)
+        shl.setContentsMargins(widgets.CARD_PAD, 0, widgets.CARD_PAD, 0)
+        shl.addWidget(split)
+        outer.addWidget(split_holder, 1)
 
     def _build_footer(self, outer):
         bar = QHBoxLayout()
+        bar.setContentsMargins(widgets.CARD_PAD, 0, widgets.CARD_PAD, 0)
         self._copy_btn = widgets.button(None, "Sao chép trang này", variant="neutral",
                                         icon="copy", command=self._copy_current)
         self._save_btn = widgets.button(None, "Lưu toàn bộ ra .txt", variant="success",

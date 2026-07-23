@@ -32,9 +32,7 @@ class BaseTool(ABC):
         outer_lay.setContentsMargins(0, 0, 0, 0)
         outer_lay.setSpacing(0)
 
-        card = QFrame(outer)
-        card.setObjectName("Card")
-        widgets.add_shadow(card)
+        card = widgets.Card(outer)
         card_lay = QVBoxLayout(card)
         card_lay.setContentsMargins(28, 24, 28, 24)
         card_lay.setSpacing(4)

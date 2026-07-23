@@ -25,6 +25,17 @@ QWidget {
     border-bottom-right-radius: 12px;
 }
 
+/* Khi phóng to: cửa sổ lấp đầy màn hình → bỏ bo góc + viền để không lộ góc
+   trong suốt ở 4 mép màn hình. Bật/tắt bằng property "maxed" trên #AppShell
+   (đặt trong main_window.changeEvent). Không dùng tên "maximized" vì Qt đã
+   giữ tên đó cho trạng thái cửa sổ. */
+#AppShell[maxed="true"] { border-radius: 0; border: none; }
+#AppShell[maxed="true"] #Sidebar {
+    border-top-left-radius: 0; border-bottom-left-radius: 0;
+}
+#AppShell[maxed="true"] #TitleBar { border-top-right-radius: 0; }
+#AppShell[maxed="true"] #Content  { border-bottom-right-radius: 0; }
+
 /* ============================================================
    SIDEBAR (nền tối — bộ chữ sáng riêng)
    ============================================================ */
@@ -83,6 +94,11 @@ QWidget {
 }
 
 #SidebarVersion { color: {{--sidebar-title}}; font-size: 10px; padding: 12px; }
+/* background trong suốt: là widget CUỐI cùng ở đáy sidebar, nếu tô nền sẽ vẽ
+   hình chữ nhật VUÔNG đè lên góc bo dưới-trái của #Sidebar → góc bị vuông.
+   Phải viết '#Sidebar #SidebarVersion' để THẮNG luật '#Sidebar QWidget' (nền
+   tối) vì luật đó có độ ưu tiên cao hơn '#SidebarVersion' đơn lẻ. */
+#Sidebar #SidebarVersion { background: transparent; }
 #SidebarDivider { background: {{--sidebar-border}}; max-height: 1px; min-height: 1px; }
 
 /* ============================================================
