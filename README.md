@@ -17,21 +17,51 @@ git pull origin main
 
 ```bash
 pip install -r requirements.txt
-python main.py
+python main.py          # giao diện MỚI (PySide6)
+python main_tk.py       # giao diện CŨ (Tkinter) — để đối chiếu
 ```
 
 ```bash
 ./Personal_Tool.bat
 ```
 
+## Giao diện (PySide6)
+
+Từ bản này giao diện được dựng lại bằng **PySide6 (Qt)** — phong cách dashboard
+sáng, sidebar tối làm điểm nhấn, style bằng **QSS** (gần giống CSS).
+
+- **Đổi giao diện toàn app**: sửa `app_qt/theme.py` (bảng màu) hoặc
+  `app_qt/theme.qss` ("CSS" của app). Icon vector ở `app_qt/assets/`.
+- **Kiến trúc giữ nguyên triết lý cũ**: mỗi tool là 1 file trong `app_qt/tools/`
+  kế thừa `app_qt.base_tool.BaseTool`; `app_qt/registry.py` tự phát hiện.
+- **Logic nghiệp vụ KHÔNG viết lại**: các tool Qt *import lại* logic thuần
+  (openpyxl / Excel COM / Gemini / SQLite / Outlook) từ `app/core` và
+  `app/tools/*` — giao diện chỉ là lớp vỏ. Vì vậy `app/` (kể cả UI Tkinter cũ)
+  vẫn còn để dùng lại code và để chạy `main_tk.py`.
+- **Component dùng chung** ở `app_qt/components/`: `table` (bảng), `form_dialog`
+  (form nhập liệu), `crud_panel` (CRUD master data), `progress_dialog` &
+  `task` (chạy nền QThread), `dialog_base` (khung hộp thoại).
+
 ## Cấu trúc dự án
 
 ```
 personal-app/
-├── main.py                  # Điểm khởi động
+├── main.py                  # Điểm khởi động (giao diện PySide6)
+├── main_tk.py               # Điểm khởi động giao diện cũ (Tkinter)
 ├── requirements.txt
 ├── icon_app.ico
-└── app/
+├── app_qt/                  # GIAO DIỆN MỚI (PySide6)
+│   ├── theme.py / theme.qss # Bảng màu + "CSS" của app
+│   ├── widgets.py           # Widget dựng sẵn (giữ API .get()/.set())
+│   ├── base_tool.py         # Lớp cha tool (Qt)
+│   ├── registry.py          # Tự phát hiện tool
+│   ├── main_window.py       # Cửa sổ chính: sidebar + top bar + nội dung
+│   ├── dialogs.py           # Hộp thoại tùy biến (info/error/confirm)
+│   ├── settings_page.py     # Trang Cài đặt
+│   ├── assets/              # Icon vector (svg)
+│   ├── components/          # table · form_dialog · crud_panel · progress_dialog · task · dialog_base
+│   └── tools/               # MỖI FILE = 1 TÁC VỤ (giao diện; logic import từ app/)
+└── app/                     # LOGIC + giao diện Tkinter cũ (dùng lại)
     ├── core/
     │   ├── base_tool.py     # Lớp cha của mọi tool (+ hook startup tự chạy)
     │   ├── config.py        # Lưu/đọc cấu hình tool (JSON dùng chung)
@@ -52,11 +82,11 @@ personal-app/
 
 ## Thêm một tác vụ mới
 
-Tạo 1 file trong `app/tools/`, ví dụ `app/tools/my_tool.py`:
+Tạo 1 file trong `app_qt/tools/`, ví dụ `app_qt/tools/my_tool.py`:
 
 ```python
-from app.core.base_tool import BaseTool
-from app.ui import widgets
+from app_qt import widgets
+from app_qt.base_tool import BaseTool
 
 
 class MyTool(BaseTool):
@@ -68,11 +98,12 @@ class MyTool(BaseTool):
     action_label = "Thực hiện"
 
     def build_body(self, parent):
-        widgets.file_row(parent, "Chọn file", mode="file")
-        # ... thêm ô nhập tùy ý
+        self.file = widgets.file_row(parent, "Chọn file", mode="file")
+        # ... thêm ô nhập tùy ý (widgets.text_row / text_area / dropdown / checkbox)
 
     def run(self):
-        # Gắn logic thật ở đây. Mặc định chỉ hiện thông báo hoàn thành.
+        # Gắn logic thật ở đây. Đọc giá trị bằng .get(); báo kết quả:
+        #   self.info("Xong", "...")  /  self.error("Lỗi", "...")
         super().run()
 ```
 
