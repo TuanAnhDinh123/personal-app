@@ -69,6 +69,7 @@ APP_BG = PALETTE["--app-bg"]
 TEXT = PALETTE["--text"]
 TEXT_MUTED = PALETTE["--text-muted"]
 BORDER = PALETTE["--border"]
+BORDER_STRONG = PALETTE["--border-strong"]
 
 FONT_FAMILY = "Segoe UI"
 

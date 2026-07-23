@@ -82,7 +82,7 @@ class ProgressDialog(QFrame):
         shell.addWidget(card)
 
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(24, 20, 24, 18)
+        lay.setContentsMargins(22, 20, 22, 18)   # padding thẻ→nội dung chuẩn
         lay.setSpacing(10)
 
         t = QLabel(title)

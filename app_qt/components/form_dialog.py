@@ -58,7 +58,7 @@ class FormDialog(QDialog):
         shell.addWidget(card)
 
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(24, 20, 24, 18)
+        lay.setContentsMargins(22, 20, 22, 18)   # padding thẻ→nội dung chuẩn
         lay.setSpacing(12)
 
         # header

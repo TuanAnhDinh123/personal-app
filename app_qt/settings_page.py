@@ -9,7 +9,7 @@ def _group_card(parent_layout):
     card = widgets.Card()
     inner = QWidget(card)
     lay = QVBoxLayout(card)
-    lay.setContentsMargins(28, 24, 28, 24)
+    lay.setContentsMargins(22, 20, 22, 18)   # padding thẻ→nội dung chuẩn
     lay.setSpacing(6)
     inner_lay = QVBoxLayout(inner)
     inner_lay.setContentsMargins(0, 0, 0, 0)

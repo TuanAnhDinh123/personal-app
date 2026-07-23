@@ -373,7 +373,9 @@ class MainWindow(QMainWindow):
         side = self.CONTENT_EDGE - pad
         page = QWidget()
         lay = QVBoxLayout(page)
-        lay.setContentsMargins(side, 8, side, 8)
+        # lề ngang (side) = lề dưới → padding từ viền app tới thẻ đều nhau
+        # (x == bottom). Cả hai + CARD_PAD = CONTENT_EDGE ở mép thẻ nhìn thấy.
+        lay.setContentsMargins(side, 8, side, side)
         lay.setSpacing(0)
 
         header = QHBoxLayout()
@@ -386,7 +388,8 @@ class MainWindow(QMainWindow):
         texts.addWidget(t); texts.addWidget(st)
         header.addLayout(texts); header.addStretch(1)
         lay.addLayout(header)
-        lay.addSpacing(2)   # + CARD_PAD (thẻ tự chừa trên) ≈ 22px cách tiêu đề
+        lay.addSpacing(22)   # khoảng cách tiêu đề → thẻ (trước do CARD_PAD chừa,
+        #                      nay CARD_PAD=0 nên đặt thẳng ~22px ở đây)
 
         if fills_height:
             lay.addWidget(body, 1)
@@ -418,7 +421,7 @@ class MainWindow(QMainWindow):
         side = self.CONTENT_EDGE - pad
         page = QWidget()
         outer = QVBoxLayout(page)
-        outer.setContentsMargins(side, 10, side, 8)
+        outer.setContentsMargins(side, 10, side, side)   # x == bottom (như trang tool)
         outer.setSpacing(0)
 
         # thụt pad để tiêu đề thẳng hàng mép trái lưới thẻ (thẻ cũng thụt pad)

@@ -42,7 +42,7 @@ class AppDialog(QDialog):
         shell.addWidget(card)
 
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(24, 22, 24, 20)
+        lay.setContentsMargins(22, 20, 22, 18)   # padding thẻ→nội dung chuẩn
         lay.setSpacing(14)
 
         # header: chip icon + tiêu đề + nút đóng

@@ -302,7 +302,7 @@ class _RenamePreview(QDialog):
         widgets.add_shadow(card, blur=48, dy=12, alpha=70)
         shell.addWidget(card)
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(24, 20, 24, 18)
+        lay.setContentsMargins(22, 20, 22, 18)   # padding thẻ→nội dung chuẩn
         lay.setSpacing(10)
 
         t = QLabel(f"Tìm thấy {len(files)} file — double-click cột giữa để chỉnh tên")

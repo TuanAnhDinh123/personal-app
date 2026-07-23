@@ -34,7 +34,7 @@ class BaseTool(ABC):
 
         card = widgets.Card(outer)
         card_lay = QVBoxLayout(card)
-        card_lay.setContentsMargins(28, 24, 28, 24)
+        card_lay.setContentsMargins(22, 20, 22, 18)   # padding thẻ→nội dung chuẩn
         card_lay.setSpacing(4)
 
         body = QWidget(card)

@@ -42,7 +42,7 @@ def build_dialog_shell(parent, title, min_width=520):
     shell.addWidget(card)
 
     lay = QVBoxLayout(card)
-    lay.setContentsMargins(24, 20, 24, 18)
+    lay.setContentsMargins(22, 20, 22, 18)   # padding thẻ→nội dung chuẩn
     lay.setSpacing(10)
 
     head = QHBoxLayout()

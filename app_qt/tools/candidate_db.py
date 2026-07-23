@@ -504,7 +504,7 @@ class CandidateDbTool(BaseTool):
         widgets.add_shadow(card, blur=48, dy=12, alpha=70)
         shell.addWidget(card)
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(24, 20, 24, 18)
+        lay.setContentsMargins(22, 20, 22, 18)   # padding thẻ→nội dung chuẩn
         lay.setSpacing(12)
 
         title = QLabel("Ứng viên trùng")

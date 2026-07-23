@@ -13,7 +13,7 @@ from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFrame, QGraphicsDropShadowEffect,
+    QCheckBox, QComboBox, QFileDialog, QFrame,
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -55,33 +55,29 @@ def svg_icon(name, color, px=18):
 
 
 def add_shadow(widget, blur=48, dy=12, alpha=70):
-    """Đổ bóng mềm bằng QGraphicsDropShadowEffect (dùng cho HỘP THOẠI nổi trên
-    cửa sổ riêng — ở đó hiệu ứng render ổn). KHÔNG dùng cho thẻ trong trang: thẻ
-    dùng lớp Card (tự vẽ bóng) vì hiệu ứng này ra 'vệt xám' cứng trên Windows
-    HiDPI + cửa sổ frameless nền trong suốt."""
-    eff = QGraphicsDropShadowEffect(widget)
-    eff.setBlurRadius(blur)
-    eff.setXOffset(0)
-    eff.setYOffset(dy)
-    eff.setColor(QColor(31, 41, 55, alpha))
-    widget.setGraphicsEffect(eff)
+    """No-op: bóng đổ đã được gỡ khỏi toàn bộ thẻ/hộp thoại. Giữ hàm (và tham số)
+    để các nơi gọi cũ không phải đổi; lề chừa quanh thẻ vẫn giữ nguyên bố cục."""
     return widget
 
 
-# Vùng đệm quanh thẻ để chứa bóng (px). Thẻ NHÌN THẤY thụt vào chừng này so với
-# mép widget → mọi thứ căn theo mép thẻ phải cộng thêm CARD_PAD.
-CARD_PAD = 20
+# Trước đây là vùng đệm quanh thẻ để chứa bóng; bóng đã gỡ nên = 0. Giữ hằng số
+# (và các chỗ '+ CARD_PAD') để không phải sửa loạt công thức căn lề: giờ mép
+# NHÌN THẤY của thẻ = mép widget, nên cộng thêm 0.
+#
+# LƯU Ý QUAN TRỌNG: padding thẻ→nội dung = contentsMargins của LAYOUT con, KHÔNG
+# phải pad. Qt để layout con GHI ĐÈ contentsMargins của widget, nên hai lề không
+# cộng dồn. Viền thẻ vẽ tại mép widget (pad=0) → lề layout con hiện đúng là
+# padding thấy được. (Khi pad>0 như thẻ Trang chủ: padding = lề layout − pad.)
+CARD_PAD = 0
 
 
 class Card(QFrame):
-    """Thẻ trắng bo góc + bóng đổ mềm, TỰ VẼ bằng QPainter (không QSS #Card).
+    """Thẻ trắng bo góc, viền 1px, TỰ VẼ bằng QPainter (không QSS #Card).
 
-    Vì sao không dùng QGraphicsDropShadowEffect: trên Windows (cửa sổ frameless
-    nền trong suốt + màn hình HiDPI) hiệu ứng đó hay ra một 'vệt xám' cứng,
-    không đều — chỗ mềm chỗ cứng. Tự vẽ thì hiện GIỐNG NHAU ở mọi máy và không
-    bao giờ bị cắt. Đổi lại: widget chừa `pad` px mỗi phía để chứa bóng, nên
-    vùng nội dung (layout con) tự động nằm thụt vào `pad` — mọi thứ khác muốn
-    thẳng hàng mép thẻ phải cộng thêm `pad`.
+    `pad` = khoảng CHỪA NGOÀI viền thẻ (mặc định 0). Trang chủ dùng pad>0 để tạo
+    khe hở giữa các thẻ trong lưới. Viền vẽ thụt vào `pad`; padding bên trong do
+    contentsMargins của layout con quyết định (Qt cho layout con ghi đè lề widget
+    → hai lề không cộng dồn, xem ghi chú ở CARD_PAD).
     """
 
     def __init__(self, parent=None, *, pad=CARD_PAD, radius=16, dy=6,
@@ -96,7 +92,9 @@ class Card(QFrame):
         self._spread = max(1, pad - dy)   # số lớp; +dy để lớp dưới cùng không lố pad
         self._tint = tint
         self._fill = QColor(fill or theme.CARD_BG)
-        self._border = QColor(border or theme.BORDER)
+        # Không còn bóng → viền phải rõ hơn để thẻ tách khỏi nền (nếu không thẻ
+        # trắng trên nền xám rất nhạt gần như 'chìm', trông vỡ bố cục).
+        self._border = QColor(border or theme.BORDER_STRONG)
         super().setContentsMargins(pad, pad, pad, pad)
 
     def _card_rect(self):
@@ -112,14 +110,8 @@ class Card(QFrame):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setPen(Qt.NoPen)
-        # Bóng: nhiều rounded-rect nở dần ra ngoài, mỗi lớp mờ nhẹ → chồng lên
-        # nhau thành gradient mềm (đậm sát thẻ, tan dần ra xa). Vẽ ngoài → trong.
-        tint = QColor(*self._tint)
-        for i in range(self._spread, 0, -1):
-            tint.setAlpha(self._alpha)
-            p.setBrush(tint)
-            rad = self._radius + i
-            p.drawRoundedRect(r.adjusted(-i, -i + self._dy, i, i + self._dy), rad, rad)
+        # Bóng đã gỡ — chỉ vẽ nền thẻ. Vẫn chừa CARD_PAD quanh thẻ để mọi chỗ
+        # căn theo mép thẻ (dùng CARD_PAD) giữ nguyên bố cục.
         # Nền thẻ + viền 1px
         fill, border = self._colors()
         p.setBrush(fill)
