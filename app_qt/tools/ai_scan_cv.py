@@ -13,8 +13,8 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from app.core import config, settings
 from app.core.ai_cv_scan import (
-    _call_gemini, append_rows_to_excel, done_folder_for, move_to_done,
-    read_jd_file,
+    _call_gemini, _Cancelled, append_rows_to_excel, done_folder_for,
+    move_to_done, read_jd_file,
 )
 from app_qt import dialogs, theme, widgets
 from app_qt.base_tool import BaseTool
@@ -159,8 +159,10 @@ class AiScanCvTool(BaseTool):
             # DỪNG mà không mất tiến độ — lần sau bấm lại sẽ quét tiếp phần còn lại.
             done, errors = [], []
             stopped_at = None
+            cancelled = False
             for i, p in enumerate(files, start=1):
                 if ctx.cancelled:
+                    cancelled = True
                     break
                 ctx.status(f"({i}/{total}) {p.name}")
 
@@ -169,7 +171,13 @@ class AiScanCvTool(BaseTool):
 
                 try:
                     data = _call_gemini(api_key, model, jd, p.read_bytes(),
-                                        on_retry=on_retry, extra=extra)
+                                        on_retry=on_retry, extra=extra,
+                                        should_cancel=lambda: ctx.cancelled)
+                except _Cancelled:
+                    # Bấm Hủy giữa chừng — CV này CHƯA xong, để lại cho lần sau.
+                    ctx.log(f"✋ Đã hủy khi đang xử lý {p.name} (chưa lưu file này).")
+                    cancelled = True
+                    break
                 except Exception as exc:
                     # Lỗi (thường là hết hạn mức) → DỪNG ngay tại đây.
                     errors.append(f"{p.name}: {exc}")
@@ -199,10 +207,10 @@ class AiScanCvTool(BaseTool):
                 done.append(p.name)
                 ctx.log(f"✅ {p.name} — điểm {data.get('fit_score', '?')}")
                 ctx.step()
-            return done, errors, stopped_at
+            return done, errors, stopped_at, cancelled
 
         def on_finish(dlg, result):
-            done, errors, stopped_at = result
+            done, errors, stopped_at, cancelled = result
             remaining = total - len(done)
             if done:
                 dlg.log(f"\n✅ Đã lưu {len(done)} CV vào:\n{out}")
@@ -213,6 +221,13 @@ class AiScanCvTool(BaseTool):
                 dlg.log(f"\n⛔ Dừng tại: {stopped_at}")
                 dlg.log("👉 Chờ ít phút cho hạn mức key hồi lại rồi bấm 'Quét CV bằng AI' "
                         "để quét tiếp các CV còn lại.")
+            elif cancelled:
+                dlg.set_final_status(
+                    f"Đã hủy — đã quét {len(done)}/{total}, còn {remaining} CV.")
+                dlg.log("\n✋ Đã hủy. Các CV quét xong đã được lưu vào Excel và chuyển "
+                        "sang folder '…_da_quet'.")
+                if remaining:
+                    dlg.log("👉 Bấm 'Quét CV bằng AI' để quét tiếp các CV còn lại.")
             elif not done:
                 dlg.set_final_status("Không có CV nào được xử lý.")
             else:

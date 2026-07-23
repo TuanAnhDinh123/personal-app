@@ -140,16 +140,22 @@ _RETRY_BASE_DELAY = 4     # giây; chờ tăng dần: 4s, 8s, 16s…
 
 
 def _call_gemini(api_key: str, model: str, jd: str, pdf_bytes: bytes,
-                 timeout: int = 180, on_retry=None, extra: str = "") -> dict:
+                 timeout: int = 180, on_retry=None, extra: str = "",
+                 should_cancel=None) -> dict:
     """Gửi 1 file PDF cho Gemini, trả về dict theo _RESPONSE_SCHEMA.
 
     Tự động thử lại khi gặp lỗi tạm thời (429/5xx, ví dụ HTTP 503 "high
     demand"), chờ tăng dần giữa các lần. `on_retry(attempt, wait, reason)`
     (nếu có) được gọi trước mỗi lần chờ để báo tiến trình. Ném RuntimeError
     với thông báo dễ hiểu nếu vẫn thất bại.
+
+    `should_cancel()` (nếu có) được kiểm tra thường xuyên — kể cả trong lúc
+    đang chờ giữa các lần thử lại — để bấm Hủy có hiệu lực NGAY, ném _Cancelled.
     """
     last_error = ""
     for attempt in range(1, _MAX_RETRIES + 1):
+        if should_cancel and should_cancel():
+            raise _Cancelled()
         try:
             return _call_gemini_once(api_key, model, jd, pdf_bytes, timeout, extra)
         except _TransientError as exc:
@@ -159,12 +165,27 @@ def _call_gemini(api_key: str, model: str, jd: str, pdf_bytes: bytes,
             wait = _RETRY_BASE_DELAY * (2 ** (attempt - 1))
             if on_retry:
                 on_retry(attempt, wait, last_error)
-            time.sleep(wait)
+            _interruptible_sleep(wait, should_cancel)
     raise RuntimeError(f"Thất bại sau {_MAX_RETRIES} lần thử — {last_error}")
 
 
 class _TransientError(Exception):
     """Lỗi tạm thời (nên thử lại): quá tải, giới hạn nhịp, mất kết nối."""
+
+
+class _Cancelled(Exception):
+    """Người dùng bấm Hủy giữa chừng (kể cả khi đang chờ thử lại)."""
+
+
+def _interruptible_sleep(seconds: float, should_cancel=None) -> None:
+    """Ngủ `seconds` giây nhưng cứ 0.2s lại kiểm tra Hủy; nếu Hủy → _Cancelled."""
+    remaining = seconds
+    while remaining > 0:
+        if should_cancel and should_cancel():
+            raise _Cancelled()
+        chunk = 0.2 if remaining > 0.2 else remaining
+        time.sleep(chunk)
+        remaining -= chunk
 
 
 def _call_gemini_once(api_key: str, model: str, jd: str, pdf_bytes: bytes,
