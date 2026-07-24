@@ -10,7 +10,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView, QDialog, QFrame, QHBoxLayout, QHeaderView, QLabel,
+    QAbstractItemView, QHBoxLayout, QHeaderView, QLabel,
     QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -23,6 +23,7 @@ from app.core.cv_scan import (
 )
 from app_qt import dialogs, widgets
 from app_qt.base_tool import BaseTool
+from app_qt.components.modal import ModalDialog
 from app_qt.components.progress_dialog import ProgressDialog
 
 try:
@@ -280,34 +281,20 @@ class ScanCvTool(BaseTool):
         dlg.start(job, on_finish)
 
 
-class _RenamePreview(QDialog):
+class _RenamePreview(ModalDialog):
     """Bảng xem trước đổi tên — sửa được cột 'Tên ứng viên', tên mới tự cập nhật."""
 
     def __init__(self, parent, files, prefix, start_str, noise):
-        super().__init__(parent)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setModal(True)
+        super().__init__(parent, "lg")
         self._files = files
         self._prefix = prefix
         self._suffixes = []
         self._codes = []
-        self._drag = None
 
-        shell = QVBoxLayout(self)
-        shell.setContentsMargins(24, 24, 24, 24)
-        card = QFrame(self)
-        card.setObjectName("Dialog")
-        card.setMinimumWidth(900)
-        widgets.add_shadow(card, blur=48, dy=12, alpha=70)
-        shell.addWidget(card)
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(22, 20, 22, 18)   # padding thẻ→nội dung chuẩn
-        lay.setSpacing(10)
+        card, lay = self.build_shell(
+            f"Tìm thấy {len(files)} file — double-click cột giữa để chỉnh tên",
+            spacing=10)
 
-        t = QLabel(f"Tìm thấy {len(files)} file — double-click cột giữa để chỉnh tên")
-        t.setObjectName("DialogTitle")
-        lay.addWidget(t)
         sub = QLabel("Tên ứng viên tự trích từ tên file gốc; cột 'Tên file mới' cập nhật ngay.")
         sub.setObjectName("DialogMsg")
         lay.addWidget(sub)
@@ -341,6 +328,7 @@ class _RenamePreview(QDialog):
 
         self.table.itemChanged.connect(self._on_edit)
         lay.addWidget(self.table, 1)
+        self.set_grow_region(self.table)   # cao theo cỡ lg, tự co khi màn hình thấp
 
         foot = QHBoxLayout()
         foot.addWidget(widgets.button(card, "Đổi tên tất cả", variant="success",
@@ -349,7 +337,6 @@ class _RenamePreview(QDialog):
                                       command=self.reject))
         foot.addStretch(1)
         lay.addLayout(foot)
-        self.resize(960, 620)
 
     def _on_edit(self, item):
         if item.column() != 1:
@@ -389,15 +376,3 @@ class _RenamePreview(QDialog):
             dialogs.warning(self.parent(), "Hoàn thành (có lỗi)", msg)
         else:
             dialogs.success(self.parent(), "Hoàn thành", msg)
-
-    # kéo di chuyển
-    def mousePressEvent(self, e):
-        if e.button() == Qt.LeftButton:
-            self._drag = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
-
-    def mouseMoveEvent(self, e):
-        if self._drag is not None and e.buttons() & Qt.LeftButton:
-            self.move(e.globalPosition().toPoint() - self._drag)
-
-    def mouseReleaseEvent(self, e):
-        self._drag = None

@@ -5,11 +5,10 @@ nút bấm cùng phong cách app. Dùng: dialogs.info(parent, title, msg) / .err
 .success / .warning / .confirm(...).
 """
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QDialog, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
-)
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
 from app_qt import theme, widgets
+from app_qt.components.modal import ModalDialog
 
 _KINDS = {
     "info":    ("ℹ", theme.PALETTE["--accent"]),
@@ -20,14 +19,11 @@ _KINDS = {
 }
 
 
-class AppDialog(QDialog):
+class AppDialog(ModalDialog):
+    # Hộp báo/xác nhận: cỡ nội dung tự co theo chữ, nhưng KHÔNG rộng quá cỡ sm.
     def __init__(self, parent, title, message, kind="info", buttons=None):
-        super().__init__(parent)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setModal(True)
+        super().__init__(parent, "sm")
         self._result = 0
-        self._drag = None
 
         emoji, color = _KINDS.get(kind, _KINDS["info"])
         buttons = buttons or [("OK", "primary", 1)]
@@ -38,6 +34,7 @@ class AppDialog(QDialog):
 
         card = QFrame(self)
         card.setObjectName("Dialog")
+        card.setMaximumWidth(self.modal_w)   # tham chiếu cỡ sm (trần bề rộng)
         widgets.add_shadow(card, blur=48, dy=12, alpha=70)
         shell.addWidget(card)
 
@@ -90,18 +87,6 @@ class AppDialog(QDialog):
     def _done(self, value):
         self._result = value
         self.accept()
-
-    # cho phép kéo hộp thoại bằng cách rê chuột trên thân
-    def mousePressEvent(self, e):
-        if e.button() == Qt.LeftButton:
-            self._drag = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
-
-    def mouseMoveEvent(self, e):
-        if self._drag is not None and e.buttons() & Qt.LeftButton:
-            self.move(e.globalPosition().toPoint() - self._drag)
-
-    def mouseReleaseEvent(self, e):
-        self._drag = None
 
     def run(self):
         self.exec()

@@ -15,7 +15,7 @@ from app.core import cv_schema
 # Cột được phép ghi cho từng bảng (chặn khóa lạ lọt vào câu INSERT/UPDATE).
 DEPARTMENT_FIELDS = ["department_name", "manager_name", "description"]
 POSITION_FIELDS = ["department_id", "position_code", "position_title", "level",
-                   "headcount", "status"]
+                   "headcount", "status", "mail_cc", "mail_subject", "mail_body"]
 JD_FIELDS = ["position_id", "jd_title", "jd_file_path"]
 CANDIDATE_FIELDS = [
     "full_name", "email", "phone", "date_of_birth", "address",

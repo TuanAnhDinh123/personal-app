@@ -159,7 +159,7 @@ class InterviewGateTool(BaseTool):
         return subject, body
 
     def _open_confirm(self, parent, to, cc, subject, body):
-        dlg, card, lay = build_dialog_shell(parent, "Kiểm tra & gửi mail", min_width=680)
+        dlg, card, lay = build_dialog_shell(parent, "Kiểm tra & gửi mail", size="md")
 
         def field(label, value, multiline=False):
             lb = QLabel(label); lb.setObjectName("FieldLabel")
@@ -199,5 +199,5 @@ class InterviewGateTool(BaseTool):
                                       command=dlg.reject))
         foot.addStretch(1)
         lay.addLayout(foot)
-        dlg.resize(720, 720)
+        body_w.setMinimumHeight(round(dlg.modal_h * 0.5))   # vùng nội dung cao theo cỡ md
         dlg.exec()

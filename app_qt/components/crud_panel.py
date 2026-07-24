@@ -57,7 +57,8 @@ class CrudTablePanel(QWidget):
     def _add(self):
         FormDialog(
             self, "Thêm " + self.spec["title"], self.spec["form"], None,
-            on_save=lambda data: (self.spec["insert"](data), self._changed())
+            on_save=lambda data: (self.spec["insert"](data), self._changed()),
+            size=self.spec.get("modal_size", "sm")
         ).run()
 
     def _edit(self):
@@ -69,7 +70,8 @@ class CrudTablePanel(QWidget):
         current = self.spec["get"](rid)
         FormDialog(
             self, "Sửa " + self.spec["title"], self.spec["form"], current,
-            on_save=lambda data: (self.spec["update"](rid, data), self._changed())
+            on_save=lambda data: (self.spec["update"](rid, data), self._changed()),
+            size=self.spec.get("modal_size", "sm")
         ).run()
 
     def _delete(self):

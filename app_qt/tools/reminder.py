@@ -60,8 +60,7 @@ class ReminderTool(BaseTool):
         widgets.section_label(card, "Mẫu email phản hồi ứng viên")
         self.var_subject = widgets.text_row(card, "Tiêu đề")
         self.var_subject.set(cfg["subject"])
-        lbl = QLabel("Nội dung (dùng được {name}, {position}, {subject}, {date}, {time} — "
-                     "bôi đen chữ rồi bấm B/I/U/màu để định dạng)")
+        lbl = QLabel("Nội dung (dùng được {name}, {position}, {subject}, {date}, {time})")
         lbl.setObjectName("FieldLabel")
         lbl.setWordWrap(True)
         lay.addWidget(lbl)
@@ -226,7 +225,7 @@ class ReminderTool(BaseTool):
         return out
 
     def _open_compose(self, appt):
-        dlg, card, lay = build_dialog_shell(self._page, "Soạn mail phản hồi ứng viên", min_width=700)
+        dlg, card, lay = build_dialog_shell(self._page, "Soạn mail phản hồi ứng viên", size="md")
 
         lb1 = QLabel("Đến"); lb1.setObjectName("FieldLabel"); lay.addWidget(lb1)
         to_w = QLineEdit("; ".join(self._eligible_recipients(appt)))
@@ -267,11 +266,10 @@ class ReminderTool(BaseTool):
                                       command=dlg.reject))
         foot.addStretch(1)
         lay.addLayout(foot)
-        dlg.resize(760, 760)
         dlg.exec()
 
     def _open_schedule(self, appt):
-        dlg, card, lay = build_dialog_shell(self._page, "Đặt lịch nhắc phản hồi", min_width=460)
+        dlg, card, lay = build_dialog_shell(self._page, "Đặt lịch nhắc phản hồi", size="sm")
         sub = QLabel(appt["subject"]); sub.setObjectName("DialogMsg"); sub.setWordWrap(True)
         lay.addWidget(sub)
 

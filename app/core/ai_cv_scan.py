@@ -246,9 +246,24 @@ def _call_gemini_once(api_key: str, model: str, jd: str, pdf_bytes: bytes,
             f"Không nhận được nội dung từ mô hình"
             + (f" (bị chặn: {reason})" if reason else ""))
     try:
-        return json.loads(text)
+        data = json.loads(text)
     except ValueError:
         raise RuntimeError("Mô hình trả về không đúng JSON.")
+    if isinstance(data, dict) and data.get("name"):
+        data["name"] = normalize_name(data["name"])
+    return data
+
+
+def normalize_name(name: str) -> str:
+    """Chuẩn hóa tên ứng viên AI trả về: viết hoa chữ cái đầu mỗi từ, GIỮ dấu.
+
+    Ví dụ: "ĐINH QUANG SƠN" hoặc "đinh quang sơn" → "Đinh Quang Sơn".
+    Chỉ đổi kiểu chữ hoa/thường (Unicode-aware nên dấu tiếng Việt giữ nguyên),
+    không bỏ dấu, không xóa ký tự. Khoảng trắng thừa được gộp lại.
+    """
+    if not name:
+        return ""
+    return " ".join(w[:1].upper() + w[1:].lower() for w in name.split())
 
 
 _SHEET_TITLE = "AI CV Scan"

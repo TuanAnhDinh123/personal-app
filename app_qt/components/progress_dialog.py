@@ -10,12 +10,13 @@ Dùng:
     dlg.start(job, on_finish)     # job(ctx) chạy ở luồng nền; on_finish(dlg, kq)
 Trong job dùng: ctx.log(str) · ctx.status(str) · ctx.step(n=1) · ctx.cancelled
 """
-from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QProgressBar, QTextEdit, QVBoxLayout,
 )
 
 from app_qt import widgets
+from app_qt.components.modal import SHELL_MARGIN, dims, viewport_rect
 
 
 class _Signals(QObject):
@@ -73,11 +74,14 @@ class ProgressDialog(QFrame):
         self._worker = None
         self._drag = None
 
+        # Cỡ md (xem app_qt/components/modal.py) — rộng theo hệ 3 cỡ chung.
+        self._mw, self._mh = dims("md")
+
         shell = QVBoxLayout(self)
         shell.setContentsMargins(24, 24, 24, 24)
         card = QFrame(self)
         card.setObjectName("Dialog")
-        card.setMinimumWidth(560)
+        card.setFixedWidth(self._mw)
         widgets.add_shadow(card, blur=48, dy=12, alpha=70)
         shell.addWidget(card)
 
@@ -112,16 +116,19 @@ class ProgressDialog(QFrame):
         foot.addWidget(self._btn)
         lay.addLayout(foot)
 
-        self.resize(600, 460)
-        if parent is not None:
-            self._center_on(parent)
+        self._ref = parent   # widget tham chiếu để canh giữa vùng nội dung
+        self._card = card
 
-    def _center_on(self, parent):
-        try:
-            g = parent.window().frameGeometry()
-            self.move(g.center().x() - 300, g.center().y() - 230)
-        except Exception:
-            pass
+    def _recenter(self):
+        # Kẹp không vượt viewport rồi canh giữa VÙNG NỘI DUNG (trừ sidebar).
+        area = viewport_rect(self._ref)
+        if area is None:
+            return
+        self._card.setFixedWidth(min(self._mw, max(240, area.width() - 2 * SHELL_MARGIN)))
+        self.setMaximumSize(area.width(), area.height())
+        g = self.frameGeometry()
+        g.moveCenter(area.center())
+        self.move(g.topLeft())
 
     # --------------------------------------------------------------- chạy job
     def start(self, job, on_finish=None):
@@ -135,6 +142,8 @@ class ProgressDialog(QFrame):
         s.failed.connect(self._failed)
         ProgressDialog._alive.add(self)
         self.show()
+        self._recenter()
+        QTimer.singleShot(0, self._recenter)   # canh lại khi layout đã ổn định
         self.raise_()
         self._worker.start()
 

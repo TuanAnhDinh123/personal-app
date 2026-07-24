@@ -6,17 +6,19 @@ app.core.cv_schema) dùng lại 100% — chỉ dựng lại giao diện bằng Q
     • 3 trang Master Data: Bộ phận · Vị trí · JD (dùng CrudTablePanel).
 """
 import os
+import unicodedata
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDate, QDateTime, QTime, Qt
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel,
-    QLineEdit, QToolTip, QVBoxLayout, QWidget,
+    QApplication, QCalendarWidget, QFileDialog, QFrame, QHBoxLayout,
+    QLabel, QLineEdit, QTimeEdit, QToolTip, QVBoxLayout, QWidget,
 )
 
 from app.core import cv_repository as repo
 from app.core import cv_schema
+from app.core import outlook
 from app.core.cv_scan import (
     _open_existing_workbook, _open_template_workbook, _split_id_name,
     _write_candidates,
@@ -24,8 +26,11 @@ from app.core.cv_scan import (
 from app_qt import dialogs, theme, widgets
 from app_qt.base_tool import BaseTool
 from app_qt.components.crud_panel import CrudTablePanel
+from app_qt.components.dialog_base import build_dialog_shell
 from app_qt.components.form_dialog import FormDialog
+from app_qt.components.modal import ModalDialog
 from app_qt.components.table import DataTable
+from app_qt.richtext import RichText
 
 try:
     import openpyxl
@@ -98,6 +103,99 @@ def _num(text, kind):
         return int(float(s)) if kind == "int" else float(s)
     except ValueError:
         return None
+
+
+def _strip_accents(s):
+    """Bỏ dấu tiếng Việt: 'Tuấn Anh' → 'Tuan Anh' (xử lý riêng đ/Đ)."""
+    s = s.replace("đ", "d").replace("Đ", "D")
+    return "".join(c for c in unicodedata.normalize("NFD", s)
+                   if unicodedata.category(c) != "Mn")
+
+
+def _given_name(full_name):
+    """Tên gọi (không dấu) từ họ tên đầy đủ — lấy TỪ CUỐI: 'Đinh Tuấn Anh' → 'Anh'."""
+    parts = (full_name or "").strip().split()
+    return _strip_accents(parts[-1]) if parts else ""
+
+
+def _fill_template(text, mapping):
+    """Thay các placeholder {name}{possion}{position}{date}{time}{time_start}
+    {time_end} trong `text` bằng giá trị thật."""
+    if not text:
+        return text or ""
+    for key, val in mapping.items():
+        text = text.replace("{" + key + "}", val)
+    return text
+
+
+# Tên thứ/tháng tiếng Anh cố định — KHÔNG dùng locale máy (đang là tiếng Việt)
+# để định dạng ngày luôn ra dạng 'Fri, 24th Jul 2026'.
+_WEEKDAYS_EN = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+_MONTHS_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _ordinal(n):
+    """Số thứ tự tiếng Anh: 1→1st, 2→2nd, 3→3rd, 4→4th, 11→11th, 21→21st…"""
+    if 11 <= n % 100 <= 13:
+        return f"{n}th"
+    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th') }"
+
+
+def _fmt_date_en(dt):
+    """datetime → 'Fri, 24th Jul 2026'."""
+    return (f"{_WEEKDAYS_EN[dt.weekday()]}, {_ordinal(dt.day)} "
+            f"{_MONTHS_EN[dt.month - 1]} {dt.year}")
+
+
+def _fmt_time_en(dt):
+    """datetime → '08:30 AM' (12 giờ, có AM/PM, không phụ thuộc locale)."""
+    suffix = "AM" if dt.hour < 12 else "PM"
+    hour12 = dt.hour % 12 or 12
+    return f"{hour12:02d}:{dt.minute:02d} {suffix}"
+
+
+def _picker_qss():
+    """QSS riêng cho lịch + ô giờ trong hộp chọn ngày giờ.
+
+    QSS toàn cục cho QTableView/::item bị QCalendarWidget kế thừa (khiến ô ngày
+    bị bo góc, đệm sai, header ngày/tuần co lại thành '…'). Ghi đè tại đây bằng
+    selector cụ thể hơn để lịch hiển thị gọn gàng, đúng tông màu app.
+    """
+    P = theme.PALETTE
+    return f"""
+    QCalendarWidget QWidget {{ alternate-background-color: {P['--input-bg']};
+        color: {P['--text']}; }}
+    QCalendarWidget QAbstractItemView {{
+        background: {P['--input-bg']}; color: {P['--text']};
+        selection-background-color: {P['--accent']}; selection-color: #ffffff;
+        outline: none; border: none; border-radius: 0;
+        gridline-color: transparent; padding: 2px;
+    }}
+    QCalendarWidget QAbstractItemView::item {{
+        border: none; border-radius: 8px; padding: 2px; }}
+    QCalendarWidget QAbstractItemView:disabled {{ color: {P['--text-faint']}; }}
+    QCalendarWidget QHeaderView::section {{
+        background: transparent; color: {P['--text-muted']};
+        border: none; padding: 4px 0; font-weight: 600; }}
+    QCalendarWidget #qt_calendar_navigationbar {{
+        background: {P['--card-bg']};
+        border-top-left-radius: 10px; border-top-right-radius: 10px; }}
+    QCalendarWidget QToolButton {{
+        color: {P['--text']}; background: transparent; font-size: 13px;
+        font-weight: 600; padding: 5px 12px; border-radius: 8px; margin: 3px; }}
+    QCalendarWidget QToolButton:hover {{ background: {P['--accent-soft']}; }}
+    QCalendarWidget QToolButton::menu-indicator {{ image: none; }}
+    QCalendarWidget QMenu {{ background: {P['--card-bg']}; color: {P['--text']};
+        border: 1px solid {P['--border-strong']}; border-radius: 8px; }}
+    QCalendarWidget QSpinBox {{ background: {P['--input-bg']}; color: {P['--text']};
+        border: 1px solid {P['--border-strong']}; border-radius: 8px;
+        padding: 2px 6px; }}
+    QTimeEdit {{ background: {P['--input-bg']}; color: {P['--text']};
+        border: 1px solid {P['--border-strong']}; border-radius: 10px;
+        padding: 8px 10px; }}
+    QTimeEdit:focus {{ border: 1px solid {P['--accent']}; }}
+    """
 
 
 def _dept_options():
@@ -188,6 +286,7 @@ def _master_specs():
         },
         "position": {
             "title": "vị trí", "pk": "position_id",
+            "modal_size": "md",   # form vị trí có mẫu mail dài → dùng cỡ md
             "list_fn": repo.list_positions,
             "get": repo.get_position, "insert": repo.insert_position,
             "update": repo.update_position, "delete": repo.delete_position,
@@ -199,6 +298,9 @@ def _master_specs():
                 ("level", "Cấp", 90),
                 ("headcount", "SL", 55),
                 ("status", "Trạng thái", 110),
+                ("mail_subject", "Mẫu mail", 200, "w",
+                 lambda v: (str(v).replace("\n", " ")[:50] + "…")
+                 if v and len(str(v)) > 50 else (str(v) if v else "—")),
             ],
             "form": [
                 {"key": "department_id", "label": "Bộ phận", "kind": "dropdown",
@@ -210,6 +312,13 @@ def _master_specs():
                 {"key": "headcount", "label": "Số lượng cần tuyển", "kind": "int"},
                 {"key": "status", "label": "Trạng thái", "kind": "choice",
                  "choices": cv_schema.POSITION_STATUS_CHOICES, "allow_empty": True},
+                {"kind": "section", "label": "Mẫu mail mời phỏng vấn"},
+                {"key": "mail_cc", "label": "CC (nhiều email cách nhau bởi ;)",
+                 "kind": "text"},
+                {"key": "mail_subject", "label": "Tiêu đề mail", "kind": "text"},
+                {"key": "mail_body", "label": "Nội dung mail (dùng {name} "
+                 "{possion} {date} {time_start} {time_end})", "kind": "richtext",
+                 "height": 10, "grow": True},
             ],
         },
         "jd": {
@@ -287,7 +396,7 @@ class JobDescriptionTool(_MasterPageTool):
 
 
 # ═════════════════════ MODAL XEM CHI TIẾT ỨNG VIÊN ══════════════════════
-class _CandidateDetailDialog(QDialog):
+class _CandidateDetailDialog(ModalDialog):
     """Modal lớn xem chi tiết toàn bộ ứng viên trong danh sách hiện tại.
 
     Mỗi ứng viên là một thẻ; phần nổi bật nhất là NHẬN XÉT CỦA AI
@@ -295,34 +404,8 @@ class _CandidateDetailDialog(QDialog):
     """
 
     def __init__(self, parent, rows):
-        super().__init__(parent)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setModal(True)
-        self._drag = None
-
-        shell = QVBoxLayout(self)
-        shell.setContentsMargins(24, 24, 24, 24)
-        card = QFrame(self)
-        card.setObjectName("Dialog")
-        card.setMinimumSize(920, 620)
-        shell.addWidget(card)
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(22, 20, 22, 18)
-        lay.setSpacing(12)
-
-        head = QHBoxLayout()
-        title = QLabel(f"Chi tiết ứng viên · {len(rows)} người")
-        title.setObjectName("DialogTitle")
-        head.addWidget(title, 1)
-        close = QLabel("✕")
-        close.setObjectName("DialogClose")
-        close.setFixedSize(24, 24)
-        close.setAlignment(Qt.AlignCenter)
-        close.setCursor(Qt.PointingHandCursor)
-        close.mousePressEvent = lambda _e: self.reject()
-        head.addWidget(close, 0, Qt.AlignTop)
-        lay.addLayout(head)
+        super().__init__(parent, "lg")
+        card, lay = self.build_shell(f"Chi tiết ứng viên · {len(rows)} người")
 
         body = QWidget()
         col = QVBoxLayout(body)
@@ -333,9 +416,11 @@ class _CandidateDetailDialog(QDialog):
             empty.setObjectName("DialogMsg")
             col.addWidget(empty)
         for row in rows:
-            col.addWidget(self._card(body, row))
+            col.addWidget(self._candidate_card(body, row))
         col.addStretch(1)
-        lay.addWidget(widgets.scroll_area(body), 1)
+        sa = widgets.scroll_area(body)
+        lay.addWidget(sa, 1)
+        self.set_grow_region(sa)   # cao theo cỡ lg, tự co khi màn hình thấp
 
         foot = QHBoxLayout()
         foot.addStretch(1)
@@ -343,10 +428,8 @@ class _CandidateDetailDialog(QDialog):
                                       command=self.reject))
         lay.addLayout(foot)
 
-        self.resize(1000, 760)
-
     # ------------------------------------------------------------- thẻ 1 ứng viên
-    def _card(self, parent, row):
+    def _candidate_card(self, parent, row):
         box = QFrame(parent)
         box.setObjectName("DetailCard")
         v = QVBoxLayout(box)
@@ -453,18 +536,6 @@ class _CandidateDetailDialog(QDialog):
         col.addWidget(txt)
         return col
 
-    # kéo di chuyển (frameless)
-    def mousePressEvent(self, e):
-        if e.button() == Qt.LeftButton:
-            self._drag = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
-
-    def mouseMoveEvent(self, e):
-        if self._drag is not None and e.buttons() & Qt.LeftButton:
-            self.move(e.globalPosition().toPoint() - self._drag)
-
-    def mouseReleaseEvent(self, e):
-        self._drag = None
-
 
 # ═══════════════════════════════ TOOL CHÍNH ═════════════════════════════
 class CandidateDbTool(BaseTool):
@@ -535,6 +606,8 @@ class CandidateDbTool(BaseTool):
         bar.addWidget(B(None, "Thêm mới", variant="success", icon="plus", command=self._add))
         bar.addWidget(B(None, "Xem chi tiết", variant="info", icon="sparkles",
                         command=self._show_details))
+        bar.addWidget(B(None, "Gửi mail", variant="info", icon="mail",
+                        command=self._send_mail))
         bar.addWidget(B(None, "Nhập từ Excel", variant="primary", icon="download",
                         command=self._batch_import))
         self._btn_export = B(None, "Xuất Excel", variant="warning", icon="save",
@@ -577,7 +650,210 @@ class CandidateDbTool(BaseTool):
         return cid
 
     def _show_details(self):
-        _CandidateDetailDialog(self._root, getattr(self, "_rows", [])).exec()
+        rows = self.table.checked_rows()
+        if not rows:
+            dialogs.info(self._root, "Chưa chọn",
+                         "Hãy tick chọn ít nhất một ứng viên trong bảng để xem chi tiết.")
+            return
+        _CandidateDetailDialog(self._root, rows).exec()
+
+    # ------------------------------------------------- gửi mail mời phỏng vấn
+    # Tick ĐÚNG 1 ứng viên → chọn ngày giờ → soạn mail (điền sẵn từ mẫu của VỊ
+    # TRÍ ứng tuyển, đã thay {name}{possion}{date}{time}) → gửi qua Outlook.
+    def _send_mail(self):
+        if not outlook.available():
+            dialogs.warning(self._root, "Cần Outlook",
+                            "Tính năng gửi mail cần Outlook trên Windows (pywin32).")
+            return
+        rows = self.table.checked_rows()
+        if len(rows) != 1:
+            dialogs.warning(
+                self._root, "Chọn đúng 1 ứng viên",
+                "Vui lòng tick chọn ĐÚNG MỘT ứng viên trong bảng để gửi mail.")
+            return
+        row = rows[0]
+        email = _txt(row, "email")
+        if not email:
+            dialogs.warning(self._root, "Thiếu email",
+                            "Ứng viên này chưa có email — không thể gửi mail.")
+            return
+
+        pos_id = row["position_id"] if "position_id" in row.keys() else None
+        pos = repo.get_position(pos_id) if pos_id else None
+        if pos is None:
+            dialogs.warning(
+                self._root, "Chưa có vị trí",
+                "Ứng viên chưa gắn vị trí tuyển dụng nên không có mẫu mail. "
+                "Hãy gán vị trí (và soạn mẫu mail ở master Vị trí tuyển dụng).")
+            return
+
+        picked = self._pick_datetime()
+        if picked is None:
+            return
+        start, end = picked
+        title = _txt(pos, "position_title")
+        sd, ed = start.toPython(), end.toPython()
+        start_hm, end_hm = _fmt_time_en(sd), _fmt_time_en(ed)
+        mapping = {
+            "name":       _given_name(_txt(row, "full_name")),
+            "possion":    title,
+            "position":   title,
+            "date":       _fmt_date_en(sd),    # 'Fri, 24th Jul 2026'
+            "time":       start_hm,            # tương thích cũ: {time} = giờ bắt đầu
+            "time_start": start_hm,            # '08:30 AM'
+            "time_end":   end_hm,
+        }
+        subject = _fill_template(_txt(pos, "mail_subject"), mapping)
+        body_html = _fill_template(
+            pos["mail_body"] if "mail_body" in pos.keys() and pos["mail_body"] else "",
+            mapping)
+        ctx = {"full_name": _txt(row, "full_name"), "position_title": title,
+               "start": start, "end": end}
+        self._compose_mail(email, _txt(pos, "mail_cc"), subject, body_html, ctx)
+
+    def _pick_datetime(self):
+        """Hộp thoại chọn NGÀY + GIỜ bắt đầu/kết thúc phỏng vấn.
+
+        Dùng lịch INLINE (không phải popup) có style riêng — tránh lỗi hiển thị
+        do QSS bảng toàn cục & popup trong modal frameless. Trả về (start, end)
+        dạng QDateTime, hoặc None nếu hủy.
+        """
+        dlg, card, lay = build_dialog_shell(self._root, "Chọn ngày giờ phỏng vấn",
+                                            size="sm")
+        lbl = QLabel("Ngày phỏng vấn:")
+        lbl.setObjectName("FieldLabel")
+        lay.addWidget(lbl)
+
+        cal = QCalendarWidget(card)
+        cal.setStyleSheet(_picker_qss())
+        cal.setGridVisible(False)
+        cal.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)   # bỏ cột số tuần
+        cal.setHorizontalHeaderFormat(QCalendarWidget.ShortDayNames)
+        cal.setNavigationBarVisible(True)
+        cal.setFirstDayOfWeek(Qt.Monday)
+        cal.setMinimumDate(QDate.currentDate())
+        cal.setSelectedDate(QDate.currentDate().addDays(1))   # mặc định: ngày mai
+        cal.setMinimumHeight(260)
+        lay.addWidget(cal)
+
+        # Hàng chọn giờ bắt đầu / kết thúc.
+        times = QHBoxLayout()
+        times.setSpacing(12)
+
+        def _time_col(label, default):
+            col = QVBoxLayout(); col.setSpacing(4)
+            cap = QLabel(label); cap.setObjectName("FieldLabel")
+            col.addWidget(cap)
+            te = QTimeEdit(card)
+            te.setDisplayFormat("HH:mm")
+            te.setStyleSheet(_picker_qss())
+            te.setTime(default)
+            col.addWidget(te)
+            times.addLayout(col, 1)
+            return te
+
+        start_te = _time_col("Giờ bắt đầu", QTime(9, 0))
+        end_te = _time_col("Giờ kết thúc", QTime(9, 30))
+        lay.addLayout(times)
+
+        result = {"val": None}
+
+        def _confirm():
+            d = cal.selectedDate()
+            start = QDateTime(d, start_te.time())
+            end = QDateTime(d, end_te.time())
+            if end <= start:
+                dialogs.warning(dlg, "Giờ không hợp lệ",
+                                "Giờ kết thúc phải sau giờ bắt đầu.")
+                return
+            result["val"] = (start, end)
+            dlg.accept()
+
+        foot = QHBoxLayout()
+        foot.addWidget(widgets.button(card, "Tiếp tục", variant="primary",
+                                      icon="check", command=_confirm))
+        foot.addWidget(widgets.button(card, "Hủy", variant="neutral", icon="x",
+                                      command=dlg.reject))
+        foot.addStretch(1)
+        lay.addLayout(foot)
+        dlg.exec()
+        return result["val"]
+
+    def _compose_mail(self, to, cc, subject, body_html, ctx):
+        """Hộp thoại soạn/duyệt mail → gửi qua Outlook (HTML) → tạo lịch phỏng vấn.
+
+        `ctx` = {full_name, position_title, start, end} để tạo cuộc hẹn (appointment)
+        trên lịch cá nhân ngay sau khi gửi mail thành công.
+        """
+        dlg, card, lay = build_dialog_shell(self._root, "Soạn & gửi mail", size="md")
+
+        def field(label):
+            lb = QLabel(label); lb.setObjectName("FieldLabel")
+            lay.addWidget(lb)
+
+        field("Đến")
+        to_w = QLineEdit(to); lay.addWidget(to_w)
+        field("CC")
+        cc_w = QLineEdit(cc); lay.addWidget(cc_w)
+        field("Tiêu đề")
+        subj_w = QLineEdit(subject); lay.addWidget(subj_w)
+        field("Nội dung")
+        body_w = RichText(card, height=12)
+        body_w.set_html(body_html)
+        lay.addWidget(body_w)
+
+        foot = QHBoxLayout()
+
+        def do_send():
+            to_value = to_w.text().strip()
+            if not to_value:
+                dialogs.warning(dlg, "Thiếu người nhận",
+                                "Vui lòng nhập email người nhận.")
+                return
+            try:
+                outlook.send_mail(to_value, subj_w.text().strip(),
+                                  body_w.get_text(), cc=cc_w.text().strip(),
+                                  html=body_w.get_html())
+            except Exception as exc:
+                dialogs.error(dlg, "Lỗi gửi mail", f"Không gửi được:\n{exc}")
+                return
+            # Gửi xong → đặt lịch phỏng vấn (appointment cá nhân). Lỗi tạo lịch
+            # KHÔNG hủy việc đã gửi mail — chỉ báo để người dùng tự thêm tay.
+            appt_err = self._create_appointment(ctx, body_w.get_text())
+            dlg.accept()
+            if appt_err is None:
+                dialogs.success(self._root, "Hoàn tất",
+                                "Đã gửi mail và đặt lịch phỏng vấn ✅")
+            else:
+                dialogs.warning(
+                    self._root, "Đã gửi mail",
+                    f"Mail đã gửi, nhưng KHÔNG tạo được lịch:\n{appt_err}")
+
+        foot.addWidget(widgets.button(card, "Gửi mail", variant="primary", icon="mail",
+                                      command=do_send))
+        foot.addWidget(widgets.button(card, "Hủy", variant="neutral", icon="x",
+                                      command=dlg.reject))
+        foot.addStretch(1)
+        lay.addLayout(foot)
+        body_w.setMinimumHeight(round(dlg.modal_h * 0.5))   # vùng nội dung cao theo cỡ md
+        dlg.exec()
+
+    @staticmethod
+    def _create_appointment(ctx, body_text):
+        """Tạo cuộc hẹn phỏng vấn trên lịch Outlook. Trả về None nếu OK, hoặc
+        chuỗi mô tả lỗi nếu thất bại (để bên gọi báo mà không chặn việc gửi mail)."""
+        start, end = ctx["start"], ctx["end"]
+        duration = max(15, start.secsTo(end) // 60)   # phút; tối thiểu 15
+        who = " ".join(p for p in (ctx.get("full_name"),
+                                   ctx.get("position_title")) if p)
+        subject = f"Phỏng vấn {who}".strip()
+        try:
+            outlook.create_appointment(
+                subject, start.toPython(), duration_minutes=duration,
+                body=body_text or "")
+        except Exception as exc:   # noqa: BLE001 — báo lại cho UI, không chặn luồng
+            return str(exc)
+        return None
 
     # --------------------------------------------------- xuất Excel (các dòng đã tick)
     # Dùng lại đúng logic "Quét CV → Trích xuất Excel": ghi vào template có sẵn
@@ -878,24 +1154,9 @@ class CandidateDbTool(BaseTool):
             rec["cv_file_path"] = full if os.path.isfile(full) else fname
 
     def _confirm_import_dups(self, dups) -> bool:
-        dlg = QDialog(self._root)
-        dlg.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        dlg.setAttribute(Qt.WA_TranslucentBackground)
-        dlg.setModal(True)
-        shell = QVBoxLayout(dlg)
-        shell.setContentsMargins(24, 24, 24, 24)
-        card = QFrame(dlg)
-        card.setObjectName("Dialog")
-        card.setMinimumWidth(620)
-        widgets.add_shadow(card, blur=48, dy=12, alpha=70)
-        shell.addWidget(card)
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(22, 20, 22, 18)   # padding thẻ→nội dung chuẩn
-        lay.setSpacing(12)
+        dlg = ModalDialog(self._root, "md")
+        card, lay = dlg.build_shell("Ứng viên trùng")
 
-        title = QLabel("Ứng viên trùng")
-        title.setObjectName("DialogTitle")
-        lay.addWidget(title)
         desc = QLabel(f"Có {len(dups)} ứng viên trùng email hoặc SĐT (với người đã có "
                       "trong DB hoặc trùng nhau trong file):")
         desc.setObjectName("DialogMsg")
@@ -905,6 +1166,7 @@ class CandidateDbTool(BaseTool):
         table = DataTable([("full_name", "Họ tên", 220), ("email", "Email", 240),
                            ("phone", "SĐT", 120)])
         table.set_rows(dups)
+        table.setMinimumHeight(min(360, dlg.modal_h))
         lay.addWidget(table, 1)
 
         result = {"ok": False}
@@ -917,7 +1179,6 @@ class CandidateDbTool(BaseTool):
         foot.addStretch(1)
         lay.addLayout(foot)
 
-        dlg.resize(680, 460)
         dlg.exec()
         return result["ok"]
 

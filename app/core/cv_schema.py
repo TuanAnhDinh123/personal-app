@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS positions (
     level          VARCHAR,             -- cấp bậc (Junior/Senior/Lead…)
     headcount      INT,                 -- số lượng cần tuyển
     status         VARCHAR,             -- Đang tuyển / Tạm dừng / Đã đóng
+    mail_cc        VARCHAR,             -- CC mặc định khi gửi mail mời PV
+    mail_subject   VARCHAR,             -- tiêu đề mẫu mail (hỗ trợ {name}{possion}{date}{time})
+    mail_body      TEXT,                -- nội dung mẫu mail (HTML, hỗ trợ placeholder trên)
     created_at     DATETIME DEFAULT (datetime('now', 'localtime')),
     updated_at     DATETIME DEFAULT (datetime('now', 'localtime'))
 );
@@ -131,6 +134,10 @@ MIGRATIONS: list[str] = [
     # init_db (trang không mở được).
     "ALTER TABLE candidates ADD COLUMN batch INT",
     "CREATE INDEX IF NOT EXISTS idx_candidates_batch ON candidates(batch)",
+    # Mẫu mail mời phỏng vấn gắn theo từng VỊ TRÍ (thêm cho DB đã tồn tại).
+    "ALTER TABLE positions ADD COLUMN mail_cc VARCHAR",
+    "ALTER TABLE positions ADD COLUMN mail_subject VARCHAR",
+    "ALTER TABLE positions ADD COLUMN mail_body TEXT",
     # Bỏ các cột không dùng nữa (SQLite ≥ 3.35 hỗ trợ DROP COLUMN; DB mới đã
     # không có sẵn các cột này nên câu lệnh sẽ bị bỏ qua an toàn).
     "ALTER TABLE departments DROP COLUMN department_code",

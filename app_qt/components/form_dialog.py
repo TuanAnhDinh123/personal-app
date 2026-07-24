@@ -8,13 +8,13 @@ Dựng field từ danh sách `specs`. Mỗi spec là dict {"key","label","kind"[
   - section:  chỉ hiện tiêu đề nhóm.
   - "required": True → bắt buộc nhập.
 """
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QScrollArea, QTextEdit, QVBoxLayout, QWidget, QDialog,
+    QFileDialog, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout,
+    QWidget,
 )
 
-from app_qt import dialogs, theme, widgets
+from app_qt import dialogs, widgets
+from app_qt.components.modal import ModalDialog
 
 _NONE = "— Chưa chọn —"
 
@@ -35,12 +35,10 @@ def _filter_str(filetypes):
     return ";;".join(f"{label} ({pat})" for label, pat in filetypes)
 
 
-class FormDialog(QDialog):
-    def __init__(self, parent, title, specs, current=None, on_save=None, on_delete=None):
-        super().__init__(parent)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setModal(True)
+class FormDialog(ModalDialog):
+    def __init__(self, parent, title, specs, current=None, on_save=None,
+                 on_delete=None, size="sm"):
+        super().__init__(parent, size)
         self._specs = specs
         self._current = current
         self._on_save = on_save
@@ -48,30 +46,9 @@ class FormDialog(QDialog):
         self._getters = {}
         self._required = {}
         self._saved = False
-        self._drag = None
+        self._has_grow = False   # có field "grow" → field đó nở, không thêm stretch cuối
 
-        shell = QVBoxLayout(self)
-        shell.setContentsMargins(24, 24, 24, 24)
-        card = QFrame(self)
-        card.setObjectName("Dialog")
-        card.setMinimumWidth(520)
-        widgets.add_shadow(card, blur=48, dy=12, alpha=70)
-        shell.addWidget(card)
-
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(22, 20, 22, 18)   # padding thẻ→nội dung chuẩn
-        lay.setSpacing(12)
-
-        # header
-        head = QHBoxLayout()
-        t = QLabel(title); t.setObjectName("DialogTitle")
-        head.addWidget(t, 1)
-        close = QLabel("✕"); close.setObjectName("DialogClose")
-        close.setFixedSize(24, 24); close.setAlignment(Qt.AlignCenter)
-        close.setCursor(Qt.PointingHandCursor)
-        close.mousePressEvent = lambda _e: self.reject()
-        head.addWidget(close, 0, Qt.AlignTop)
-        lay.addLayout(head)
+        card, lay = self.build_shell(title)
 
         # thân form cuộn được
         form = QWidget()
@@ -79,12 +56,13 @@ class FormDialog(QDialog):
         self._form_col.setContentsMargins(0, 0, 8, 0)
         self._form_col.setSpacing(4)
         self._build_fields(form)
-        self._form_col.addStretch(1)
+        # Có field nở (grow) → nó chiếm hết chỗ trống; không nở → đẩy field lên trên.
+        if not self._has_grow:
+            self._form_col.addStretch(1)
 
         sa = widgets.scroll_area(form)   # viewport trong suốt → không còn nền xám
-        sa.setMinimumHeight(360)
-        sa.setMaximumHeight(560)
         lay.addWidget(sa, 1)
+        self.set_grow_region(sa)         # cao = modal_h (đổi cỡ là cao lên thật)
 
         # footer
         foot = QHBoxLayout()
@@ -116,6 +94,16 @@ class FormDialog(QDialog):
         lbl.setContentsMargins(0, 8, 0, 2)
         self._form_col.addWidget(lbl)
 
+    def _add_field(self, widget, grow=False):
+        """Thêm widget vào form. `grow=True` → widget nở kín chiều cao còn lại của
+        modal (dùng cho ô soạn thảo dài như nội dung mail)."""
+        if grow:
+            widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+            self._form_col.addWidget(widget, 1)   # stretch → ăn hết chỗ trống
+            self._has_grow = True
+        else:
+            self._form_col.addWidget(widget)
+
     def _build_fields(self, form):
         for spec in self._specs:
             kind = spec.get("kind", "text")
@@ -144,10 +132,25 @@ class FormDialog(QDialog):
                 self._label(form, label)
                 box = widgets.TextEdit(form)
                 box.setAcceptRichText(False)
-                box.setFixedHeight(max(60, spec.get("height", 3) * 22))
+                grow = spec.get("grow")
+                if grow:
+                    box.setMinimumHeight(max(60, spec.get("height", 3) * 22))
+                else:
+                    box.setFixedHeight(max(60, spec.get("height", 3) * 22))
                 box.setPlainText(str(self._cur(key)))
-                self._form_col.addWidget(box)
+                self._add_field(box, grow)
                 self._getters[key] = lambda b=box: b.toPlainText().strip() or None
+
+            elif kind == "richtext":
+                from app_qt.richtext import RichText
+                self._label(form, label)
+                rt = RichText(form, height=spec.get("height", 8))
+                rt.set_html(str(self._cur(key)))
+                self._add_field(rt, spec.get("grow"))
+                # Lưu HTML nếu có chữ; ô rỗng → None (QTextEdit vẫn sinh khung HTML
+                # dù không có nội dung, nên phải soi phần text thuần để quyết định).
+                self._getters[key] = lambda r=rt: (r.get_html()
+                                                   if r.get_text().strip() else None)
 
             elif kind == "file":
                 self._label(form, label)
@@ -211,18 +214,6 @@ class FormDialog(QDialog):
         # on_delete tự lo xác nhận + xóa; trả về False để giữ form mở (vd hủy xác nhận).
         if self._on_delete is not None and self._on_delete() is not False:
             self.reject()
-
-    # kéo di chuyển
-    def mousePressEvent(self, e):
-        if e.button() == Qt.LeftButton:
-            self._drag = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
-
-    def mouseMoveEvent(self, e):
-        if self._drag is not None and e.buttons() & Qt.LeftButton:
-            self.move(e.globalPosition().toPoint() - self._drag)
-
-    def mouseReleaseEvent(self, e):
-        self._drag = None
 
     def run(self):
         """Trả về data dict nếu lưu (khi không dùng on_save), hoặc True/False."""
