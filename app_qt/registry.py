@@ -7,6 +7,7 @@ import importlib
 import inspect
 import pkgutil
 
+from app_qt import theme
 from app_qt import tools as tools_pkg
 from app_qt.base_tool import BaseTool
 
@@ -24,5 +25,5 @@ def discover_tools():
                 and not obj.__name__.startswith("_")
             ):
                 found.append(obj())
-    found.sort(key=lambda t: (t.category, t.order, t.name))
+    found.sort(key=lambda t: (theme.category_rank(t.category), t.category, t.order, t.name))
     return found

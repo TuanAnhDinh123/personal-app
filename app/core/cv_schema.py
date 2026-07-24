@@ -26,6 +26,12 @@ SƠ ĐỒ QUAN HỆ (mềm, không ràng buộc FK)
   • positions   (vị trí)     1—N  job_descriptions (JD) và  1—N  candidates
   • Đường dẫn file lưu thẳng: candidates.cv_file_path, job_descriptions.jd_file_path
     (không còn bảng document_files — file thực tế đã nằm sẵn trên máy).
+
+  departments ──1:N──> employees
+  courses  ──N:M──  employees   (qua bảng trung gian course_employees)
+  • Một khóa học (courses) có NHIỀU nhân viên; một nhân viên tham gia NHIỀU
+    khóa học. Mỗi dòng trong course_employees = 1 lượt ghi danh (course_id +
+    employee_id, unique để không ghi danh trùng).
 ────────────────────────────────────────────────────────────────────────────
 
 LƯU Ý khi sửa về sau:
@@ -40,6 +46,7 @@ SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS departments (
     department_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     department_name VARCHAR,
+    short_name      VARCHAR,                 -- mã viết tắt (vd FIN, IT, R&D) — dùng khi xuất Excel
     manager_name    VARCHAR,
     description     TEXT,
     created_at      DATETIME DEFAULT (datetime('now', 'localtime')),
@@ -97,6 +104,52 @@ CREATE TABLE IF NOT EXISTS candidates (
     updated_at       DATETIME DEFAULT (datetime('now', 'localtime'))
 );
 
+-- ───────────────────────── NHÂN VIÊN ────────────────────────────────
+CREATE TABLE IF NOT EXISTS employees (
+    employee_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    code          VARCHAR,               -- mã nhân viên nội bộ
+    global_code   VARCHAR,               -- mã toàn cầu (Global Code)
+    full_name     VARCHAR,               -- họ tên đầy đủ
+    surname       VARCHAR,               -- họ
+    name          VARCHAR,               -- tên
+    middle_name   VARCHAR,               -- tên đệm
+    date_of_birth DATE,
+    gender        VARCHAR,               -- giới tính
+    education     VARCHAR,               -- trình độ học vấn
+    phone         VARCHAR,
+    email         VARCHAR,
+    level         VARCHAR,               -- cấp bậc
+    department_id INT,                   -- tham chiếu mềm → departments.department_id
+    address       VARCHAR,
+    created_at    DATETIME DEFAULT (datetime('now', 'localtime')),
+    updated_at    DATETIME DEFAULT (datetime('now', 'localtime'))
+);
+
+-- ───────────────────────── KHÓA HỌC / ĐÀO TẠO ───────────────────────
+CREATE TABLE IF NOT EXISTS courses (
+    course_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    title       VARCHAR,                 -- tên khóa học
+    content     TEXT,                    -- nội dung
+    date        DATE,                    -- ngày tổ chức
+    location    VARCHAR,                 -- địa điểm
+    course_type INT,                     -- loại: 0=inhouse, 1=external, 2=funded (xem COURSE_TYPE_CHOICES)
+    created_at  DATETIME DEFAULT (datetime('now', 'localtime')),
+    updated_at  DATETIME DEFAULT (datetime('now', 'localtime'))
+);
+
+-- ─────────────── LIÊN KẾT KHÓA HỌC ↔ NHÂN VIÊN (nhiều-nhiều) ─────────
+-- Một khóa học có nhiều nhân viên; một nhân viên tham gia nhiều khóa học.
+-- Tham chiếu mềm (không FK): course_id → courses, employee_id → employees.
+CREATE TABLE IF NOT EXISTS course_employees (
+    enrollment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    course_id     INT,                   -- tham chiếu mềm → courses.course_id
+    employee_id   INT,                   -- tham chiếu mềm → employees.employee_id
+    status        VARCHAR,               -- trạng thái học (xem COURSE_STATUS_CHOICES)
+    note          TEXT,
+    created_at    DATETIME DEFAULT (datetime('now', 'localtime')),
+    updated_at    DATETIME DEFAULT (datetime('now', 'localtime'))
+);
+
 -- ───────────────────────── CHỈ MỤC (tăng tốc tìm kiếm) ───────────────
 CREATE INDEX IF NOT EXISTS idx_candidates_name   ON candidates(full_name);
 CREATE INDEX IF NOT EXISTS idx_candidates_email  ON candidates(email);
@@ -105,6 +158,12 @@ CREATE INDEX IF NOT EXISTS idx_candidates_pos    ON candidates(position_id);
 CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);
 CREATE INDEX IF NOT EXISTS idx_positions_dept    ON positions(department_id);
 CREATE INDEX IF NOT EXISTS idx_jd_pos            ON job_descriptions(position_id);
+CREATE INDEX IF NOT EXISTS idx_employees_name    ON employees(full_name);
+CREATE INDEX IF NOT EXISTS idx_employees_code     ON employees(code);
+CREATE INDEX IF NOT EXISTS idx_employees_dept     ON employees(department_id);
+CREATE INDEX IF NOT EXISTS idx_ce_course           ON course_employees(course_id);
+CREATE INDEX IF NOT EXISTS idx_ce_employee         ON course_employees(employee_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ce_unique    ON course_employees(course_id, employee_id);
 """
 
 # =============================================================================
@@ -144,13 +203,33 @@ MIGRATIONS: list[str] = [
     "ALTER TABLE job_descriptions DROP COLUMN summary",
     "ALTER TABLE job_descriptions DROP COLUMN requirements",
     "ALTER TABLE job_descriptions DROP COLUMN salary_range",
+    # Đổi tên cột course_employees.result → status (DB cũ). Bảng tạo mới đã có sẵn
+    # cột 'status' nên câu lệnh này ném OperationalError ("no such column: result")
+    # và được init_db() bỏ qua an toàn.
+    "ALTER TABLE course_employees RENAME COLUMN result TO status",
+    # Mã viết tắt bộ phận (vd FIN, IT, R&D) — thêm cho DB đã tồn tại.
+    "ALTER TABLE departments ADD COLUMN short_name VARCHAR",
 ]
 
 # Gợi ý cho các ô chọn ở giao diện (sửa tùy ý).
 STATUS_CHOICES = ["Mới", "Đã liên hệ", "Phỏng vấn", "Đạt", "Loại", "Chờ"]
 POSITION_STATUS_CHOICES = ["Đang tuyển", "Tạm dừng", "Đã đóng"]
 
+# Nhân viên: giới tính & cấp bậc (level) — dùng cho ô lọc + form nhập.
+GENDER_CHOICES = ["Nam", "Nữ", "Khác"]
+EMPLOYEE_LEVEL_CHOICES = [
+    "Intern", "Fresher", "Junior", "Middle", "Senior", "Lead", "Manager",
+]
+
+# Loại khóa học — lưu dạng INT trong cột courses.course_type (chỉ số = giá trị lưu).
+COURSE_TYPE_CHOICES = ["inhouse", "external", "funded"]  # 0, 1, 2
+
+# Trạng thái học của nhân viên trong 1 khóa (cột course_employees.status).
+# "Not started" = chưa học · "Completed" = đã học xong.
+COURSE_STATUS_CHOICES = ["Not started", "Completed"]
+
 # Danh sách bảng do init_db quản lý — dùng khi cần dựng lại bảng trống lệch schema.
 _MANAGED_TABLES = [
     "departments", "positions", "job_descriptions", "candidates",
+    "employees", "courses", "course_employees",
 ]

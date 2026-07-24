@@ -208,6 +208,19 @@ def _position_options():
             for p in repo.list_positions()}
 
 
+def _course_type_options():
+    """Tên loại khóa học → mã số lưu trong DB (inhouse=0, external=1, funded=2)."""
+    return {name: i for i, name in enumerate(cv_schema.COURSE_TYPE_CHOICES)}
+
+
+def _course_type_label(v):
+    """Mã số course_type → nhãn hiển thị; giá trị lạ/rỗng → '—'."""
+    try:
+        return cv_schema.COURSE_TYPE_CHOICES[int(v)]
+    except (ValueError, TypeError, IndexError):
+        return "—"
+
+
 def _txt(row, key):
     """Đọc row[key] an toàn (sqlite3.Row/dict) → chuỗi đã strip, None → ''."""
     try:
@@ -274,12 +287,15 @@ def _master_specs():
             "columns": [
                 ("department_id", "ID", 50),
                 ("department_name", "Tên bộ phận", 200),
+                ("short_name", "Mã viết tắt", 100),
                 ("manager_name", "Quản lý", 150),
                 ("description", "Mô tả", 220),
             ],
             "form": [
                 {"key": "department_name", "label": "Tên bộ phận (*)",
                  "kind": "text", "required": True},
+                {"key": "short_name", "label": "Mã viết tắt (vd FIN, IT, R&D)",
+                 "kind": "text"},
                 {"key": "manager_name", "label": "Người quản lý", "kind": "text"},
                 {"key": "description", "label": "Mô tả", "kind": "textarea", "height": 3},
             ],
@@ -341,6 +357,33 @@ def _master_specs():
                  "kind": "file"},
             ],
         },
+        "course": {
+            "title": "khóa học", "pk": "course_id",
+            "modal_size": "md",   # form có ô nội dung dài → dùng cỡ md
+            "list_fn": repo.list_courses,
+            "get": repo.get_course, "insert": repo.insert_course,
+            "update": repo.update_course, "delete": repo.delete_course,
+            "columns": [
+                ("course_id", "ID", 50),
+                ("title", "Tên khóa học", 230),
+                ("course_type", "Loại", 100, "w", _course_type_label),
+                ("date", "Ngày", 110),
+                ("location", "Địa điểm", 160),
+                ("content", "Nội dung", 240, "w",
+                 lambda v: (str(v).replace("\n", " ")[:60] + "…")
+                 if v and len(str(v)) > 60 else (str(v) if v else "—")),
+            ],
+            "form": [
+                {"key": "title", "label": "Tên khóa học (*)",
+                 "kind": "text", "required": True},
+                {"key": "course_type", "label": "Loại khóa học", "kind": "dropdown",
+                 "options": _course_type_options},
+                {"key": "date", "label": "Ngày tổ chức (yyyy-mm-dd)", "kind": "text"},
+                {"key": "location", "label": "Địa điểm", "kind": "text"},
+                {"key": "content", "label": "Nội dung", "kind": "textarea",
+                 "height": 6, "grow": True},
+            ],
+        },
     }
 
 
@@ -393,6 +436,14 @@ class JobDescriptionTool(_MasterPageTool):
     icon = "📋"
     order = 30
     spec_key = "jd"
+
+
+class CourseTool(_MasterPageTool):
+    name = "Khóa học"
+    description = "Danh mục khóa học / đào tạo."
+    icon = "🎓"
+    order = 40
+    spec_key = "course"
 
 
 # ═════════════════════ MODAL XEM CHI TIẾT ỨNG VIÊN ══════════════════════

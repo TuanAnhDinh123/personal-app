@@ -13,7 +13,7 @@ import sqlite3
 from app.core import cv_schema
 
 # Cột được phép ghi cho từng bảng (chặn khóa lạ lọt vào câu INSERT/UPDATE).
-DEPARTMENT_FIELDS = ["department_name", "manager_name", "description"]
+DEPARTMENT_FIELDS = ["department_name", "short_name", "manager_name", "description"]
 POSITION_FIELDS = ["department_id", "position_code", "position_title", "level",
                    "headcount", "status", "mail_cc", "mail_subject", "mail_body"]
 JD_FIELDS = ["position_id", "jd_title", "jd_file_path"]
@@ -23,6 +23,13 @@ CANDIDATE_FIELDS = [
     "source", "batch", "fit_score", "fit_summary", "strengths", "weaknesses",
     "cv_file_path", "note",
 ]
+EMPLOYEE_FIELDS = [
+    "code", "global_code", "full_name", "surname", "name", "middle_name",
+    "date_of_birth", "gender", "education", "phone", "email", "level",
+    "department_id", "address",
+]
+COURSE_FIELDS = ["title", "content", "date", "location", "course_type"]
+COURSE_EMPLOYEE_FIELDS = ["course_id", "employee_id", "status", "note"]
 
 # PK của mỗi bảng (dùng cho update/delete generic).
 _PK = {
@@ -30,6 +37,9 @@ _PK = {
     "positions": "position_id",
     "job_descriptions": "jd_id",
     "candidates": "candidate_id",
+    "employees": "employee_id",
+    "courses": "course_id",
+    "course_employees": "enrollment_id",
 }
 
 
@@ -433,6 +443,205 @@ def count_candidates() -> int:
 def set_cv_file_path(candidate_id, path) -> None:
     """Cập nhật lại đường dẫn file CV (dùng khi định vị lại file đã bị di chuyển)."""
     _update("candidates", CANDIDATE_FIELDS, candidate_id, {"cv_file_path": path})
+
+
+# ───────────────────────────── NHÂN VIÊN ────────────────────────────────
+
+# Các cột TEXT được ô tìm kiếm toàn văn quét qua (bỏ các field đã có ô lọc riêng
+# dạng select: department_id, gender, level).
+EMPLOYEE_SEARCH_FIELDS = [
+    "e.code", "e.global_code", "e.full_name", "e.surname", "e.name",
+    "e.middle_name", "e.education", "e.phone", "e.email", "e.address",
+]
+
+
+def list_employees():
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT e.*, d.department_name "
+            "FROM employees e "
+            "LEFT JOIN departments d ON d.department_id = e.department_id "
+            "ORDER BY e.full_name").fetchall()
+
+
+def search_employees(keyword: str = "", department_id=None, gender: str = "",
+                     level: str = "", codes=None):
+    """Tìm nhân viên: từ khóa quét MỌI cột text; lọc theo bộ phận / giới tính /
+    level (các ô select).
+
+    Từ khóa tách theo khoảng trắng → mỗi token phải khớp ÍT NHẤT một cột text
+    (LIKE); các token ghép AND. Trả kèm `department_name` để hiển thị bảng.
+
+    `codes`: danh sách mã NV (thường dán nguyên cột từ Excel). Nếu có, lọc CHÍNH
+    XÁC những nhân viên có `code` nằm trong danh sách (khớp không phân biệt hoa
+    thường + bỏ khoảng trắng thừa).
+    """
+    sql = [
+        "SELECT e.*, d.department_name",
+        "FROM employees e",
+        "LEFT JOIN departments d ON d.department_id = e.department_id",
+        "WHERE 1=1",
+    ]
+    params: list = []
+    kw = (keyword or "").strip()
+    if kw:
+        ors = " OR ".join(f"{col} LIKE ?" for col in EMPLOYEE_SEARCH_FIELDS)
+        for token in kw.split():
+            sql.append(f"AND ({ors})")
+            params += [f"%{token}%"] * len(EMPLOYEE_SEARCH_FIELDS)
+    norm_codes = [c.strip().upper() for c in (codes or []) if c and c.strip()]
+    if norm_codes:
+        ph = ", ".join("?" for _ in norm_codes)
+        sql.append(f"AND UPPER(TRIM(e.code)) IN ({ph})")
+        params += norm_codes
+    if department_id:
+        sql.append("AND e.department_id = ?")
+        params.append(department_id)
+    if gender:
+        sql.append("AND e.gender = ?")
+        params.append(gender)
+    if level:
+        sql.append("AND e.level = ?")
+        params.append(level)
+    sql.append("ORDER BY e.employee_id DESC")
+    with get_connection() as conn:
+        return conn.execute(" ".join(sql), params).fetchall()
+
+
+def count_employees() -> int:
+    with get_connection() as conn:
+        return conn.execute("SELECT COUNT(*) FROM employees").fetchone()[0]
+
+
+def get_employee(employee_id):
+    return _get("employees", employee_id)
+
+
+def insert_employee(data: dict) -> int:
+    return _insert("employees", EMPLOYEE_FIELDS, data)
+
+
+def update_employee(employee_id, data: dict) -> None:
+    _update("employees", EMPLOYEE_FIELDS, employee_id, data)
+
+
+def delete_employee(employee_id) -> None:
+    _delete("employees", employee_id)
+
+
+# ───────────────────────── KHÓA HỌC / ĐÀO TẠO ───────────────────────────
+
+def list_courses():
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT * FROM courses ORDER BY date DESC, course_id DESC").fetchall()
+
+
+def get_course(course_id):
+    return _get("courses", course_id)
+
+
+def insert_course(data: dict) -> int:
+    return _insert("courses", COURSE_FIELDS, data)
+
+
+def update_course(course_id, data: dict) -> None:
+    _update("courses", COURSE_FIELDS, course_id, data)
+
+
+def delete_course(course_id) -> None:
+    _delete("courses", course_id)
+
+
+# ───────────────── LIÊN KẾT KHÓA HỌC ↔ NHÂN VIÊN (nhiều-nhiều) ───────────
+
+def list_course_employees(course_id):
+    """Danh sách nhân viên đã ghi danh vào 1 khóa học (kèm thông tin nhân viên)."""
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT ce.*, e.code, e.full_name, e.email, e.department_id, "
+            "       d.department_name, d.short_name AS department_short "
+            "FROM course_employees ce "
+            "LEFT JOIN employees e   ON e.employee_id = ce.employee_id "
+            "LEFT JOIN departments d ON d.department_id = e.department_id "
+            "WHERE ce.course_id = ? "
+            "ORDER BY e.full_name", (course_id,)).fetchall()
+
+
+def list_employee_courses(employee_id):
+    """Danh sách khóa học mà 1 nhân viên đã tham gia (kèm thông tin khóa học)."""
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT ce.*, c.title, c.date, c.location, c.course_type "
+            "FROM course_employees ce "
+            "LEFT JOIN courses c ON c.course_id = ce.course_id "
+            "WHERE ce.employee_id = ? "
+            "ORDER BY c.date DESC", (employee_id,)).fetchall()
+
+
+def enroll_employee(course_id, employee_id, data: dict | None = None) -> int:
+    """Ghi danh 1 nhân viên vào 1 khóa học. Bỏ qua nếu đã ghi danh (INSERT OR IGNORE
+    nhờ unique index course_id+employee_id). Trả về enrollment_id (0 nếu đã có sẵn).
+    """
+    d = {k: (data or {}).get(k) for k in COURSE_EMPLOYEE_FIELDS if k in (data or {})}
+    d["course_id"] = course_id
+    d["employee_id"] = employee_id
+    cols = list(d)
+    ph = ", ".join("?" for _ in cols)
+    with get_connection() as conn:
+        cur = conn.execute(
+            f"INSERT OR IGNORE INTO course_employees ({', '.join(cols)}) "
+            f"VALUES ({ph})", [d[c] for c in cols])
+        return cur.lastrowid if cur.rowcount else 0
+
+
+def unenroll_employee(course_id, employee_id) -> None:
+    """Gỡ 1 nhân viên khỏi 1 khóa học."""
+    with get_connection() as conn:
+        conn.execute(
+            "DELETE FROM course_employees WHERE course_id = ? AND employee_id = ?",
+            (course_id, employee_id))
+
+
+def update_enrollment(enrollment_id, data: dict) -> None:
+    _update("course_employees", COURSE_EMPLOYEE_FIELDS, enrollment_id, data)
+
+
+def get_enrollment(enrollment_id):
+    return _get("course_employees", enrollment_id)
+
+
+def search_course_employees(course_id=None, status: str = ""):
+    """Tra cứu lượt ghi danh (course_employees) theo khóa học / trạng thái học.
+
+    Chỉ lọc bằng 2 ô select (không có tìm kiếm toàn văn). Trả về TẤT CẢ cột của
+    course_employees kèm thông tin nhân viên & tên khóa học để hiển thị bảng.
+    """
+    sql = [
+        "SELECT ce.*, c.title AS course_title,",
+        "       e.code, e.full_name, e.email, e.department_id,",
+        "       d.department_name, d.short_name AS department_short",
+        "FROM course_employees ce",
+        "LEFT JOIN courses c     ON c.course_id = ce.course_id",
+        "LEFT JOIN employees e   ON e.employee_id = ce.employee_id",
+        "LEFT JOIN departments d ON d.department_id = e.department_id",
+        "WHERE 1=1",
+    ]
+    params: list = []
+    if course_id:
+        sql.append("AND ce.course_id = ?")
+        params.append(course_id)
+    if status:
+        sql.append("AND ce.status = ?")
+        params.append(status)
+    sql.append("ORDER BY e.full_name")
+    with get_connection() as conn:
+        return conn.execute(" ".join(sql), params).fetchall()
+
+
+def count_course_employees() -> int:
+    with get_connection() as conn:
+        return conn.execute("SELECT COUNT(*) FROM course_employees").fetchone()[0]
 
 
 def find_duplicates(email=None, phone=None, exclude_id=None):

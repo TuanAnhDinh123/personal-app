@@ -28,10 +28,20 @@ class ComboBox(QComboBox):
     con trỏ vô tình dừng trên select-box. Ta bỏ qua (ignore) wheel để nó truyền
     lên cha (vùng cuộn/hộp thoại) — trang vẫn cuộn bình thường. Khi popup đang mở,
     sự kiện wheel đi vào view của popup (không qua đây) nên vẫn cuộn danh sách được.
+
+    `on_open` (tùy chọn): callable chạy NGAY TRƯỚC khi bung danh sách — dùng để
+    nạp lại option từ DB, đảm bảo luôn tươi mới (trang bị cache vẫn cập nhật kịp).
     """
+
+    on_open = None
 
     def wheelEvent(self, e):
         e.ignore()
+
+    def showPopup(self):
+        if callable(self.on_open):
+            self.on_open()
+        super().showPopup()
 
 
 class TextEdit(QTextEdit):
@@ -330,9 +340,13 @@ class FilterSelect(QWidget):
     changed = Signal()
     _ALL = "— Tất cả —"   # dòng đầu trong menu để bỏ chọn, quay về 'tất cả'
 
-    def __init__(self, title, parent=None):
+    def __init__(self, title, parent=None, allow_all=True):
         super().__init__(parent)
         self._title = title
+        # allow_all=False → KHÔNG có dòng '— Tất cả —'; luôn có đúng 1 lựa chọn
+        # thực (option đầu tiên) → dùng cho ô bắt buộc chọn 1 (vd 1 khóa học).
+        self._allow_all = allow_all
+        self._first = 1 if allow_all else 0   # index option THỰC đầu tiên
         self.setFixedHeight(54)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -352,29 +366,56 @@ class FilterSelect(QWidget):
         cur = self.value()
         self.combo.blockSignals(True)
         self.combo.clear()
-        self.combo.addItem(self._ALL)                     # index 0 = bỏ chọn
+        if self._allow_all:
+            self.combo.addItem(self._ALL)                 # index 0 = bỏ chọn
         self.combo.addItems([str(x) for x in labels])
         i = self.combo.findText(cur) if cur else -1
-        self.combo.setCurrentIndex(i if i >= 1 else -1)   # -1 → placeholder
+        if i >= self._first:
+            self.combo.setCurrentIndex(i)                 # giữ lựa chọn cũ nếu còn
+        elif self._allow_all:
+            self.combo.setCurrentIndex(-1)                # -1 → placeholder 'tất cả'
+        else:
+            self.combo.setCurrentIndex(0 if self.combo.count() else -1)  # option đầu
         self.combo.blockSignals(False)
         self._sync()
 
+    def set_open_hook(self, callback):
+        """Đăng ký hàm chạy mỗi khi người dùng bung dropdown (để nạp lại option
+        từ DB → luôn tươi mới dù trang đã bị cache)."""
+        self.combo.on_open = callback
+
     def value(self):
-        return self.combo.currentText() if self.combo.currentIndex() >= 1 else ""
+        return (self.combo.currentText()
+                if self.combo.currentIndex() >= self._first else "")
+
+    def set_value(self, label):
+        """Chọn sẵn 1 option theo nhãn (đặt mặc định bằng code). KHÔNG phát tín
+        hiệu `changed`; nhãn rỗng / không có trong danh sách → về 'tất cả'
+        (allow_all=True) hoặc option đầu (allow_all=False)."""
+        i = self.combo.findText(str(label)) if label else -1
+        if i >= self._first:
+            self.combo.setCurrentIndex(i)
+        elif self._allow_all:
+            self.combo.setCurrentIndex(-1)
+        else:
+            self.combo.setCurrentIndex(0 if self.combo.count() else -1)
+        self._sync()
 
     def clear(self):
-        self.combo.setCurrentIndex(-1)
+        # allow_all=False không có 'tất cả' → về option đầu thay vì bỏ chọn.
+        self.combo.setCurrentIndex(-1 if self._allow_all else
+                                   (0 if self.combo.count() else -1))
         self._sync()
 
     def _on_activated(self, idx):
-        if idx <= 0:                       # chọn '— Tất cả —' → về placeholder
+        if self._allow_all and idx <= 0:   # chọn '— Tất cả —' → về placeholder
             self.combo.setCurrentIndex(-1)
         self._sync()
         self.changed.emit()
 
     def _sync(self):
         """Đồng bộ nhãn nổi + trạng thái viền theo việc đã chọn hay chưa."""
-        floated = self.combo.currentIndex() >= 1
+        floated = self.combo.currentIndex() >= self._first
         self.float_lbl.setVisible(floated)
         self.combo.setProperty("floated", "true" if floated else "false")
         self.combo.style().unpolish(self.combo)

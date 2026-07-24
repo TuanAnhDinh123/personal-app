@@ -22,6 +22,7 @@ _MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 DEFAULTS = {
     "api_key":  "",                 # API key Gemini, dùng chung cho các tính năng AI
     "ai_model": "gemini-3.6-flash",  # model mặc định khi gọi AI
+    "course_template_path": "",     # file Excel mẫu để xuất roster khóa học
 }
 
 # Section cũ (tool "Quét CV bằng AI" từng lưu API key/model ở đây). Dùng để tự

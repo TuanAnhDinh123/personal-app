@@ -75,15 +75,27 @@ FONT_FAMILY = "Segoe UI"
 
 CATEGORY_COLORS = {
     "Tệp & Tài liệu": PALETTE["--cat-files"],
-    "Dữ liệu":        PALETTE["--cat-data"],
     "Văn phòng":      PALETTE["--cat-office"],
     "Tuyển dụng":     PALETTE["--cat-hr"],
+    "Nhân sự":        PALETTE["--cat-data"],
     "Demo":           PALETTE["--accent"],
 }
+
+# Thứ tự hiển thị nhóm ở sidebar / trang chủ (nhóm không có trong đây xếp sau,
+# theo tên). "Master Data" luôn được main_window tách xuống cuối riêng.
+CATEGORY_ORDER = ["Tuyển dụng", "Nhân sự", "Tệp & Tài liệu", "Văn phòng"]
 
 
 def category_color(category):
     return CATEGORY_COLORS.get(category, PALETTE["--cat-default"])
+
+
+def category_rank(category):
+    """Chỉ số sắp xếp nhóm; nhóm lạ trả số lớn để xếp sau."""
+    try:
+        return CATEGORY_ORDER.index(category)
+    except ValueError:
+        return len(CATEGORY_ORDER)
 
 
 def asset(name):

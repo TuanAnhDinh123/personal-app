@@ -15,6 +15,8 @@ EMOJI_ICON = {
     "📝": "file-text",
     "📄": "files",
     "🙋": "users",
+    "👥": "users",
+    "🎓": "award",
     "🏢": "building",
     "💼": "briefcase",
     "📋": "clipboard",

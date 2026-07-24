@@ -42,6 +42,13 @@ def build():
     fields["api_key"].widget.textChanged.connect(
         lambda *_: fields["ai_model"].widget.reset())
 
+    # ---- Nhóm Xuất Excel ----
+    inner = _group_card(outer_lay)
+    widgets.section_label(inner, "Xuất Excel khóa học")
+    fields["course_template_path"] = widgets.file_row(
+        inner, "File Excel mẫu (roster khóa học)", mode="file")
+    fields["course_template_path"].set(data["course_template_path"])
+
     # ---- Nút lưu ----
     # Thẻ tự chừa CARD_PAD cho bóng → nút (không phải thẻ) thêm lề trái CARD_PAD
     # để thẳng hàng mép thẻ nhìn thấy.
@@ -52,6 +59,7 @@ def build():
         values = {
             "api_key": fields["api_key"].get().strip(),
             "ai_model": fields["ai_model"].get().strip() or settings.DEFAULTS["ai_model"],
+            "course_template_path": fields["course_template_path"].get().strip(),
         }
         settings.save(values)
         dialogs.success(outer, "Đã lưu", "Đã lưu cài đặt ✅")
