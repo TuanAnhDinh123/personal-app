@@ -9,7 +9,7 @@ Khác biệt với bản Tk: mỗi hàm nhận `parent` là QWidget CÓ SẴN la
 """
 import os
 
-from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -210,9 +210,13 @@ class ChoiceValue:
         return self._w.currentText()
 
     def set(self, value):
-        i = self._w.findText(str(value))
+        v = str(value) if value is not None else ""
+        i = self._w.findText(v)
         if i >= 0:
             self._w.setCurrentIndex(i)
+        elif self._w.isEditable():
+            # Combobox cho gõ tay (vd ô Model): giữ giá trị dù chưa có trong list.
+            self._w.setCurrentText(v)
 
     @property
     def widget(self):
@@ -278,6 +282,104 @@ def dropdown(parent, label, options):
     combo = QComboBox(block)
     combo.addItems([str(o) for o in options])
     v.addWidget(combo)
+    return ChoiceValue(combo)
+
+
+class _FetchCombo(QComboBox):
+    """Combobox tự TẢI danh sách lựa chọn khi người dùng bấm mở.
+
+    `fetch_fn()` chạy ở luồng nền (tránh treo UI), trả về list[str] hoặc ném lỗi.
+    Cho phép gõ tay (editable) để vẫn nhập được giá trị tùy ý. Trạng thái tải /
+    lỗi hiển thị qua nhãn gắn bằng `bind_status`.
+    """
+
+    # Kết quả từ luồng nền → phát tín hiệu để cập nhật UI ở luồng chính (an toàn).
+    _loaded = Signal(list)
+    _failed = Signal(str)
+
+    def __init__(self, fetch_fn, parent=None):
+        super().__init__(parent)
+        self.setEditable(True)
+        self.setInsertPolicy(QComboBox.NoInsert)
+        self._fetch_fn = fetch_fn
+        self._loading = False
+        self._fetched_once = False
+        self._status = None
+        self._loaded.connect(self._on_loaded)
+        self._failed.connect(self._on_failed)
+
+    def bind_status(self, label):
+        self._status = label
+
+    def reset(self):
+        """Cho phép tải lại danh sách ở lần mở kế tiếp (vd khi API key đổi)."""
+        self._fetched_once = False
+
+    def showPopup(self):
+        if not self._loading and not self._fetched_once:
+            self._start_fetch()
+        super().showPopup()
+
+    def _start_fetch(self):
+        import threading
+        self._loading = True
+        self._set_status("Đang tải danh sách model…")
+
+        def work():
+            try:
+                models = list(self._fetch_fn() or [])
+                self._loaded.emit(models)
+            except Exception as exc:  # noqa: BLE001 — báo mọi lỗi lại cho UI
+                self._failed.emit(str(exc))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_loaded(self, models):
+        self._loading = False
+        self._fetched_once = True
+        current = self.currentText()
+        self.blockSignals(True)
+        self.clear()
+        self.addItems(models)
+        if current:
+            i = self.findText(current)
+            self.setCurrentIndex(i) if i >= 0 else self.setEditText(current)
+        self.blockSignals(False)
+        self._set_status("" if models else "Không có model khả dụng cho key này.")
+        # Người dùng vẫn đang mở danh sách → mở lại để thấy list vừa tải.
+        if self.view().isVisible():
+            self.hidePopup()
+            self.showPopup()
+
+    def _on_failed(self, msg):
+        self._loading = False
+        self._set_status(f"Không tải được danh sách model: {msg}")
+        if self.view().isVisible():
+            self.hidePopup()
+
+    def _set_status(self, text):
+        if self._status is None:
+            return
+        self._status.setText(text)
+        self._status.setVisible(bool(text))
+
+
+def model_select_row(parent, label, fetch_fn):
+    """Ô chọn Model: combobox bấm vào sẽ tự gọi `fetch_fn()` lấy danh sách model.
+
+    fetch_fn() trả về list[str] (chạy nền). Cho gõ tay nếu muốn model ngoài list.
+    Trả về ChoiceValue (.get()/.set()) như dropdown; `.widget.reset()` để buộc
+    tải lại ở lần mở sau.
+    """
+    block, v = _field_block(parent, label)
+    combo = _FetchCombo(fetch_fn, block)
+    v.addWidget(combo)
+    status = QLabel("", block)
+    status.setObjectName("Hint")
+    status.setWordWrap(True)
+    status.hide()
+    v.addWidget(status)
+    combo.bind_status(status)
     return ChoiceValue(combo)
 
 

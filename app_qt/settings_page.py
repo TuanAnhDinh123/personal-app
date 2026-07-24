@@ -34,17 +34,13 @@ def build():
     widgets.section_label(inner, "AI (Gemini)")
     fields["api_key"] = widgets.text_row(inner, "API key Gemini")
     fields["api_key"].set(data["api_key"])
-    widgets.hint(
-        inner,
-        "Lấy key miễn phí tại https://aistudio.google.com/apikey — key dùng chung "
-        "cho mọi tính năng AI (vd Quét CV bằng AI) và được lưu trong máy.")
-    fields["ai_model"] = widgets.text_row(inner, "Model mặc định")
+    fields["ai_model"] = widgets.model_select_row(
+        inner, "AI Model",
+        lambda: settings.list_models(fields["api_key"].get()))
     fields["ai_model"].set(data["ai_model"])
-    widgets.hint(
-        inner,
-        "Mặc định 'gemini-3.6-flash'. Free tier giới hạn theo TỪNG model; nếu một "
-        "model báo lỗi 429/503 do chạm trần, đổi sang model khác "
-        "(gemini-3.5-flash, gemini-2.5-flash).")
+    # Đổi API key thì cho phép tải lại danh sách model ở lần mở kế tiếp.
+    fields["api_key"].widget.textChanged.connect(
+        lambda *_: fields["ai_model"].widget.reset())
 
     # ---- Nút lưu ----
     # Thẻ tự chừa CARD_PAD cho bóng → nút (không phải thẻ) thêm lề trái CARD_PAD
