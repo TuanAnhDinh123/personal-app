@@ -17,9 +17,12 @@ from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QVBoxLayout
 from app.core import cv_repository as repo
 from app.core import cv_schema
 from app.core import settings as app_settings
+from app.core import signature_scan
 from app_qt import dialogs, widgets
 from app_qt.base_tool import BaseTool
 from app_qt.components.form_dialog import FormDialog
+from app_qt.components.modal import ModalDialog
+from app_qt.components.progress_dialog import ProgressDialog
 from app_qt.components.table import DataTable
 
 try:
@@ -95,6 +98,10 @@ class CourseDbTool(BaseTool):
             w.changed.connect(self._reload)
             filters.addWidget(w, 1)
         filters.addStretch(1)
+        self._btn_scan = widgets.button(
+            self._root, "Quét chữ ký (AI)", variant="info", icon="sparkles",
+            command=self._scan_signatures)
+        filters.addWidget(self._btn_scan)
         self._btn_export = widgets.button(
             self._root, "Xuất Excel", variant="primary", icon="save",
             command=self._export_roster)
@@ -224,3 +231,137 @@ class CourseDbTool(BaseTool):
         dialogs.success(
             self._root, "Hoàn tất",
             f'Đã xuất {len(export_rows)} nhân viên ("{not_started}") vào:\n{path}')
+
+    # ---------------------------------------------------- quét chữ ký bằng AI
+    # HR scan bảng điểm danh đã ký → gửi cho Gemini nhận diện ai đã ký → review →
+    # cập nhật status sang "Completed". Chỉ đối chiếu nhóm "Not started" của khóa
+    # đang chọn (đúng đối tượng cần ký, khớp với file đã xuất).
+    def _scan_signatures(self):
+        gen = app_settings.load()
+        api_key = (gen.get("api_key") or "").strip()
+        model = (gen.get("ai_model") or "").strip() or app_settings.DEFAULTS["ai_model"]
+        if not api_key:
+            return dialogs.error(
+                self._root, "Chưa có API key",
+                "Hãy vào Cài đặt → AI (Gemini) và nhập API key trước.")
+
+        course_id = self._course_opts.get(self.sel_course.value())
+        if not course_id:
+            return dialogs.info(self._root, "Chưa chọn khóa học",
+                                "Hãy chọn một khóa học để quét.")
+
+        not_started = cv_schema.COURSE_STATUS_CHOICES[0]   # "Not started"
+        roster = repo.search_course_employees(course_id=course_id, status=not_started)
+        if not roster:
+            return dialogs.info(
+                self._root, "Không có dữ liệu",
+                f'Khóa học này không có nhân viên nào ở trạng thái "{not_started}".')
+
+        path, _ = QFileDialog.getOpenFileName(
+            self._root, "Chọn file scan chữ ký (ảnh/PDF)", "",
+            "Ảnh & PDF (*.png *.jpg *.jpeg *.webp *.pdf)")
+        if not path:
+            return
+        if not signature_scan.is_supported(path):
+            return dialogs.error(self._root, "Định dạng không hỗ trợ",
+                                 "Chỉ hỗ trợ ảnh (PNG/JPG/WEBP) hoặc PDF.")
+        try:
+            with open(path, "rb") as f:
+                file_bytes = f.read()
+        except Exception as exc:   # noqa: BLE001
+            return dialogs.error(self._root, "Lỗi đọc file", str(exc))
+        mime = signature_scan.guess_mime(path)
+        roster_min = [{"code": r["code"] or "", "full_name": r["full_name"] or ""}
+                      for r in roster]
+
+        def job(ctx):
+            ctx.status(f"Đang gửi cho AI ({model})…")
+
+            def on_retry(attempt, wait, reason):
+                ctx.log(f"Thử lại lần {attempt} sau {wait}s ({reason})")
+
+            data = signature_scan.detect_signatures(
+                api_key, model, file_bytes, mime, roster_min,
+                on_retry=on_retry, should_cancel=lambda: ctx.cancelled)
+            ctx.step()
+            return data
+
+        def on_finish(dlg, result):
+            dlg.close()
+            rows = result.get("rows", []) if isinstance(result, dict) else []
+            by_code = {str(r["code"] or "").strip(): r
+                       for r in roster if (r["code"] or "").strip()}
+            signed, unmatched, seen = [], [], set()
+            for item in rows:
+                if not item.get("signed"):
+                    continue
+                pid = str(item.get("person_id") or "").strip()
+                if pid in by_code and pid not in seen:
+                    signed.append(by_code[pid])
+                    seen.add(pid)
+                elif pid:
+                    unmatched.append((pid, (item.get("name") or "").strip()))
+            if not signed:
+                note = ""
+                if unmatched:
+                    note = ("\n\nAI báo có ký nhưng không khớp mã NV nào: "
+                            + ", ".join(p for p, _ in unmatched[:10]))
+                return dialogs.info(
+                    self._root, "Không có ai đã ký",
+                    "AI không nhận thấy chữ ký khớp với nhân viên trong khóa." + note)
+            self._review_signed(signed, unmatched)
+
+        dlg = ProgressDialog(self._root, "Đang nhận diện chữ ký…", total=1,
+                             subtitle=f"Phân tích {os.path.basename(path)} bằng {model}")
+        dlg.start(job, on_finish)
+
+    def _review_signed(self, signed_rows, unmatched):
+        """Bảng review: HR bỏ tick người AI nhận nhầm rồi xác nhận → cập nhật status."""
+        completed = cv_schema.COURSE_STATUS_CHOICES[-1]   # "Completed"
+        dlg = ModalDialog(self._root, size="md")
+        card, lay = dlg.build_shell("Xác nhận nhân viên đã ký")
+
+        hint = QLabel(
+            f"AI nhận diện {len(signed_rows)} nhân viên đã ký. Bỏ tick người bị nhận "
+            f'nhầm, rồi bấm Xác nhận để cập nhật trạng thái sang "{completed}".')
+        hint.setObjectName("Hint")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+
+        cols = [
+            ("code",            "Mã NV",   110, "w"),
+            ("full_name",       "Họ tên",  200, "w"),
+            ("department_name", "Bộ phận", 150, "w"),
+        ]
+        table = DataTable(cols, pk="enrollment_id", checkable=True)
+        table.set_rows(signed_rows)
+        table._model.set_all_checked(True)   # tick sẵn tất cả người AI báo đã ký
+        dlg.set_grow_region(table)
+        lay.addWidget(table, 1)
+
+        if unmatched:
+            warn = QLabel(
+                "Không khớp mã NV (bỏ qua): "
+                + ", ".join(f"{p} {n}".strip() for p, n in unmatched[:15]))
+            warn.setObjectName("Hint")
+            warn.setWordWrap(True)
+            lay.addWidget(warn)
+
+        def _confirm():
+            chosen = table.checked_rows()
+            for r in chosen:
+                repo.update_enrollment(r["enrollment_id"], {"status": completed})
+            dlg.accept()
+            self._reload()
+            dialogs.success(
+                self._root, "Hoàn tất",
+                f'Đã cập nhật {len(chosen)} nhân viên sang "{completed}".')
+
+        foot = QHBoxLayout()
+        foot.addStretch(1)
+        foot.addWidget(widgets.button(card, "Hủy", variant="neutral", icon="x",
+                                      command=dlg.reject))
+        foot.addWidget(widgets.button(card, "Xác nhận", variant="success",
+                                      icon="check", command=_confirm))
+        lay.addLayout(foot)
+        dlg.exec()
