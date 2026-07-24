@@ -194,6 +194,20 @@ QComboBox QAbstractItemView {
     selection-color: {{--text}};
 }
 
+/* Ô lọc 'nhãn nổi' (FilterSelect): khi ĐÃ chọn, chừa chỗ trên cho nhãn +
+   viền đổi sang màu nhấn; nhãn nổi nhỏ, màu nhấn. */
+QComboBox[floated="true"] {
+    padding-top: 20px;
+    padding-bottom: 2px;
+    border: 1px solid {{--accent}};
+}
+#FloatLabel {
+    color: {{--accent}};
+    font-size: 11px;
+    font-weight: 600;
+    background: transparent;
+}
+
 /* ============================================================
    CHECKBOX / TOGGLE
    ============================================================ */

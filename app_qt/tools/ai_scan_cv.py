@@ -6,6 +6,7 @@ gặp lỗi (giới hạn key free) thì dừng, lần sau bấm lại sẽ qué
 Luồng nền chạy qua QThread trong ProgressDialog dùng chung.
 """
 import os
+import re
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -14,7 +15,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 from app.core import config, settings
 from app.core.ai_cv_scan import (
     _call_gemini, _Cancelled, append_rows_to_excel, done_folder_for,
-    move_to_done, read_jd_file,
+    move_to_done, read_jd_file, resolve_done_target,
 )
 from app_qt import dialogs, theme, widgets
 from app_qt.base_tool import BaseTool
@@ -152,6 +153,10 @@ class AiScanCvTool(BaseTool):
     def _scan(self, files, api_key, model, jd, extra, out, folder):
         total = len(files)
         done_dir = done_folder_for(folder)
+        # 'batch' = SỐ bóc ra từ tên thư mục chứa CV (vd "batch1" → 1). Không có
+        # số trong tên → để trống.
+        m = re.search(r"\d+", os.path.basename(os.path.normpath(folder)))
+        batch = int(m.group()) if m else None
 
         def job(ctx):
             # Quét TUẦN TỰ; mỗi CV thành công được ghi Excel + chuyển sang folder
@@ -186,6 +191,12 @@ class AiScanCvTool(BaseTool):
                     break
 
                 data["file"] = p.name
+                data["batch"] = batch
+                # Tính TRƯỚC nơi file CV sẽ nằm sau khi quét (folder '…_da_quet')
+                # để ghi luôn đường dẫn đầy đủ vào Excel — lúc import không cần
+                # hỏi lại thư mục CV nữa.
+                target = resolve_done_target(p, done_dir)
+                data["cv_path"] = str(target)
                 row = {k: (v if v is not None else "") for k, v in data.items()}
                 try:
                     append_rows_to_excel([row], out)
@@ -201,7 +212,7 @@ class AiScanCvTool(BaseTool):
                     break
 
                 try:
-                    move_to_done(p, done_dir)
+                    move_to_done(p, done_dir, target=target)
                 except Exception as exc:
                     ctx.log(f"⚠ Đã ghi Excel nhưng không chuyển được file {p.name}: {exc}")
                 done.append(p.name)

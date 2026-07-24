@@ -6,16 +6,21 @@ app.core.cv_schema) dùng lại 100% — chỉ dựng lại giao diện bằng Q
     • 3 trang Master Data: Bộ phận · Vị trí · JD (dùng CrudTablePanel).
 """
 import os
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel,
+    QApplication, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel,
     QLineEdit, QToolTip, QVBoxLayout, QWidget,
 )
 
 from app.core import cv_repository as repo
 from app.core import cv_schema
+from app.core.cv_scan import (
+    _open_existing_workbook, _open_template_workbook, _split_id_name,
+    _write_candidates,
+)
 from app_qt import dialogs, theme, widgets
 from app_qt.base_tool import BaseTool
 from app_qt.components.crud_panel import CrudTablePanel
@@ -28,26 +33,50 @@ try:
 except ImportError:
     _OPENPYXL_OK = False
 
-_NONE = "— Chưa chọn —"
-_ALL_POS = "— Mọi vị trí —"
+# ─────────────────────────────────────────────────────────────────────────
+#  BỀ RỘNG (px) CÁC CỘT BẢNG ỨNG VIÊN — chỉnh tùy ý ở đây.
+#  (Cột checkbox 'chọn' nằm ở app_qt/components/table.py → CHECK_COL_WIDTH.)
+# ─────────────────────────────────────────────────────────────────────────
+CAND_COL_WIDTHS = {
+    "candidate_id":    40,
+    "full_name":       180,
+    "email":           210,
+    "phone":           120,
+    "position_title":  100,
+    "fit_score":       60,
+    "cv_file_path":    160,
+    "department_name": 140,
+    "batch":           90,
+    "status":          100,
+    "date_of_birth":   95,
+    "applied_at":      105,
+    "note":            200,
+}
 
-# Cột bảng ỨNG VIÊN: (khóa, tiêu đề, rộng, canh lề).
+_W = CAND_COL_WIDTHS
+
+# Cột bảng ỨNG VIÊN: (khóa, tiêu đề, rộng, canh lề[, formatter]).
 _CAND_COLUMNS = [
-    ("candidate_id",    "ID",         50,  "center"),
-    ("full_name",       "Họ tên",     180, "w"),
-    ("email",           "Email",      210, "w"),
-    ("phone",           "SĐT",        120, "w"),
-    ("position_title",  "Vị trí",     100, "w"),
-    ("fit_score",       "Điểm",       60,  "center"),
-    ("cv_file_path",    "CV",   160, "w",
+    ("candidate_id",    "ID",         _W["candidate_id"],    "center"),
+    ("full_name",       "Họ tên",     _W["full_name"],       "w"),
+    ("email",           "Email",      _W["email"],           "w"),
+    ("phone",           "SĐT",        _W["phone"],           "w"),
+    ("position_title",  "Vị trí",     _W["position_title"],  "w"),
+    ("fit_score",       "Điểm",       _W["fit_score"],       "center"),
+    ("cv_file_path",    "CV",         _W["cv_file_path"],    "w",
      lambda v: os.path.basename(str(v)) if v else ""),
-    ("department_name", "Bộ phận",    140, "w"),
-    ("status",          "Trạng thái", 100, "center"),
-    ("date_of_birth",   "Ngày sinh",  95,  "center"),
-    ("applied_at",      "Ngày nộp",   105, "center"),
+    ("department_name", "Bộ phận",    _W["department_name"], "w"),
+    ("batch",           "Batch",      _W["batch"],           "center"),
+    ("status",          "Trạng thái", _W["status"],          "center"),
+    ("date_of_birth",   "Ngày sinh",  _W["date_of_birth"],   "center"),
+    ("applied_at",      "Ngày nộp",   _W["applied_at"],      "center"),
+    ("note",            "Ghi chú",    _W["note"],            "w",
+     lambda v: (str(v).replace("\n", " ")[:60] + "…")
+     if v and len(str(v)) > 60 else (str(v).replace("\n", " ") if v else "")),
 ]
 
 _EXCEL_HEADER_MAP = {
+    "batch":            "batch",
     "họ tên":           "full_name",
     "ngày sinh":        "date_of_birth",
     "email":            "email",
@@ -56,7 +85,8 @@ _EXCEL_HEADER_MAP = {
     "đánh giá phù hợp": "fit_summary",
     "ưu điểm":          "strengths",
     "nhược điểm":       "weaknesses",
-    "tên file":         "cv_file_path",
+    "tên file":         "cv_file_path",   # file cũ: chỉ có tên → cần hỏi thư mục CV
+    "đường dẫn cv":     "cv_file_path",   # file mới: đã có sẵn đường dẫn đầy đủ
 }
 
 
@@ -452,15 +482,13 @@ class CandidateDbTool(BaseTool):
 
         widgets.section_label(card, "Tìm kiếm ứng viên")
         self._build_search_bar(lay)
-        hint = QLabel("Gõ tên / email / SĐT rồi Enter. Lọc thêm theo vị trí và trạng thái.")
-        hint.setObjectName("Hint")
-        lay.addWidget(hint)
 
         self._build_toolbar(lay)
 
         self.table = DataTable(_CAND_COLUMNS, pk="candidate_id",
                                stretch_key="email", on_double=self._edit,
-                               link_keys={"cv_file_path"}, on_link=self._on_file_link)
+                               link_keys={"cv_file_path"}, on_link=self._on_file_link,
+                               checkable=True)
         lay.addWidget(self.table, 1)
 
         self.count_lbl = QLabel("")
@@ -475,28 +503,30 @@ class CandidateDbTool(BaseTool):
 
     # -------------------------------------------------------------- tìm kiếm
     def _build_search_bar(self, lay):
-        bar = QHBoxLayout()
-        bar.setSpacing(8)
+        # Ô tìm kiếm toàn văn: quét MỌI field text. Tìm ngay khi rời ô (tab /
+        # click ra ngoài) hoặc nhấn Enter — editingFinished bao cả hai.
         self.ent_kw = QLineEdit()
-        self.ent_kw.setPlaceholderText("Tìm theo tên, email, số điện thoại…")
-        self.ent_kw.returnPressed.connect(self._reload)
-        bar.addWidget(self.ent_kw, 1)
+        self.ent_kw.setPlaceholderText("Tìm kiếm…")
+        self.ent_kw.setClearButtonEnabled(True)
+        self.ent_kw.addAction(widgets.svg_icon("search", theme.TEXT_MUTED, 16),
+                              QLineEdit.LeadingPosition)
+        self.ent_kw.editingFinished.connect(self._reload)
+        lay.addWidget(self.ent_kw)
 
-        self.cb_pos = QComboBox()
-        self.cb_pos.setMinimumWidth(180)
-        self.cb_pos.addItem(_ALL_POS)
-        bar.addWidget(self.cb_pos)
-
-        self.cb_status = QComboBox()
-        self.cb_status.setMinimumWidth(130)
-        self.cb_status.addItems(["Tất cả"] + cv_schema.STATUS_CHOICES)
-        bar.addWidget(self.cb_status)
-
-        bar.addWidget(widgets.button(None, "Tìm", variant="primary", icon="search",
-                                     command=self._reload))
-        bar.addWidget(widgets.button(None, "", variant="neutral", icon="x",
-                                     command=self._clear_filters))
-        lay.addLayout(bar)
+        # Hàng ô lọc dạng select 'nhãn nổi' — chọn 1 option là tìm luôn.
+        filters = QHBoxLayout()
+        filters.setSpacing(10)
+        self.sel_pos = widgets.FilterSelect("Vị trí")
+        self.sel_dept = widgets.FilterSelect("Bộ phận")
+        self.sel_status = widgets.FilterSelect("Trạng thái")
+        self.sel_batch = widgets.FilterSelect("Batch")
+        self.sel_status.set_options(cv_schema.STATUS_CHOICES)
+        for w in (self.sel_pos, self.sel_dept, self.sel_status, self.sel_batch):
+            w.changed.connect(self._reload)
+            filters.addWidget(w, 1)
+        filters.addWidget(widgets.button(None, "Đặt lại", variant="neutral",
+                                         icon="eraser", command=self._clear_filters), 0)
+        lay.addLayout(filters)
 
     def _build_toolbar(self, lay):
         bar = QHBoxLayout()
@@ -507,26 +537,28 @@ class CandidateDbTool(BaseTool):
                         command=self._show_details))
         bar.addWidget(B(None, "Nhập từ Excel", variant="primary", icon="download",
                         command=self._batch_import))
+        self._btn_export = B(None, "Xuất Excel", variant="warning", icon="save",
+                             command=self._export_excel)
+        bar.addWidget(self._btn_export)
         bar.addStretch(1)
         bar.addWidget(B(None, "Tải lại", variant="neutral", icon="refresh", command=self._reload))
         lay.addLayout(bar)
 
     # -------------------------------------------------------------- dữ liệu
     def _reload(self):
+        # Nạp lại danh sách vị trí / bộ phận / batch (giữ lựa chọn cũ nếu còn).
         pos_opts = _position_options()
-        names = [_ALL_POS] + list(pos_opts)
-        cur = self.cb_pos.currentText()
-        self.cb_pos.blockSignals(True)
-        self.cb_pos.clear()
-        self.cb_pos.addItems(names)
-        self.cb_pos.setCurrentText(cur if cur in names else _ALL_POS)
-        self.cb_pos.blockSignals(False)
+        dept_opts = _dept_options()
+        self.sel_pos.set_options(pos_opts.keys())
+        self.sel_dept.set_options(dept_opts.keys())
+        self.sel_batch.set_options(repo.list_batches())
 
-        pos_id = pos_opts.get(self.cb_pos.currentText())
-        status = self.cb_status.currentText()
-        status = "" if status == "Tất cả" else status
+        pos_id = pos_opts.get(self.sel_pos.value())
+        dept_id = dept_opts.get(self.sel_dept.value())
 
-        rows = repo.search_candidates(self.ent_kw.text(), pos_id, status)
+        rows = repo.search_candidates(
+            self.ent_kw.text(), pos_id, self.sel_status.value(),
+            department_id=dept_id, batch=self.sel_batch.value())
         self._rows = rows
         self.table.set_rows(rows)
         self.count_lbl.setText(
@@ -534,8 +566,8 @@ class CandidateDbTool(BaseTool):
 
     def _clear_filters(self):
         self.ent_kw.clear()
-        self.cb_pos.setCurrentText(_ALL_POS)
-        self.cb_status.setCurrentText("Tất cả")
+        for w in (self.sel_pos, self.sel_dept, self.sel_status, self.sel_batch):
+            w.clear()
         self._reload()
 
     def _selected_id(self):
@@ -547,6 +579,101 @@ class CandidateDbTool(BaseTool):
     def _show_details(self):
         _CandidateDetailDialog(self._root, getattr(self, "_rows", [])).exec()
 
+    # --------------------------------------------------- xuất Excel (các dòng đã tick)
+    # Dùng lại đúng logic "Quét CV → Trích xuất Excel": ghi vào template có sẵn
+    # (sheet "Candidates"). Chọn file MỚI → tạo theo template; chọn file CÓ SẴN
+    # đúng mẫu → ghi nối tiếp. (Tương lai gỡ tool "Quét CV", tính năng nằm ở đây.)
+    def _export_excel(self):
+        if not _OPENPYXL_OK:
+            dialogs.error(self._root, "Thiếu thư viện",
+                          "Cần openpyxl để xuất Excel:\n  pip install openpyxl")
+            return
+        rows = self.table.checked_rows()
+        if not rows:
+            dialogs.info(self._root, "Chưa chọn",
+                         "Hãy tick chọn ít nhất một ứng viên trong bảng để xuất.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self._root, "Xuất ứng viên đã chọn ra Excel", "Candidates.xlsx",
+            "Excel (*.xlsx)", "", QFileDialog.Option.DontConfirmOverwrite)
+        if not path:
+            return
+        if not path.lower().endswith(".xlsx"):
+            path += ".xlsx"
+
+        export_rows = [self._to_export_row(r) for r in rows]
+        self._set_export_loading(True)
+        try:
+            if os.path.isfile(path):
+                wb, ws = _open_existing_workbook(path)
+                mode = "nối tiếp"
+            else:
+                wb, ws = _open_template_workbook()
+                mode = "mới"
+            _write_candidates(ws, export_rows)
+            wb.save(path)
+        except PermissionError:
+            dialogs.error(self._root, "Không ghi được file",
+                          f"File Excel đang mở? Hãy đóng rồi thử lại:\n{path}")
+            return
+        except Exception as exc:
+            dialogs.error(self._root, "Lỗi xuất Excel", str(exc))
+            return
+        finally:
+            self._set_export_loading(False)
+
+        if dialogs.confirm(
+                self._root, "Hoàn tất",
+                f"Đã xuất {len(export_rows)} ứng viên ({mode}) vào:\n{path}\n\nMở file ngay?",
+                ok_label="Mở file", cancel_label="Đóng"):
+            self._launch(path)
+
+    def _set_export_loading(self, loading):
+        """Bật/tắt trạng thái 'đang xuất' cho nút Xuất Excel (khóa nút + đổi chữ).
+
+        Xuất chạy đồng bộ trên luồng chính; ép vẽ lại ngay để nút hiện trạng thái
+        loading TRƯỚC khi bắt đầu ghi file (thao tác nặng làm UI đứng một chút).
+        """
+        btn = self._btn_export
+        if loading:
+            self._export_label = btn.text()
+            btn.setEnabled(False)
+            btn.setText("Đang xuất…")
+        else:
+            btn.setText(getattr(self, "_export_label", "Xuất Excel"))
+            btn.setEnabled(True)
+        QApplication.processEvents()
+
+    @staticmethod
+    def _to_export_row(row):
+        """Map 1 dòng ứng viên (DB) → dict theo template Candidates của cv_scan.
+
+        Cột template: batch · id · name · apply (bộ phận) · email · phone.
+        `id` (mã CV) bóc từ tên file CV nếu có dạng '<số>_<tên>'.
+        """
+        rec = {}
+        batch = _txt(row, "batch")
+        if batch:
+            rec["batch"] = int(batch) if batch.isdigit() else batch
+        name = _txt(row, "full_name")
+        if name:
+            rec["name"] = name
+        cv_path = _txt(row, "cv_file_path")
+        if cv_path:
+            cv_id, _ = _split_id_name(Path(cv_path).stem, [])
+            if cv_id:
+                rec["id"] = cv_id
+        dept = _txt(row, "department_name")
+        if dept:
+            rec["apply"] = dept
+        email = _txt(row, "email")
+        if email:
+            rec["email"] = email
+        phone = _txt(row, "phone")
+        if phone:
+            rec["phone"] = phone
+        return rec
+
     # ------------------------------------------------------------- form specs
     def _candidate_form_specs(self):
         return [
@@ -555,8 +682,6 @@ class CandidateDbTool(BaseTool):
             {"key": "email", "label": "Email", "kind": "text"},
             {"key": "phone", "label": "Số điện thoại", "kind": "text"},
             {"key": "date_of_birth", "label": "Ngày sinh (dd/mm/yyyy)", "kind": "text"},
-            {"key": "gender", "label": "Giới tính", "kind": "choice",
-             "choices": cv_schema.GENDER_CHOICES, "allow_empty": True},
             {"key": "address", "label": "Địa chỉ", "kind": "text"},
             {"kind": "section", "label": "Ứng tuyển"},
             {"key": "position_id", "label": "Vị trí ứng tuyển", "kind": "dropdown",
@@ -567,6 +692,7 @@ class CandidateDbTool(BaseTool):
             {"key": "status", "label": "Trạng thái", "kind": "choice",
              "choices": cv_schema.STATUS_CHOICES},
             {"key": "source", "label": "Nguồn CV", "kind": "text"},
+            {"key": "batch", "label": "Batch (đợt quét — chỉ số)", "kind": "int"},
             {"key": "cv_file_path", "label": "File CV (đường dẫn trên máy)", "kind": "file",
              "filetypes": [("PDF/Word", "*.pdf *.doc *.docx"), ("Tất cả", "*.*")]},
             {"kind": "section", "label": "Đánh giá (từ quét CV)"},
@@ -692,8 +818,11 @@ class CandidateDbTool(BaseTool):
                                ok_label="Nhập"):
             return
 
+        # Chỉ hỏi thư mục CV khi còn đường dẫn TƯƠNG ĐỐI cần ghép (file Excel cũ
+        # chỉ có tên file). File mới từ tool quét AI đã ghi sẵn đường dẫn tuyệt
+        # đối nên bỏ qua bước này.
         folder = ""
-        if any((r.get("cv_file_path") or "").strip() for r in rows):
+        if any(self._needs_cv_folder(r) for r in rows):
             folder = QFileDialog.getExistingDirectory(
                 self._root, "Thư mục chứa các file CV (bỏ qua nếu không có)") or ""
 
@@ -732,9 +861,19 @@ class CandidateDbTool(BaseTool):
         dialogs.success(self._root, "Hoàn tất", msg)
 
     @staticmethod
+    def _needs_cv_folder(rec):
+        """True nếu cột CV là đường dẫn TƯƠNG ĐỐI cần ghép với thư mục gốc.
+
+        Đường dẫn tuyệt đối (file mới từ tool quét AI đã ghi sẵn) thì không cần
+        hỏi lại thư mục.
+        """
+        path = (rec.get("cv_file_path") or "").strip()
+        return bool(path) and not os.path.isabs(path)
+
+    @staticmethod
     def _apply_cv_folder(rec, folder):
         fname = (rec.get("cv_file_path") or "").strip()
-        if fname and folder:
+        if fname and folder and not os.path.isabs(fname):
             full = os.path.join(folder, fname)
             rec["cv_file_path"] = full if os.path.isfile(full) else fname
 
@@ -803,8 +942,14 @@ class CandidateDbTool(BaseTool):
             for idx, key in col_key.items():
                 if idx < len(values):
                     v = values[idx]
-                    rec[key] = v if v is not None else ""
+                    v = "" if v is None else v
+                    # 'Tên file' và 'Đường dẫn CV' cùng map vào cv_file_path;
+                    # đừng để một cột rỗng đè lên giá trị đã đọc được từ cột kia.
+                    if v == "" and str(rec.get(key, "")).strip():
+                        continue
+                    rec[key] = v
             rec["fit_score"] = _num(rec.get("fit_score", ""), "decimal")
+            rec["batch"] = _num(rec.get("batch", ""), "int")
             if (rec.get("full_name") or "").strip():
                 rows.append(rec)
         wb.close()

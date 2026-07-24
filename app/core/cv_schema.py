@@ -76,7 +76,6 @@ CREATE TABLE IF NOT EXISTS candidates (
     email            VARCHAR,
     phone            VARCHAR,
     date_of_birth    DATE,
-    gender           VARCHAR,
     address          VARCHAR,
     position_id      INT,               -- tham chiếu mềm → positions.position_id
     years_experience INT,
@@ -84,6 +83,7 @@ CREATE TABLE IF NOT EXISTS candidates (
     applied_at       DATETIME,          -- ngày nộp CV
     status           VARCHAR,           -- Mới / Phỏng vấn / Đạt / Loại…
     source           VARCHAR,           -- nguồn CV
+    batch            INT,               -- đợt/lô quét CV (chỉ lưu SỐ: 1, 2, 3… từ tên thư mục batch1…)
     fit_score        DECIMAL,           -- điểm phù hợp (0–100)
     fit_summary      TEXT,
     strengths        TEXT,
@@ -124,6 +124,13 @@ MIGRATIONS: list[str] = [
     "ALTER TABLE job_descriptions ADD COLUMN updated_at DATETIME",
     "ALTER TABLE candidates ADD COLUMN created_at DATETIME",
     "ALTER TABLE candidates ADD COLUMN updated_at DATETIME",
+    # Cột 'batch' (đợt/lô quét CV) — chỉ lưu SỐ; thêm cho DB đã tồn tại.
+    # LƯU Ý: index cho 'batch' PHẢI tạo Ở ĐÂY (sau ALTER), KHÔNG đặt trong
+    # SCHEMA_SQL — vì executescript(SCHEMA_SQL) chạy TRƯỚC migration, DB cũ chưa
+    # có cột batch sẽ khiến CREATE INDEX ném "no such column: batch" và hỏng cả
+    # init_db (trang không mở được).
+    "ALTER TABLE candidates ADD COLUMN batch INT",
+    "CREATE INDEX IF NOT EXISTS idx_candidates_batch ON candidates(batch)",
     # Bỏ các cột không dùng nữa (SQLite ≥ 3.35 hỗ trợ DROP COLUMN; DB mới đã
     # không có sẵn các cột này nên câu lệnh sẽ bị bỏ qua an toàn).
     "ALTER TABLE departments DROP COLUMN department_code",
@@ -135,7 +142,6 @@ MIGRATIONS: list[str] = [
 # Gợi ý cho các ô chọn ở giao diện (sửa tùy ý).
 STATUS_CHOICES = ["Mới", "Đã liên hệ", "Phỏng vấn", "Đạt", "Loại", "Chờ"]
 POSITION_STATUS_CHOICES = ["Đang tuyển", "Tạm dừng", "Đã đóng"]
-GENDER_CHOICES = ["Nam", "Nữ", "Khác"]
 
 # Danh sách bảng do init_db quản lý — dùng khi cần dựng lại bảng trống lệch schema.
 _MANAGED_TABLES = [

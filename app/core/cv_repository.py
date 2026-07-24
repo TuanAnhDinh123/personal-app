@@ -18,9 +18,9 @@ POSITION_FIELDS = ["department_id", "position_code", "position_title", "level",
                    "headcount", "status"]
 JD_FIELDS = ["position_id", "jd_title", "jd_file_path"]
 CANDIDATE_FIELDS = [
-    "full_name", "email", "phone", "date_of_birth", "gender", "address",
+    "full_name", "email", "phone", "date_of_birth", "address",
     "position_id", "years_experience", "education", "applied_at", "status",
-    "source", "fit_score", "fit_summary", "strengths", "weaknesses",
+    "source", "batch", "fit_score", "fit_summary", "strengths", "weaknesses",
     "cv_file_path", "note",
 ]
 
@@ -345,11 +345,34 @@ def delete_job_description(jd_id) -> None:
 
 # ───────────────────────────── ỨNG VIÊN ─────────────────────────────────
 
-def search_candidates(keyword: str = "", position_id=None,
-                      status: str = ""):
-    """Tìm ứng viên theo từ khóa (tên/email/SĐT), lọc theo vị trí & trạng thái.
+# Các cột TEXT được ô tìm kiếm toàn văn quét qua. KHÔNG gồm:
+#   • field đã có ô lọc riêng dạng select (status, position, department);
+#   • các cột NHẬN XÉT của AI (fit_summary/strengths/weaknesses) — văn bản dài
+#     nên gõ 1–2 từ gần như dòng nào cũng khớp, gây nhiễu kết quả.
+CANDIDATE_SEARCH_FIELDS = [
+    "c.full_name", "c.email", "c.phone", "c.address", "c.education",
+    "c.source", "c.note", "c.cv_file_path",
+]
 
-    Trả kèm `position_title` và `department_name` để hiển thị bảng cho tiện.
+
+def list_batches():
+    """Danh sách các 'batch' (đợt quét) khác nhau đang có trong DB, mới → cũ."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT batch FROM candidates "
+            "WHERE batch IS NOT NULL AND TRIM(batch) <> '' "
+            "ORDER BY batch").fetchall()
+    return [r["batch"] for r in rows]
+
+
+def search_candidates(keyword: str = "", position_id=None, status: str = "",
+                      department_id=None, batch: str = ""):
+    """Tìm ứng viên: từ khóa quét MỌI cột text; lọc theo vị trí / bộ phận /
+    trạng thái / batch (các ô select).
+
+    Từ khóa tách theo khoảng trắng → mỗi từ (token) phải khớp ÍT NHẤT một cột
+    text (LIKE, khớp chuỗi con); các token ghép AND với nhau. Trả kèm
+    `position_title` và `department_name` để hiển thị bảng cho tiện.
     """
     sql = [
         "SELECT c.*, p.position_title, d.department_name",
@@ -361,15 +384,26 @@ def search_candidates(keyword: str = "", position_id=None,
     params: list = []
     kw = (keyword or "").strip()
     if kw:
-        like = f"%{kw}%"
-        sql.append("AND (c.full_name LIKE ? OR c.email LIKE ? OR c.phone LIKE ?)")
-        params += [like, like, like]
+        ors = " OR ".join(f"{col} LIKE ?" for col in CANDIDATE_SEARCH_FIELDS)
+        for token in kw.split():
+            sql.append(f"AND ({ors})")
+            params += [f"%{token}%"] * len(CANDIDATE_SEARCH_FIELDS)
     if position_id:
         sql.append("AND c.position_id = ?")
         params.append(position_id)
+    if department_id:
+        sql.append("AND p.department_id = ?")
+        params.append(department_id)
     if status:
         sql.append("AND c.status = ?")
         params.append(status)
+    if batch not in (None, ""):
+        try:
+            batch = int(batch)
+        except (TypeError, ValueError):
+            pass
+        sql.append("AND c.batch = ?")
+        params.append(batch)
     sql.append("ORDER BY c.candidate_id DESC")
     with get_connection() as conn:
         return conn.execute(" ".join(sql), params).fetchall()

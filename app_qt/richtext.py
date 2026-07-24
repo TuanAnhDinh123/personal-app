@@ -8,8 +8,10 @@ import re
 
 from PySide6.QtGui import QColor, QTextCharFormat, QTextListFormat
 from PySide6.QtWidgets import (
-    QColorDialog, QHBoxLayout, QPushButton, QTextEdit, QVBoxLayout, QWidget,
+    QColorDialog, QHBoxLayout, QPushButton, QVBoxLayout, QWidget,
 )
+
+from app_qt.widgets import TextEdit
 
 
 def _looks_like_html(s):
@@ -36,7 +38,7 @@ class RichText(QWidget):
         bar.addStretch(1)
         lay.addLayout(bar)
 
-        self.text = QTextEdit(self)
+        self.text = TextEdit(self)
         self.text.setMinimumHeight(max(80, height * 20))
         lay.addWidget(self.text)
 

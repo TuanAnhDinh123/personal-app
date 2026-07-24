@@ -142,7 +142,7 @@ class FormDialog(QDialog):
 
             elif kind == "textarea":
                 self._label(form, label)
-                box = QTextEdit(form)
+                box = widgets.TextEdit(form)
                 box.setAcceptRichText(False)
                 box.setFixedHeight(max(60, spec.get("height", 3) * 22))
                 box.setPlainText(str(self._cur(key)))
@@ -169,7 +169,7 @@ class FormDialog(QDialog):
             elif kind == "dropdown":
                 opts = spec["options"]() if callable(spec["options"]) else spec["options"]
                 self._label(form, label)
-                combo = QComboBox(form)
+                combo = widgets.ComboBox(form)
                 combo.addItems([_NONE] + list(opts))
                 try:
                     cur_id = self._current[key] if self._current is not None else None
@@ -185,7 +185,7 @@ class FormDialog(QDialog):
                 allow_empty = spec.get("allow_empty", False)
                 values = ([_NONE] + choices) if allow_empty else choices
                 self._label(form, label)
-                combo = QComboBox(form)
+                combo = widgets.ComboBox(form)
                 combo.addItems(values)
                 cur = self._cur(key)
                 combo.setCurrentText(cur if cur else (_NONE if allow_empty else choices[0]))

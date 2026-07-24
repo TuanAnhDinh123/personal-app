@@ -165,7 +165,7 @@ class InterviewGateTool(BaseTool):
             lb = QLabel(label); lb.setObjectName("FieldLabel")
             lay.addWidget(lb)
             if multiline:
-                w = QTextEdit(); w.setAcceptRichText(False); w.setPlainText(value)
+                w = widgets.TextEdit(); w.setAcceptRichText(False); w.setPlainText(value)
                 w.setMinimumHeight(220)
             else:
                 w = QLineEdit(value)

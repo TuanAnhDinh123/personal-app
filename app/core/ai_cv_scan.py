@@ -72,8 +72,11 @@ _RESPONSE_SCHEMA = {
 }
 
 # Cột xuất ra Excel: (khóa trong JSON, tiêu đề hiển thị, độ rộng cột).
+# 'batch' = tên thư mục chứa CV (batch1, batch2…), do tool gán vào mỗi dòng.
 _COLUMNS = [
+    ("batch",       "Batch",            14),
     ("file",        "Tên file",         28),
+    ("cv_path",     "Đường dẫn CV",     52),
     ("name",        "Họ tên",           22),
     ("dob",         "Ngày sinh",        14),
     ("email",       "Email",            28),
@@ -310,11 +313,12 @@ def done_folder_for(folder: str) -> Path:
     return src.parent / f"{src.name}{_DONE_SUFFIX}"
 
 
-def move_to_done(path: Path, done_dir: Path) -> Path:
-    """Chuyển 1 file CV đã quét xong sang folder 'đã quét'.
+def resolve_done_target(path: Path, done_dir: Path) -> Path:
+    """Tính đường dẫn đích trong folder 'đã quét' cho 1 CV (CHƯA di chuyển).
 
-    Tự tạo folder đích nếu chưa có; nếu trùng tên thì thêm hậu tố _1, _2…
-    Trả về đường dẫn mới của file.
+    Tạo sẵn folder đích; nếu trùng tên thì thêm hậu tố _1, _2… Trả về đường
+    dẫn cuối cùng mà file sẽ nằm — dùng để ghi vào Excel TRƯỚC khi thực sự
+    move, nhờ vậy cột 'Đường dẫn CV' khớp với vị trí file sau khi quét.
     """
     done_dir.mkdir(parents=True, exist_ok=True)
     target = done_dir / path.name
@@ -322,5 +326,18 @@ def move_to_done(path: Path, done_dir: Path) -> Path:
     while target.exists():
         target = done_dir / f"{path.stem}_{i}{path.suffix}"
         i += 1
+    return target
+
+
+def move_to_done(path: Path, done_dir: Path, target: Path = None) -> Path:
+    """Chuyển 1 file CV đã quét xong sang folder 'đã quét'.
+
+    Nếu truyền sẵn `target` (từ resolve_done_target) thì move tới đúng đó;
+    nếu không thì tự tính. Trả về đường dẫn mới của file.
+    """
+    if target is None:
+        target = resolve_done_target(path, done_dir)
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(path), str(target))
     return target

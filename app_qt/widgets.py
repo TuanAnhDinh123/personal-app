@@ -20,6 +20,32 @@ from PySide6.QtWidgets import (
 from app_qt import theme
 
 
+# ----- Widget nền: chuẩn hoá hành vi Tab & lăn chuột cho toàn app -----
+class ComboBox(QComboBox):
+    """QComboBox KHÔNG đổi lựa chọn khi lăn chuột.
+
+    Mặc định Qt bắt sự kiện wheel để nhảy option → cuộn trang/modal bị 'kẹt' khi
+    con trỏ vô tình dừng trên select-box. Ta bỏ qua (ignore) wheel để nó truyền
+    lên cha (vùng cuộn/hộp thoại) — trang vẫn cuộn bình thường. Khi popup đang mở,
+    sự kiện wheel đi vào view của popup (không qua đây) nên vẫn cuộn danh sách được.
+    """
+
+    def wheelEvent(self, e):
+        e.ignore()
+
+
+class TextEdit(QTextEdit):
+    """QTextEdit với Tab CHUYỂN FOCUS thay vì chèn ký tự tab.
+
+    Mặc định QTextEdit nuốt phím Tab để chèn tab/dấu cách → không đi tiếp được
+    sang ô sau bằng bàn phím. Bật tabChangesFocus để Tab/Shift+Tab điều hướng
+    focus như mọi ô nhập khác (muốn chèn tab thật thì dùng Ctrl+Tab)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setTabChangesFocus(True)
+
+
 # ----- Icon line (SVG) tô màu theo yêu cầu (crisp, thay cho emoji nhòe) -----
 _icon_cache = {}
 
@@ -267,7 +293,7 @@ def digit_entry(parent, label, placeholder=""):
 def text_area(parent, label, value="", height=8):
     """Ô nhập chữ nhiều dòng. Trả về TextValue."""
     block, v = _field_block(parent, label)
-    edit = QTextEdit(block)
+    edit = TextEdit(block)
     edit.setAcceptRichText(False)
     edit.setFixedHeight(max(60, height * 20))
     if value:
@@ -279,13 +305,88 @@ def text_area(parent, label, value="", height=8):
 def dropdown(parent, label, options):
     """Danh sách chọn (combobox). Trả về ChoiceValue."""
     block, v = _field_block(parent, label)
-    combo = QComboBox(block)
+    combo = ComboBox(block)
     combo.addItems([str(o) for o in options])
     v.addWidget(combo)
     return ChoiceValue(combo)
 
 
-class _FetchCombo(QComboBox):
+class FilterSelect(QWidget):
+    """Ô lọc dạng select có 'nhãn nổi' (floating label — giống Material).
+
+    • Chưa chọn gì  → hiện `title` mờ ở giữa (placeholder) = nghĩa là 'tất cả'.
+    • Chọn 1 option → `title` thu nhỏ nổi lên góc trên, giá trị hiện bên dưới,
+      viền chuyển màu nhấn.
+
+    Phát tín hiệu `changed` mỗi khi NGƯỜI DÙNG đổi lựa chọn (để tìm ngay); thao
+    tác đổi options/cleared bằng code KHÔNG phát tín hiệu.
+
+    API gần giống một ChoiceValue rút gọn:
+        .set_options(labels)  – nạp danh sách (giữ lựa chọn cũ nếu còn)
+        .value()              – nhãn đang chọn, "" nghĩa là 'tất cả'
+        .clear()              – về 'tất cả'
+    """
+
+    changed = Signal()
+    _ALL = "— Tất cả —"   # dòng đầu trong menu để bỏ chọn, quay về 'tất cả'
+
+    def __init__(self, title, parent=None):
+        super().__init__(parent)
+        self._title = title
+        self.setFixedHeight(54)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        self.combo = ComboBox(self)
+        self.combo.setPlaceholderText(title)   # hiện khi currentIndex == -1
+        self.combo.activated.connect(self._on_activated)
+        lay.addWidget(self.combo)
+
+        # Nhãn nổi (chỉ hiện khi đã chọn) — đặt đè lên góc trên-trái ô.
+        self.float_lbl = QLabel(title, self)
+        self.float_lbl.setObjectName("FloatLabel")
+        self.float_lbl.hide()
+
+    def set_options(self, labels):
+        cur = self.value()
+        self.combo.blockSignals(True)
+        self.combo.clear()
+        self.combo.addItem(self._ALL)                     # index 0 = bỏ chọn
+        self.combo.addItems([str(x) for x in labels])
+        i = self.combo.findText(cur) if cur else -1
+        self.combo.setCurrentIndex(i if i >= 1 else -1)   # -1 → placeholder
+        self.combo.blockSignals(False)
+        self._sync()
+
+    def value(self):
+        return self.combo.currentText() if self.combo.currentIndex() >= 1 else ""
+
+    def clear(self):
+        self.combo.setCurrentIndex(-1)
+        self._sync()
+
+    def _on_activated(self, idx):
+        if idx <= 0:                       # chọn '— Tất cả —' → về placeholder
+            self.combo.setCurrentIndex(-1)
+        self._sync()
+        self.changed.emit()
+
+    def _sync(self):
+        """Đồng bộ nhãn nổi + trạng thái viền theo việc đã chọn hay chưa."""
+        floated = self.combo.currentIndex() >= 1
+        self.float_lbl.setVisible(floated)
+        self.combo.setProperty("floated", "true" if floated else "false")
+        self.combo.style().unpolish(self.combo)
+        self.combo.style().polish(self.combo)
+
+    def resizeEvent(self, e):
+        self.float_lbl.adjustSize()
+        self.float_lbl.move(13, 7)
+        super().resizeEvent(e)
+
+
+class _FetchCombo(ComboBox):
     """Combobox tự TẢI danh sách lựa chọn khi người dùng bấm mở.
 
     `fetch_fn()` chạy ở luồng nền (tránh treo UI), trả về list[str] hoặc ném lỗi.
