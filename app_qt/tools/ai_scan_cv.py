@@ -1,5 +1,9 @@
 """Quét CV bằng AI (Gemini) → Excel — bản PySide6.
 
+JD dùng để chấm điểm KHÔNG chọn bằng tay nữa: người dùng chọn VỊ TRÍ tuyển dụng,
+tool lấy file JD đã gắn cho vị trí đó (`positions.jd_file_path` — mỗi vị trí
+đúng 1 JD, nhập ở Master Data → Vị trí tuyển dụng).
+
 Logic gọi Gemini + ghi Excel nằm ở app.core.ai_cv_scan. Quét TUẦN TỰ, mỗi CV
 thành công được ghi nối tiếp vào Excel và chuyển sang folder '…_da_quet' ngay;
 gặp lỗi (giới hạn key free) thì dừng, lần sau bấm lại sẽ quét tiếp phần còn lại.
@@ -12,7 +16,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
-from app.core import config, settings
+from app.core import config, cv_repository as repo, settings
 from app.core.ai_cv_scan import (
     _call_gemini, _Cancelled, append_rows_to_excel, done_folder_for,
     move_to_done, read_jd_file, resolve_done_target,
@@ -28,7 +32,62 @@ except ImportError:
     _OPENPYXL_OK = False
 
 SECTION = "ai_scan_cv"
-DEFAULTS = {"folder": "", "output": "", "jd_file": "", "extra_prompt": ""}
+DEFAULTS = {"folder": "", "output": "", "position_id": None, "extra_prompt": ""}
+
+
+class _PositionCombo(widgets.ComboBox):
+    """Ô chọn VỊ TRÍ tuyển dụng — file JD lấy theo vị trí (positions.jd_file_path).
+
+    Danh sách nạp lại từ DB mỗi lần bấm mở, nên vị trí/JD vừa thêm ở trang
+    "Vị trí tuyển dụng" là thấy ngay, không cần mở lại tool.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._rows = {}          # nhãn hiển thị → sqlite3.Row của vị trí
+        self.on_open = self.reload   # hook của widgets.ComboBox: nạp lại khi bung
+        self.reload()
+
+    @staticmethod
+    def _label(row):
+        """'Backend Dev · IT — JD: jd_backend.pdf' (hoặc '— chưa có file JD')."""
+        title = (row["position_title"] or f"#{row['position_id']}").strip()
+        dept = (row["department_name"] or "").strip()
+        jd = (row["jd_file_path"] or "").strip()
+        left = f"{title} · {dept}" if dept else title
+        return f"{left}  —  JD: {os.path.basename(jd)}" if jd \
+            else f"{left}  —  ⚠ chưa có file JD"
+
+    def reload(self):
+        keep = self.currentText()
+        try:
+            rows = repo.list_positions()
+        except Exception:   # noqa: BLE001 — DB lỗi/chưa có: để list rỗng, báo khi chạy
+            rows = []
+        self._rows = {self._label(r): r for r in rows}
+        self.blockSignals(True)
+        self.clear()
+        self.addItems(list(self._rows))
+        self.blockSignals(False)
+        self.select_text(keep)
+
+    def select_text(self, text):
+        i = self.findText(text) if text else -1
+        if i >= 0:
+            self.setCurrentIndex(i)
+
+    def select_position(self, pos_id):
+        """Chọn lại vị trí theo id (dùng khi mở tool: nhớ lựa chọn lần trước)."""
+        if pos_id in (None, ""):
+            return
+        for label, row in self._rows.items():
+            if str(row["position_id"]) == str(pos_id):
+                self.select_text(label)
+                return
+
+    def current_row(self):
+        """sqlite3.Row của vị trí đang chọn (None nếu chưa chọn / danh sách rỗng)."""
+        return self._rows.get(self.currentText())
 
 
 class AiScanCvTool(BaseTool):
@@ -67,10 +126,17 @@ class AiScanCvTool(BaseTool):
         widgets.hint(parent, "Chọn file .xlsx kết quả. Nếu file đã tồn tại, kết quả sẽ "
                              "được GHI NỐI TIẾP (không đè lên record cũ).")
 
-        widgets.section_label(parent, "File mô tả công việc (JD)")
-        self.var_jd = widgets.file_row(parent, "Chọn file JD (PDF / DOCX / TXT)", mode="file")
-        self.var_jd.set(cfg["jd_file"])
-        widgets.hint(parent, "AI đọc nội dung file JD này để chấm độ phù hợp của mỗi CV.")
+        # JD gắn theo VỊ TRÍ (mỗi vị trí đúng 1 JD) → chỉ cần chọn vị trí, file JD
+        # lấy từ positions.jd_file_path.
+        widgets.section_label(parent, "Vị trí tuyển dụng")
+        repo.init_db()
+        block, v = widgets._field_block(parent, "Chọn vị trí (JD lấy theo vị trí)")
+        self.cbo_pos = _PositionCombo(block)
+        v.addWidget(self.cbo_pos)
+        self.cbo_pos.select_position(cfg["position_id"])
+        widgets.hint(parent, "AI đọc file JD của vị trí này để chấm độ phù hợp của mỗi CV. "
+                             "Thêm/sửa vị trí & file JD ở trang Master Data → "
+                             "Vị trí tuyển dụng.")
 
         widgets.section_label(parent, "Yêu cầu bổ sung cho AI (tùy chọn)")
         self.extra_box = widgets.text_area(
@@ -98,8 +164,11 @@ class AiScanCvTool(BaseTool):
 
         folder = self.var_folder.get().strip()
         out = self.var_output.get().strip()
-        jd_file = self.var_jd.get().strip()
         extra = self.extra_box.get()
+        # Vị trí đang chọn → file JD của vị trí đó (positions.jd_file_path).
+        pos = self.cbo_pos.current_row()
+        pos_title = (pos["position_title"] or f"#{pos['position_id']}").strip() if pos else ""
+        jd_file = (pos["jd_file_path"] or "").strip() if pos else ""
 
         gen = settings.load()
         api_key = gen.get("api_key", "").strip()
@@ -111,8 +180,23 @@ class AiScanCvTool(BaseTool):
         if not folder or not os.path.isdir(folder):
             self.error("Thiếu thư mục", "Vui lòng chọn thư mục chứa CV.")
             return
-        if not jd_file or not os.path.isfile(jd_file):
-            self.error("Thiếu file JD", "Vui lòng chọn file mô tả công việc (PDF/DOCX/TXT).")
+        if pos is None:
+            self.error("Chưa chọn vị trí",
+                       "Vui lòng chọn vị trí tuyển dụng để lấy JD.\n\n"
+                       "Chưa có vị trí nào? Vào Master Data → Vị trí tuyển dụng "
+                       "để thêm vị trí kèm file JD.")
+            return
+        if not jd_file:
+            self.error("Vị trí chưa có JD",
+                       f'Vị trí "{pos_title}" chưa gắn file JD.\n\n'
+                       "Vào Master Data → Vị trí tuyển dụng, sửa vị trí này và "
+                       "chọn file JD (PDF/DOCX/TXT).")
+            return
+        if not os.path.isfile(jd_file):
+            self.error("Không tìm thấy file JD",
+                       f'File JD của vị trí "{pos_title}" không còn ở đường dẫn đã lưu:\n'
+                       f"{jd_file}\n\nFile có thể đã bị di chuyển/đổi tên — vào "
+                       "Master Data → Vị trí tuyển dụng để chọn lại.")
             return
         if not out:
             self.error("Thiếu đường dẫn", "Vui lòng chọn nơi lưu file Excel.")
@@ -128,10 +212,13 @@ class AiScanCvTool(BaseTool):
         try:
             jd = read_jd_file(jd_file)
         except Exception as exc:
-            self.error("Không đọc được JD", f"Lỗi khi đọc file JD:\n{exc}")
+            self.error("Không đọc được JD",
+                       f"Lỗi khi đọc file JD của vị trí \"{pos_title}\":\n{jd_file}\n\n{exc}")
             return
         if not jd.strip():
-            self.error("JD rỗng", "File JD không có nội dung text (PDF scan ảnh?).")
+            self.error("JD rỗng",
+                       f'File JD của vị trí "{pos_title}" không có nội dung text '
+                       f"(PDF scan ảnh?):\n{jd_file}")
             return
 
         files = sorted(p for p in Path(folder).iterdir()
@@ -146,11 +233,11 @@ class AiScanCvTool(BaseTool):
         # cũ như api_key/model từng lưu ở đây (settings đọc chung qua đó).
         saved = config.load(SECTION, {})
         saved.update({"folder": folder, "output": out,
-                      "jd_file": jd_file, "extra_prompt": extra})
+                      "position_id": pos["position_id"], "extra_prompt": extra})
         config.save(SECTION, saved)
-        self._scan(files, api_key, model, jd, extra, out, folder)
+        self._scan(files, api_key, model, jd, extra, out, folder, pos_title)
 
-    def _scan(self, files, api_key, model, jd, extra, out, folder):
+    def _scan(self, files, api_key, model, jd, extra, out, folder, pos_title=""):
         total = len(files)
         done_dir = done_folder_for(folder)
         # 'batch' = SỐ bóc ra từ tên thư mục chứa CV (vd "batch1" → 1). Không có
@@ -244,6 +331,9 @@ class AiScanCvTool(BaseTool):
             else:
                 dlg.set_final_status(f"Hoàn thành — {len(done)}/{total} CV đã lưu.")
 
+        subtitle = f"Quét {total} CV bằng {model}"
+        if pos_title:
+            subtitle += f" · JD vị trí: {pos_title}"
         dlg = ProgressDialog(self._page, "Đang quét CV bằng AI…", total=total,
-                             subtitle=f"Quét {total} CV bằng {model}")
+                             subtitle=subtitle)
         dlg.start(job, on_finish)

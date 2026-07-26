@@ -124,10 +124,17 @@ khi gửi**. Chỉ quét 1 lần/ngày; vẫn có nút bấm tay để quét b�
 `app/tools/ai_scan_cv.py` — gửi **nguyên file PDF** cho mô hình **Google Gemini**
 để đọc hiểu và chấm điểm ứng viên theo JD (khác tool "Quét CV" chỉ dùng regex).
 
-Giao diện gồm: ô nhập **API key**, ô chọn **model** (mặc định `gemini-3.6-flash`),
-ô chọn **thư mục chứa CV (PDF)**, ô chọn **đường dẫn lưu file Excel**, và một
-**text area nhập JD** (mô tả công việc). Kết quả xuất ra Excel gồm: họ tên, ngày
-sinh, email, SĐT, **điểm phù hợp (0–100)** + nhận xét, **ưu điểm / nhược điểm**.
+Giao diện gồm: ô chọn **thư mục chứa CV (PDF)**, ô chọn **đường dẫn lưu file
+Excel**, ô chọn **vị trí tuyển dụng** và ô **yêu cầu bổ sung cho AI**. (API key
++ model đặt ở ⚙️ Cài đặt, dùng chung cho cả app.) Kết quả xuất ra Excel gồm: họ
+tên, ngày sinh, email, SĐT, **điểm phù hợp (0–100)** + nhận xét, **ưu điểm /
+nhược điểm**.
+
+> **JD lấy theo vị trí, không chọn file bằng tay**: chọn 1 **vị trí tuyển dụng**
+> thì tool đọc file JD đã gắn cho vị trí đó (`positions.jd_file_path`). Ô chọn
+> hiển thị luôn tên file JD, vị trí nào chưa gắn thì ghi *“⚠ chưa có file JD”*;
+> danh sách tự nạp lại mỗi lần bung nên vị trí/JD vừa thêm là thấy ngay. Thêm JD
+> ở **Master Data → Vị trí tuyển dụng**.
 
 > - Lấy API key miễn phí tại <https://aistudio.google.com/apikey>.
 > - Gọi API bằng thư viện chuẩn (`urllib`) nên **không cần cài thêm gói**; chỉ
@@ -153,8 +160,12 @@ Sửa · Xóa · Mở CV · Nhập từ Excel · Tải lại**.
   từ Excel* có thể chọn **bỏ qua các bản trùng** (email/SĐT — cả trong file lẫn
   so với DB).
 - **Master data** tách thành nhóm **Master Data** riêng ở sidebar, gồm 3 trang:
-  **Bộ phận · Vị trí tuyển dụng · Mô tả công việc (JD)** — mỗi trang thêm/sửa/xóa
-  riêng. (Các trang này không hiện thẻ ở Trang chủ.)
+  **Bộ phận · Vị trí tuyển dụng · Khóa học** — mỗi trang thêm/sửa/xóa riêng.
+  (Các trang này không hiện thẻ ở Trang chủ.)
+- **JD nằm trong vị trí**: mỗi vị trí chỉ có **đúng 1 mô tả công việc**, nên
+  *tiêu đề JD* + *file JD* nhập ngay trong form của trang **Vị trí tuyển dụng**
+  (cột `positions.jd_title` / `positions.jd_file_path`). Không còn bảng
+  `job_descriptions` lẫn trang master "Mô tả công việc (JD)" riêng.
 - Nút **📥 Nhập từ Excel** đọc thẳng file kết quả do tool *Quét CV bằng AI* xuất
   ra (tự khớp cột theo tiêu đề), ghi hàng loạt vào DB. Có thể chọn thư mục chứa
   CV để lưu **đường dẫn đầy đủ** vào cột `cv_file_path`.
@@ -163,8 +174,8 @@ Sửa · Xóa · Mở CV · Nhập từ Excel · Tải lại**.
   **tự lưu đường dẫn mới** vào DB để lần sau khỏi hỏi.
 
 **Đường dẫn file** lưu thẳng vào cột `candidates.cv_file_path` và
-`job_descriptions.jd_file_path` (không dùng bảng riêng — file thực tế đã nằm sẵn
-trên máy). Xem thảo luận về xử lý đường dẫn bị lệch ở cuối mục.
+`positions.jd_file_path` (không dùng bảng riêng — file thực tế đã nằm sẵn trên
+máy). Xem thảo luận về xử lý đường dẫn bị lệch ở cuối mục.
 
 > Cờ ở `BaseTool`: `show_on_home=False` để ẩn thẻ khỏi Trang chủ (vẫn hiện ở
 > sidebar), `fills_height=True` để trang chiếm full chiều cao khi phóng to cửa
@@ -174,14 +185,19 @@ Thiết kế cơ sở dữ liệu tách riêng để dễ chỉnh:
 
 | File | Vai trò |
 |------|---------|
-| `app/core/cv_schema.py` | **Thiết kế DB** — 4 bảng dưới dạng SQL (`SCHEMA_SQL`) kèm chú thích. Sửa cấu trúc DB ở đây; có sẵn mục `MIGRATIONS` để thêm cột an toàn cho DB đã có dữ liệu. |
-| `app/core/cv_repository.py` | **Tầng truy cập dữ liệu** — kết nối SQLite + CRUD generic cho cả 4 bảng. Giao diện chỉ gọi hàm, không đụng SQL. |
+| `app/core/cv_schema.py` | **Thiết kế DB** — toàn bộ bảng dưới dạng SQL (`SCHEMA_SQL`) kèm chú thích. Sửa cấu trúc DB ở đây; có sẵn mục `MIGRATIONS` để thêm cột an toàn cho DB đã có dữ liệu. |
+| `app/core/cv_repository.py` | **Tầng truy cập dữ liệu** — kết nối SQLite + CRUD generic cho mọi bảng. Giao diện chỉ gọi hàm, không đụng SQL. |
 | `app/tools/candidate_db.py` | **Giao diện** tool + form nhập liệu tổng quát. |
 
-**4 bảng** (quan hệ mềm, không dùng khóa ngoại; mọi cột cho phép NULL trừ PK):
-`departments` (phòng ban) → `positions` (vị trí) → `job_descriptions` (JD, có
-`jd_file_path`) & `candidates` (ứng viên, có `cv_file_path`). Đường dẫn file lưu
-thẳng vào 2 cột này — không có bảng file riêng.
+**Các bảng** (quan hệ mềm, không dùng khóa ngoại; mọi cột cho phép NULL trừ PK):
+`departments` (phòng ban) → `positions` (vị trí, **kèm JD**: `jd_title` +
+`jd_file_path`, và mẫu mail mời PV) → `candidates` (ứng viên, có `cv_file_path`);
+ngoài ra `employees` (nhân viên) và `courses` ↔ `course_employees` (đào tạo).
+Đường dẫn file lưu thẳng vào cột — không có bảng file riêng.
+
+> **Bảng `job_descriptions` đã bị bỏ**: JD nằm trong `positions`. Khi mở tool
+> trên DB cũ, `init_db()` **xóa hẳn** bảng đó — dữ liệu JD cũ **không** được
+> chuyển sang, 2 cột `jd_*` để trống, nhập lại ở form vị trí.
 
 > Vì thiết kế cố tình **không dùng khóa ngoại**, các cột `*_id` chỉ là tham
 > chiếu mềm — ứng dụng tự đảm bảo liên kết. `init_db()` tự tạo bảng khi mở tool;

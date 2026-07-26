@@ -15,8 +15,8 @@ from app.core import cv_schema
 # Cột được phép ghi cho từng bảng (chặn khóa lạ lọt vào câu INSERT/UPDATE).
 DEPARTMENT_FIELDS = ["department_name", "short_name", "manager_name", "description"]
 POSITION_FIELDS = ["department_id", "position_code", "position_title", "level",
-                   "headcount", "status", "mail_cc", "mail_subject", "mail_body"]
-JD_FIELDS = ["position_id", "jd_title", "jd_file_path"]
+                   "headcount", "status", "jd_title", "jd_file_path",
+                   "mail_cc", "mail_subject", "mail_body"]
 CANDIDATE_FIELDS = [
     "full_name", "email", "phone", "date_of_birth", "address",
     "position_id", "years_experience", "education", "applied_at", "status",
@@ -35,7 +35,6 @@ COURSE_EMPLOYEE_FIELDS = ["course_id", "employee_id", "status", "note"]
 _PK = {
     "departments": "department_id",
     "positions": "position_id",
-    "job_descriptions": "jd_id",
     "candidates": "candidate_id",
     "employees": "employee_id",
     "courses": "course_id",
@@ -134,6 +133,7 @@ def init_db() -> None:
             except sqlite3.OperationalError:
                 pass  # thường là "duplicate column" — đã thêm rồi, bỏ qua
         _migrate_document_files(conn)
+        _drop_job_descriptions(conn)
         _backfill_timestamps(conn)
 
 
@@ -202,11 +202,11 @@ def _backfill_timestamps(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_document_files(conn: sqlite3.Connection) -> None:
-    """Bỏ bảng document_files (thiết kế cũ) → đưa đường dẫn về candidates & jd.
+    """Bỏ bảng document_files (thiết kế cũ) → đưa đường dẫn CV về candidates.
 
     Với DB đã lỡ tạo bảng document_files: chép đường dẫn/tên file của mỗi bản
-    ghi về cột cv_file_path (theo candidate_id) hoặc jd_file_path (theo jd_id),
-    rồi xóa hẳn bảng. Chạy an toàn nhiều lần (không có bảng thì bỏ qua).
+    ghi về cột cv_file_path (theo candidate_id) rồi xóa hẳn bảng. Chạy an toàn
+    nhiều lần (không có bảng thì bỏ qua).
     """
     if not _table_exists(conn, "document_files"):
         return
@@ -223,17 +223,17 @@ def _migrate_document_files(conn: sqlite3.Connection) -> None:
             ), cv_file_path)
             WHERE cv_file_path IS NULL OR TRIM(cv_file_path) = ''
         """)
-    if "jd_id" in file_cols:
-        conn.execute(f"""
-            UPDATE job_descriptions SET jd_file_path = COALESCE((
-                SELECT COALESCE(NULLIF(TRIM(f.{src}), ''), f.file_name)
-                FROM document_files f
-                WHERE f.jd_id = job_descriptions.jd_id
-                ORDER BY f.file_id LIMIT 1
-            ), jd_file_path)
-            WHERE jd_file_path IS NULL OR TRIM(jd_file_path) = ''
-        """)
     conn.execute("DROP TABLE document_files")
+
+
+def _drop_job_descriptions(conn: sqlite3.Connection) -> None:
+    """Xóa hẳn bảng job_descriptions (thiết kế cũ).
+
+    Mỗi vị trí chỉ có ĐÚNG 1 JD nên JD nằm luôn trong 2 cột positions.jd_title /
+    jd_file_path. Dữ liệu trong bảng cũ KHÔNG chuyển sang (theo yêu cầu — nhập
+    lại ở form vị trí), cũng không giữ bản sao. Chạy an toàn nhiều lần.
+    """
+    conn.execute("DROP TABLE IF EXISTS job_descriptions")
 
 
 # ───────────────────────── CRUD generic dùng chung ──────────────────────
@@ -324,33 +324,6 @@ def update_position(pos_id, data: dict) -> None:
 
 def delete_position(pos_id) -> None:
     _delete("positions", pos_id)
-
-
-# ───────────────────────── MÔ TẢ CÔNG VIỆC (JD) ─────────────────────────
-
-def list_job_descriptions():
-    with get_connection() as conn:
-        return conn.execute(
-            "SELECT j.*, p.position_title "
-            "FROM job_descriptions j "
-            "LEFT JOIN positions p ON p.position_id = j.position_id "
-            "ORDER BY j.jd_title").fetchall()
-
-
-def get_job_description(jd_id):
-    return _get("job_descriptions", jd_id)
-
-
-def insert_job_description(data: dict) -> int:
-    return _insert("job_descriptions", JD_FIELDS, data)
-
-
-def update_job_description(jd_id, data: dict) -> None:
-    _update("job_descriptions", JD_FIELDS, jd_id, data)
-
-
-def delete_job_description(jd_id) -> None:
-    _delete("job_descriptions", jd_id)
 
 
 # ───────────────────────────── ỨNG VIÊN ─────────────────────────────────

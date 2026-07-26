@@ -16,15 +16,17 @@ QUY ƯỚC THIẾT KẾ (theo yêu cầu):
 ────────────────────────────────────────────────────────────────────────────
 SƠ ĐỒ QUAN HỆ (mềm, không ràng buộc FK)
 
-  departments ──1:N──> positions ──1:N──> job_descriptions (+ jd_file_path)
+  departments ──1:N──> positions (+ jd_title, jd_file_path)
                           │
                           │ 1:N
                           ▼
                       candidates (+ cv_file_path)
 
   • departments (phòng ban)  1—N  positions (vị trí)
-  • positions   (vị trí)     1—N  job_descriptions (JD) và  1—N  candidates
-  • Đường dẫn file lưu thẳng: candidates.cv_file_path, job_descriptions.jd_file_path
+  • positions   (vị trí)     1—N  candidates
+  • MỖI VỊ TRÍ CHỈ CÓ 1 JD → thông tin JD (tiêu đề + đường dẫn file) nằm THẲNG
+    trong bảng positions; KHÔNG còn bảng job_descriptions riêng.
+  • Đường dẫn file lưu thẳng: candidates.cv_file_path, positions.jd_file_path
     (không còn bảng document_files — file thực tế đã nằm sẵn trên máy).
 
   departments ──1:N──> employees
@@ -53,7 +55,8 @@ CREATE TABLE IF NOT EXISTS departments (
     updated_at      DATETIME DEFAULT (datetime('now', 'localtime'))
 );
 
--- ───────────────────────── MASTER: VỊ TRÍ TUYỂN DỤNG ─────────────────
+-- ────────── MASTER: VỊ TRÍ TUYỂN DỤNG (kèm luôn JD của vị trí đó) ──────
+-- Mỗi vị trí chỉ có ĐÚNG 1 mô tả công việc (JD) → 2 cột jd_* nằm ngay đây.
 CREATE TABLE IF NOT EXISTS positions (
     position_id    INTEGER PRIMARY KEY AUTOINCREMENT,
     department_id  INT,                 -- tham chiếu mềm → departments.department_id
@@ -62,21 +65,13 @@ CREATE TABLE IF NOT EXISTS positions (
     level          VARCHAR,             -- cấp bậc (Junior/Senior/Lead…)
     headcount      INT,                 -- số lượng cần tuyển
     status         VARCHAR,             -- Đang tuyển / Tạm dừng / Đã đóng
+    jd_title       VARCHAR,             -- tiêu đề JD (để trống = dùng tên vị trí)
+    jd_file_path   VARCHAR,             -- đường dẫn file JD trên máy
     mail_cc        VARCHAR,             -- CC mặc định khi gửi mail mời PV
     mail_subject   VARCHAR,             -- tiêu đề mẫu mail (hỗ trợ {name}{possion}{date}{time})
     mail_body      TEXT,                -- nội dung mẫu mail (HTML, hỗ trợ placeholder trên)
     created_at     DATETIME DEFAULT (datetime('now', 'localtime')),
     updated_at     DATETIME DEFAULT (datetime('now', 'localtime'))
-);
-
--- ───────────────────────── MASTER: MÔ TẢ CÔNG VIỆC (JD) ──────────────
-CREATE TABLE IF NOT EXISTS job_descriptions (
-    jd_id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    position_id  INT,                   -- tham chiếu mềm → positions.position_id
-    jd_title     VARCHAR,
-    jd_file_path VARCHAR,                 -- đường dẫn file JD trên máy
-    created_at   DATETIME DEFAULT (datetime('now', 'localtime')),
-    updated_at   DATETIME DEFAULT (datetime('now', 'localtime'))
 );
 
 -- ───────────────────────── ỨNG VIÊN ─────────────────────────────────
@@ -157,7 +152,6 @@ CREATE INDEX IF NOT EXISTS idx_candidates_phone  ON candidates(phone);
 CREATE INDEX IF NOT EXISTS idx_candidates_pos    ON candidates(position_id);
 CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);
 CREATE INDEX IF NOT EXISTS idx_positions_dept    ON positions(department_id);
-CREATE INDEX IF NOT EXISTS idx_jd_pos            ON job_descriptions(position_id);
 CREATE INDEX IF NOT EXISTS idx_employees_name    ON employees(full_name);
 CREATE INDEX IF NOT EXISTS idx_employees_code     ON employees(code);
 CREATE INDEX IF NOT EXISTS idx_employees_dept     ON employees(department_id);
@@ -171,9 +165,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_ce_unique    ON course_employees(course_id
 #  Ví dụ:  "ALTER TABLE candidates ADD COLUMN linkedin VARCHAR",
 # =============================================================================
 MIGRATIONS: list[str] = [
-    # Bỏ bảng document_files → lưu đường dẫn file thẳng vào candidates & jd.
+    # Bỏ bảng document_files → lưu đường dẫn file thẳng vào candidates & positions.
     "ALTER TABLE candidates ADD COLUMN cv_file_path VARCHAR",
-    "ALTER TABLE job_descriptions ADD COLUMN jd_file_path VARCHAR",
     # Dấu thời gian tạo / cập nhật cho MỌI bảng. Lưu ý: SQLite không cho dùng
     # default động (datetime('now')) trong ALTER TABLE → cột thêm cho bảng CŨ sẽ
     # NULL; bản ghi TẠO MỚI sau đó được điền qua init_db()._backfill_timestamps
@@ -182,8 +175,6 @@ MIGRATIONS: list[str] = [
     "ALTER TABLE departments ADD COLUMN updated_at DATETIME",
     "ALTER TABLE positions ADD COLUMN created_at DATETIME",
     "ALTER TABLE positions ADD COLUMN updated_at DATETIME",
-    "ALTER TABLE job_descriptions ADD COLUMN created_at DATETIME",
-    "ALTER TABLE job_descriptions ADD COLUMN updated_at DATETIME",
     "ALTER TABLE candidates ADD COLUMN created_at DATETIME",
     "ALTER TABLE candidates ADD COLUMN updated_at DATETIME",
     # Cột 'batch' (đợt/lô quét CV) — chỉ lưu SỐ; thêm cho DB đã tồn tại.
@@ -197,12 +188,15 @@ MIGRATIONS: list[str] = [
     "ALTER TABLE positions ADD COLUMN mail_cc VARCHAR",
     "ALTER TABLE positions ADD COLUMN mail_subject VARCHAR",
     "ALTER TABLE positions ADD COLUMN mail_body TEXT",
+    # MỖI VỊ TRÍ = 1 JD → thông tin JD nằm luôn trong bảng positions (thêm cột
+    # cho DB đã tồn tại). Bảng job_descriptions cũ bị XÓA HẲN, dữ liệu trong đó
+    # KHÔNG chuyển sang (nhập lại ở form vị trí) — xem
+    # cv_repository._drop_job_descriptions().
+    "ALTER TABLE positions ADD COLUMN jd_title VARCHAR",
+    "ALTER TABLE positions ADD COLUMN jd_file_path VARCHAR",
     # Bỏ các cột không dùng nữa (SQLite ≥ 3.35 hỗ trợ DROP COLUMN; DB mới đã
     # không có sẵn các cột này nên câu lệnh sẽ bị bỏ qua an toàn).
     "ALTER TABLE departments DROP COLUMN department_code",
-    "ALTER TABLE job_descriptions DROP COLUMN summary",
-    "ALTER TABLE job_descriptions DROP COLUMN requirements",
-    "ALTER TABLE job_descriptions DROP COLUMN salary_range",
     # Đổi tên cột course_employees.result → status (DB cũ). Bảng tạo mới đã có sẵn
     # cột 'status' nên câu lệnh này ném OperationalError ("no such column: result")
     # và được init_db() bỏ qua an toàn.
@@ -230,6 +224,6 @@ COURSE_STATUS_CHOICES = ["Not started", "Completed"]
 
 # Danh sách bảng do init_db quản lý — dùng khi cần dựng lại bảng trống lệch schema.
 _MANAGED_TABLES = [
-    "departments", "positions", "job_descriptions", "candidates",
+    "departments", "positions", "candidates",
     "employees", "courses", "course_employees",
 ]

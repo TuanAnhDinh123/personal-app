@@ -14,6 +14,7 @@ import re
 
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QVBoxLayout
 
+from app.core import config
 from app.core import cv_repository as repo
 from app.core import cv_schema
 from app.core import settings as app_settings
@@ -40,6 +41,12 @@ _COURSE_COLUMNS = [
     ("status",          "Trạng thái", 120, "center"),
     ("note",            "Ghi chú",    220, "w"),
 ]
+
+# Section config lưu "việc quét còn dở": các TRANG bị lỗi của lần quét trước, để
+# lần sau chỉ quét tiếp mấy trang đó thay vì gửi lại cả tập 20 trang. Chỉ ghi khi
+# HR đã bấm Xác nhận (đã cập nhật DB) — xem _review_attendance.
+SECTION = "course_db"
+_PENDING_KEY = "pending_scan"
 
 
 def _course_label(course):
@@ -233,9 +240,10 @@ class CourseDbTool(BaseTool):
             f'Đã xuất {len(export_rows)} nhân viên ("{not_started}") vào:\n{path}')
 
     # ---------------------------------------------------- quét chữ ký bằng AI
-    # HR scan bảng điểm danh đã ký → gửi cho Gemini nhận diện ai đã ký → review →
-    # cập nhật status sang "Completed". Chỉ đối chiếu nhóm "Not started" của khóa
-    # đang chọn (đúng đối tượng cần ký, khớp với file đã xuất).
+    # HR scan cả tập bảng điểm danh đã ký thành MỘT file PDF nhiều trang → chọn
+    # đúng một lần, app tự tách từng trang, gửi lần lượt cho Gemini nhận diện ai
+    # đã ký → review → cập nhật status sang "Completed". Chỉ đối chiếu nhóm
+    # "Not started" của khóa đang chọn (đúng đối tượng cần ký, khớp file đã xuất).
     def _scan_signatures(self):
         gen = app_settings.load()
         api_key = (gen.get("api_key") or "").strip()
@@ -257,11 +265,33 @@ class CourseDbTool(BaseTool):
                 self._root, "Không có dữ liệu",
                 f'Khóa học này không có nhân viên nào ở trạng thái "{not_started}".')
 
-        path, _ = QFileDialog.getOpenFileName(
-            self._root, "Chọn file scan chữ ký (ảnh/PDF)", "",
-            "Ảnh & PDF (*.png *.jpg *.jpeg *.webp *.pdf)")
+        # Lần quét trước còn trang lỗi của ĐÚNG khóa này và file vẫn còn → cho
+        # quét tiếp mấy trang đó thay vì gửi lại cả tập.
+        path, only = "", None
+        pending = self._pending_scan(course_id)
+        if pending:
+            todo = pending["pages"]
+            choice = dialogs.AppDialog(
+                self._root, "Còn trang chưa quét được",
+                f"Lần quét trước của khóa này còn {len(todo)} trang lỗi "
+                f"(trang {', '.join(str(n) for n in todo)}) trong file:\n"
+                f"{os.path.basename(pending['path'])}\n\n"
+                "Quét tiếp mấy trang đó, hay chọn file khác để quét lại từ đầu?",
+                "question",
+                buttons=[("Hủy", "neutral", 0),
+                         ("Chọn file khác", "neutral", 2),
+                         (f"Quét tiếp {len(todo)} trang", "primary", 1)]).run()
+            if not choice:
+                return
+            if choice == 1:
+                path, only = pending["path"], todo
+
         if not path:
-            return
+            path, _ = QFileDialog.getOpenFileName(
+                self._root, "Chọn file scan chữ ký (ảnh/PDF nhiều trang)", "",
+                "Ảnh & PDF (*.png *.jpg *.jpeg *.webp *.pdf)")
+            if not path:
+                return
         if not signature_scan.is_supported(path):
             return dialogs.error(self._root, "Định dạng không hỗ trợ",
                                  "Chỉ hỗ trợ ảnh (PNG/JPG/WEBP) hoặc PDF.")
@@ -270,97 +300,194 @@ class CourseDbTool(BaseTool):
                 file_bytes = f.read()
         except Exception as exc:   # noqa: BLE001
             return dialogs.error(self._root, "Lỗi đọc file", str(exc))
-        mime = signature_scan.guess_mime(path)
+
+        # Tách file thành ẢNH từng trang. PDF gửi thẳng dễ bị model gán chữ ký
+        # lệch lên dòng trên (xem docstring app.core.signature_scan).
+        try:
+            pages = signature_scan.render_pages(
+                file_bytes, signature_scan.guess_mime(path), only=only)
+        except Exception as exc:   # noqa: BLE001
+            return dialogs.error(self._root, "Không tách được trang", str(exc))
+
         roster_min = [{"code": r["code"] or "", "full_name": r["full_name"] or ""}
                       for r in roster]
+        total = len(pages)
 
         def job(ctx):
-            ctx.status(f"Đang gửi cho AI ({model})…")
+            # Quét TUẦN TỰ từng trang. Một trang lỗi thì bỏ qua trang đó và đi
+            # tiếp (tập 20 trang không nên mất sạch vì 1 trang lỗi); danh sách
+            # trang lỗi được báo lại ở bước review.
+            page_rows, failed = [], []
+            for i, (no, blob, page_mime) in enumerate(pages, start=1):
+                if ctx.cancelled:
+                    return page_rows, failed, True
+                ctx.status(f"Trang {no} ({i}/{total}) — đang gửi cho AI ({model})…")
 
-            def on_retry(attempt, wait, reason):
-                ctx.log(f"Thử lại lần {attempt} sau {wait}s ({reason})")
+                def on_retry(attempt, wait, reason, n=no):
+                    ctx.log(f"… trang {n}: {reason} — thử lại lần {attempt} sau {wait}s")
 
-            data = signature_scan.detect_signatures(
-                api_key, model, file_bytes, mime, roster_min,
-                on_retry=on_retry, should_cancel=lambda: ctx.cancelled)
-            ctx.step()
-            return data
+                try:
+                    data = signature_scan.detect_signatures(
+                        api_key, model, blob, page_mime, roster_min,
+                        on_retry=on_retry, should_cancel=lambda: ctx.cancelled)
+                except signature_scan.Cancelled:
+                    ctx.log(f"✋ Đã hủy khi đang xử lý trang {no}.")
+                    return page_rows, failed, True
+                except Exception as exc:   # noqa: BLE001
+                    failed.append((no, str(exc)))
+                    ctx.log(f"⛔ Trang {no} lỗi: {exc}")
+                    ctx.step()
+                    continue
+                rows = data.get("rows", []) or []
+                page_rows.append(rows)
+                n_signed = sum(1 for r in rows if r.get("signed"))
+                ctx.log(f"✅ Trang {no}: {len(rows)} dòng, {n_signed} đã ký")
+                ctx.step()
+            return page_rows, failed, False
 
         def on_finish(dlg, result):
-            dlg.close()
-            rows = result.get("rows", []) if isinstance(result, dict) else []
+            page_rows, failed, cancelled = result
+            if cancelled:
+                dlg.set_final_status("Đã hủy — chưa cập nhật trạng thái nào.")
+                return
+            if failed and not page_rows:
+                dlg.set_final_status(f"Không quét được trang nào ({len(failed)} lỗi).")
+                dlg.log("👉 Thường là hết hạn mức key — chờ ít phút rồi bấm "
+                        "'Quét chữ ký (AI)' để quét lại.")
+                return
+
+            # Gộp kết quả các trang rồi đối chiếu theo MÃ NV với roster.
+            merged = signature_scan.merge_pages(page_rows)
             by_code = {str(r["code"] or "").strip(): r
                        for r in roster if (r["code"] or "").strip()}
-            signed, unmatched, seen = [], [], set()
-            for item in rows:
-                if not item.get("signed"):
+            signed, unmatched = [], []
+            for pid, info in merged.items():
+                if not info["signed"]:
                     continue
-                pid = str(item.get("person_id") or "").strip()
-                if pid in by_code and pid not in seen:
+                if pid in by_code:
                     signed.append(by_code[pid])
-                    seen.add(pid)
-                elif pid:
-                    unmatched.append((pid, (item.get("name") or "").strip()))
-            if not signed:
-                note = ""
-                if unmatched:
-                    note = ("\n\nAI báo có ký nhưng không khớp mã NV nào: "
-                            + ", ".join(p for p, _ in unmatched[:10]))
-                return dialogs.info(
-                    self._root, "Không có ai đã ký",
-                    "AI không nhận thấy chữ ký khớp với nhân viên trong khóa." + note)
-            self._review_signed(signed, unmatched)
+                else:
+                    unmatched.append((pid, info["name"]))
+            signed_codes = {str(r["code"] or "").strip() for r in signed}
+            unsigned = [r for r in roster
+                        if str(r["code"] or "").strip() not in signed_codes]
+            dlg.close()
+            self._review_attendance(signed, unsigned, unmatched,
+                                    [no for no, _ in failed], course_id, path)
 
-        dlg = ProgressDialog(self._root, "Đang nhận diện chữ ký…", total=1,
-                             subtitle=f"Phân tích {os.path.basename(path)} bằng {model}")
+        what = (f"quét tiếp trang {', '.join(str(n) for n, _, _ in pages)}"
+                if only else f"{total} trang")
+        dlg = ProgressDialog(self._root, "Đang nhận diện chữ ký…", total=total,
+                             subtitle=f"{os.path.basename(path)} — {what}, "
+                                      f"bằng {model}")
         dlg.start(job, on_finish)
 
-    def _review_signed(self, signed_rows, unmatched):
-        """Bảng review: HR bỏ tick người AI nhận nhầm rồi xác nhận → cập nhật status."""
+    # ------------------------------------------- ghi nhớ trang quét lỗi (resume)
+    def _pending_scan(self, course_id):
+        """Trang lỗi còn nợ của khóa `course_id`, hoặc None nếu không còn/không dùng được."""
+        p = config.load(SECTION, {}).get(_PENDING_KEY) or {}
+        pages = [int(n) for n in p.get("pages") or []]
+        if (p.get("course_id") != course_id or not pages
+                or not os.path.isfile(p.get("path") or "")):
+            return None
+        return {"path": p["path"], "pages": sorted(pages)}
+
+    def _save_pending_scan(self, course_id, path, pages):
+        """Ghi (hoặc xóa nếu `pages` rỗng) danh sách trang cần quét tiếp."""
+        saved = config.load(SECTION, {})
+        if pages:
+            saved[_PENDING_KEY] = {"course_id": course_id, "path": path,
+                                   "pages": sorted(int(n) for n in pages)}
+        else:
+            saved.pop(_PENDING_KEY, None)
+        config.save(SECTION, saved)
+
+    def _review_attendance(self, signed_rows, unsigned_rows, unmatched,
+                           failed_pages, course_id, path):
+        """Bảng review liệt kê người CHƯA ký (không phải người đã ký).
+
+        Thực tế phần lớn nhân viên đều ký, nên danh sách "chưa ký" ngắn hơn nhiều
+        — HR chỉ cần soát nhóm đó. Tick người thực ra CÓ ký mà AI bỏ sót; khi xác
+        nhận, cả nhóm AI báo đã ký lẫn nhóm được tick thêm đều sang "Completed",
+        số còn lại giữ nguyên "Not started".
+
+        `failed_pages` là các trang chưa quét được. Người thuộc mấy trang đó cũng
+        nằm trong danh sách "chưa ký" (vì chưa có dữ liệu), nên phải nói rõ để HR
+        đừng tick bừa — và chỉ khi HR Xác nhận mới ghi nhớ mấy trang đó để lần sau
+        quét tiếp (Hủy = không lưu gì, lần sau quét lại cả file).
+        """
         completed = cv_schema.COURSE_STATUS_CHOICES[-1]   # "Completed"
+        total = len(signed_rows) + len(unsigned_rows)
         dlg = ModalDialog(self._root, size="md")
-        card, lay = dlg.build_shell("Xác nhận nhân viên đã ký")
+        card, lay = dlg.build_shell("Xác nhận điểm danh")
 
         hint = QLabel(
-            f"AI nhận diện {len(signed_rows)} nhân viên đã ký. Bỏ tick người bị nhận "
-            f'nhầm, rồi bấm Xác nhận để cập nhật trạng thái sang "{completed}".')
+            f"AI thấy {len(signed_rows)}/{total} nhân viên đã ký "
+            f'→ sẽ chuyển sang "{completed}".\n'
+            + (f"{len(unsigned_rows)} người dưới đây KHÔNG thấy chữ ký. Tick những "
+               "ai thực ra đã ký để tính luôn, rồi bấm Xác nhận."
+               if unsigned_rows else
+               "Không còn ai thiếu chữ ký — bấm Xác nhận để cập nhật."))
         hint.setObjectName("Hint")
         hint.setWordWrap(True)
         lay.addWidget(hint)
 
-        cols = [
-            ("code",            "Mã NV",   110, "w"),
-            ("full_name",       "Họ tên",  200, "w"),
-            ("department_name", "Bộ phận", 150, "w"),
-        ]
-        table = DataTable(cols, pk="enrollment_id", checkable=True)
-        table.set_rows(signed_rows)
-        table._model.set_all_checked(True)   # tick sẵn tất cả người AI báo đã ký
-        dlg.set_grow_region(table)
-        lay.addWidget(table, 1)
+        table = None
+        if unsigned_rows:
+            cols = [
+                ("code",            "Mã NV",   110, "w"),
+                ("full_name",       "Họ tên",  200, "w"),
+                ("department_name", "Bộ phận", 150, "w"),
+            ]
+            table = DataTable(cols, pk="enrollment_id", checkable=True)
+            table.set_rows(unsigned_rows)   # KHÔNG tick sẵn — mặc định là chưa ký
+            dlg.set_grow_region(table)
+            lay.addWidget(table, 1)
 
-        if unmatched:
-            warn = QLabel(
-                "Không khớp mã NV (bỏ qua): "
-                + ", ".join(f"{p} {n}".strip() for p, n in unmatched[:15]))
+        pages_txt = ", ".join(str(n) for n in failed_pages)
+        for text in (
+            (f"⚠ Chưa quét được trang {pages_txt}. Người ở mấy trang đó đang nằm "
+             "trong danh sách trên (chưa có dữ liệu) — đừng tick. Bấm Xác nhận để "
+             "lưu phần đã quét, rồi bấm 'Quét chữ ký (AI)' lần nữa và chọn "
+             f"'Quét tiếp {len(failed_pages)} trang'." if failed_pages else ""),
+            ("AI thấy chữ ký ở mã không thuộc khóa này (bỏ qua): "
+             + ", ".join(f"{p} {n}".strip() for p, n in unmatched[:15]))
+            if unmatched else "",
+        ):
+            if not text:
+                continue
+            warn = QLabel(text)
             warn.setObjectName("Hint")
             warn.setWordWrap(True)
             lay.addWidget(warn)
 
         def _confirm():
-            chosen = table.checked_rows()
-            for r in chosen:
+            extra = table.checked_rows() if table is not None else []
+            rows = list(signed_rows) + list(extra)
+            for r in rows:
                 repo.update_enrollment(r["enrollment_id"], {"status": completed})
+            # Ghi nhớ trang lỗi để lần sau quét tiếp. Phần vừa cập nhật đã nằm
+            # trong DB nên lần quét tiếp không cần đọc lại các trang đã xong.
+            self._save_pending_scan(course_id, path, failed_pages)
             dlg.accept()
             self._reload()
             dialogs.success(
                 self._root, "Hoàn tất",
-                f'Đã cập nhật {len(chosen)} nhân viên sang "{completed}".')
+                f'Đã cập nhật {len(rows)} nhân viên sang "{completed}"'
+                + (f", trong đó {len(extra)} người bạn tick thêm." if extra else ".")
+                + (f"\n\nCòn trang {pages_txt} chưa quét được — bấm "
+                   "'Quét chữ ký (AI)' để quét tiếp." if failed_pages else ""))
+
+        def _cancel():
+            # Không cập nhật gì → cũng đừng ghi nhớ trang lỗi, vì lần sau phải
+            # quét lại CẢ file mới có đủ dữ liệu.
+            self._save_pending_scan(course_id, path, [])
+            dlg.reject()
 
         foot = QHBoxLayout()
         foot.addStretch(1)
         foot.addWidget(widgets.button(card, "Hủy", variant="neutral", icon="x",
-                                      command=dlg.reject))
+                                      command=_cancel))
         foot.addWidget(widgets.button(card, "Xác nhận", variant="success",
                                       icon="check", command=_confirm))
         lay.addLayout(foot)

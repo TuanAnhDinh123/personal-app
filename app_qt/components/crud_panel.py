@@ -1,7 +1,7 @@
 """Panel CRUD dùng chung — toolbar (Thêm/Sửa/Xóa/Refresh) + bảng.
 
 Bản Qt của _MasterTab. Nhận một `spec` mô tả bảng + form (xem _master_specs
-trong tool candidate_db). Dùng cho 3 trang master: Bộ phận / Vị trí / JD.
+trong tool candidate_db). Dùng cho các trang master: Bộ phận / Vị trí / Khóa học.
 """
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 

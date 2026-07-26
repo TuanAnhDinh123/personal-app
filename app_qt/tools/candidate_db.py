@@ -3,7 +3,10 @@
 Port của app/tools/candidate_db.py. Tầng dữ liệu (app.core.cv_repository,
 app.core.cv_schema) dùng lại 100% — chỉ dựng lại giao diện bằng Qt:
     • Tool chính "Quản lý CV ứng viên": tìm kiếm + bảng + CRUD + nhập Excel.
-    • 3 trang Master Data: Bộ phận · Vị trí · JD (dùng CrudTablePanel).
+    • 3 trang Master Data: Bộ phận · Vị trí · Khóa học (dùng CrudTablePanel).
+
+Mỗi vị trí chỉ có ĐÚNG 1 mô tả công việc (JD) nên JD không còn trang riêng —
+tiêu đề + file JD nhập ngay trong form của trang "Vị trí tuyển dụng".
 """
 import os
 import unicodedata
@@ -309,12 +312,14 @@ def _master_specs():
             "columns": [
                 ("position_id", "ID", 50),
                 ("position_code", "Mã", 90),
-                ("position_title", "Vị trí", 200),
-                ("department_name", "Bộ phận", 150),
-                ("level", "Cấp", 90),
-                ("headcount", "SL", 55),
-                ("status", "Trạng thái", 110),
-                ("mail_subject", "Mẫu mail", 200, "w",
+                ("position_title", "Vị trí", 190),
+                ("department_name", "Bộ phận", 140),
+                ("level", "Cấp", 80),
+                ("headcount", "SL", 50),
+                ("status", "Trạng thái", 105),
+                ("jd_file_path", "File JD", 160, "w",
+                 lambda v: os.path.basename(str(v)) if v else "—"),
+                ("mail_subject", "Mẫu mail", 180, "w",
                  lambda v: (str(v).replace("\n", " ")[:50] + "…")
                  if v and len(str(v)) > 50 else (str(v) if v else "—")),
             ],
@@ -328,6 +333,15 @@ def _master_specs():
                 {"key": "headcount", "label": "Số lượng cần tuyển", "kind": "int"},
                 {"key": "status", "label": "Trạng thái", "kind": "choice",
                  "choices": cv_schema.POSITION_STATUS_CHOICES, "allow_empty": True},
+                # Mỗi vị trí chỉ có 1 JD → nhập ngay tại form vị trí (không còn
+                # trang master "Mô tả công việc (JD)" riêng).
+                {"kind": "section", "label": "Mô tả công việc (JD)"},
+                {"key": "jd_title", "label": "Tiêu đề JD (để trống = dùng tên vị trí)",
+                 "kind": "text"},
+                {"key": "jd_file_path", "label": "File JD (đường dẫn trên máy)",
+                 "kind": "file",
+                 "filetypes": [("PDF/Word/Text", "*.pdf *.doc *.docx *.txt"),
+                               ("Tất cả", "*.*")]},
                 {"kind": "section", "label": "Mẫu mail mời phỏng vấn"},
                 {"key": "mail_cc", "label": "CC (nhiều email cách nhau bởi ;)",
                  "kind": "text"},
@@ -335,26 +349,6 @@ def _master_specs():
                 {"key": "mail_body", "label": "Nội dung mail (dùng {name} "
                  "{possion} {date} {time_start} {time_end})", "kind": "richtext",
                  "height": 10, "grow": True},
-            ],
-        },
-        "jd": {
-            "title": "JD", "pk": "jd_id",
-            "list_fn": repo.list_job_descriptions,
-            "get": repo.get_job_description, "insert": repo.insert_job_description,
-            "update": repo.update_job_description, "delete": repo.delete_job_description,
-            "columns": [
-                ("jd_id", "ID", 50),
-                ("jd_title", "Tiêu đề JD", 230),
-                ("position_title", "Vị trí", 180),
-                ("created_at", "Ngày tạo", 140),
-            ],
-            "form": [
-                {"key": "position_id", "label": "Vị trí", "kind": "dropdown",
-                 "options": _position_options},
-                {"key": "jd_title", "label": "Tiêu đề JD (*)",
-                 "kind": "text", "required": True},
-                {"key": "jd_file_path", "label": "File JD (đường dẫn trên máy)",
-                 "kind": "file"},
             ],
         },
         "course": {
@@ -424,18 +418,10 @@ class DepartmentTool(_MasterPageTool):
 
 class PositionTool(_MasterPageTool):
     name = "Vị trí tuyển dụng"
-    description = "Danh mục vị trí cần tuyển."
+    description = "Danh mục vị trí cần tuyển (kèm JD & mẫu mail của vị trí)."
     icon = "💼"
     order = 20
     spec_key = "position"
-
-
-class JobDescriptionTool(_MasterPageTool):
-    name = "Mô tả công việc (JD)"
-    description = "Danh mục JD gắn với từng vị trí."
-    icon = "📋"
-    order = 30
-    spec_key = "jd"
 
 
 class CourseTool(_MasterPageTool):
@@ -591,7 +577,7 @@ class _CandidateDetailDialog(ModalDialog):
 # ═══════════════════════════════ TOOL CHÍNH ═════════════════════════════
 class CandidateDbTool(BaseTool):
     name = "Quản lý CV ứng viên"
-    description = "Tìm kiếm ứng viên, quản lý bộ phận/vị trí/JD, nhập hàng loạt (SQLite)."
+    description = "Tìm kiếm ứng viên, quản lý bộ phận/vị trí, nhập hàng loạt (SQLite)."
     icon = "🙋"
     category = "Tuyển dụng"
     order = 10
