@@ -33,10 +33,10 @@ def _clear_layout(lay):
 
 
 class ReminderTool(BaseTool):
-    name = "Nhắc phản hồi PV"
-    description = "Quét lịch phỏng vấn 1 tháng gần đây và nhắc gửi kết quả cho ứng viên."
+    name = "Interview Follow-up"
+    description = "Scan the last month's interviews and remind you to send results to candidates."
     icon = "🔔"
-    category = "Văn phòng"
+    category = "Office"
     order = 6
 
     def build(self, parent=None):
@@ -49,18 +49,18 @@ class ReminderTool(BaseTool):
         lay.setContentsMargins(28, 24, 28, 24)
         lay.setSpacing(6)
 
-        widgets.section_label(card, "Nhận diện lịch phỏng vấn")
-        self.var_keywords = widgets.text_row(card, "Từ khóa trong tiêu đề (cách nhau bởi dấu phẩy)")
+        widgets.section_label(card, "Interview detection")
+        self.var_keywords = widgets.text_row(card, "Title keywords (comma-separated)")
         self.var_keywords.set(cfg["keywords"])
-        widgets.hint(card, "Sự kiện có tiêu đề chứa MỘT trong các từ khóa trên (không phân biệt "
-                           "hoa thường) sẽ được coi là lịch phỏng vấn.")
-        self.var_exclude = widgets.text_row(card, "Bỏ qua email thuộc domain (người nhận nội bộ)")
+        widgets.hint(card, "Events whose title contains any of these keywords "
+                           "(case-insensitive) count as interviews.")
+        self.var_exclude = widgets.text_row(card, "Skip emails on this domain (internal recipients)")
         self.var_exclude.set(cfg["exclude_domain"])
 
-        widgets.section_label(card, "Mẫu email phản hồi ứng viên")
-        self.var_subject = widgets.text_row(card, "Tiêu đề")
+        widgets.section_label(card, "Candidate reply template")
+        self.var_subject = widgets.text_row(card, "Subject")
         self.var_subject.set(cfg["subject"])
-        lbl = QLabel("Nội dung (dùng được {name}, {position}, {subject}, {date}, {time})")
+        lbl = QLabel("Body (supports {name}, {position}, {subject}, {date}, {time})")
         lbl.setObjectName("FieldLabel")
         lbl.setWordWrap(True)
         lay.addWidget(lbl)
@@ -69,18 +69,18 @@ class ReminderTool(BaseTool):
         lay.addWidget(self.body_editor)
 
         row = QHBoxLayout()
-        row.addWidget(widgets.button(card, "Lưu cấu hình", variant="neutral",
+        row.addWidget(widgets.button(card, "Save config", variant="neutral",
                                      icon="save", command=self._save_config))
-        row.addWidget(widgets.button(card, "Quét lịch (1 tháng gần đây)", variant="primary",
+        row.addWidget(widgets.button(card, "Scan calendar (last month)", variant="primary",
                                      icon="refresh", command=self._scan_clicked))
         row.addStretch(1)
         lay.addLayout(row)
 
         if not outlook.available():
-            widgets.hint(card, "⚠ Không tìm thấy Outlook (pywin32). Tính năng quét/gửi mail "
-                               "chỉ chạy trên Windows có cài Outlook.")
+            widgets.hint(card, "⚠ Outlook not found (pywin32). Scanning/sending mail "
+                               "only works on Windows with Outlook installed.")
 
-        widgets.section_label(card, "Lịch phỏng vấn quét được")
+        widgets.section_label(card, "Interviews found")
         self._table_holder = QWidget(card)
         self._table_layout = QVBoxLayout(self._table_holder)
         self._table_layout.setContentsMargins(0, 0, 0, 0)
@@ -106,7 +106,7 @@ class ReminderTool(BaseTool):
 
     def _save_config(self):
         config.save(SECTION, self._collect())
-        self.info("Đã lưu", "Đã lưu cấu hình ✅")
+        self.info("Saved", "Config saved ✅")
 
     @staticmethod
     def _save_runtime(**changes):
@@ -148,18 +148,18 @@ class ReminderTool(BaseTool):
 
     def _scan_clicked(self):
         if not outlook.available():
-            self.error("Cần Outlook", "Tính năng này cần Outlook trên Windows (pywin32).")
+            self.error("Outlook required", "This feature needs Outlook on Windows (pywin32).")
             return
         self._interviews = self._fetch_interviews()
         self._render_table()
         if not self._interviews:
-            self.info("Không có lịch", "Không tìm thấy lịch phỏng vấn nào trong 1 tháng gần đây.")
+            self.info("No events", "No interviews found in the last month.")
 
     # ----------------------------------------------------------- bảng
     def _render_table(self):
         _clear_layout(self._table_layout)
         if not self._interviews:
-            empty = QLabel("Chưa có lịch phỏng vấn nào (bấm Quét lịch).")
+            empty = QLabel("No interviews yet (click Scan calendar).")
             empty.setObjectName("Hint")
             self._table_layout.addWidget(empty)
             return
@@ -168,10 +168,10 @@ class ReminderTool(BaseTool):
         head.setStyleSheet("background: #f0f2f8; border-radius: 8px;")
         hh = QHBoxLayout(head)
         hh.setContentsMargins(12, 8, 12, 8)
-        h1 = QLabel("Lịch phỏng vấn (subject)")
+        h1 = QLabel("Interview (subject)")
         h1.setObjectName("SectionLabel")
         hh.addWidget(h1, 1)
-        h2 = QLabel("Đã phản hồi ứng viên?")
+        h2 = QLabel("Replied to candidate?")
         h2.setObjectName("SectionLabel")
         hh.addWidget(h2)
         self._table_layout.addWidget(head)
@@ -185,7 +185,7 @@ class ReminderTool(BaseTool):
         h.setContentsMargins(12, 8, 12, 8)
         info = QVBoxLayout()
         info.setSpacing(2)
-        subj = QLabel(appt["subject"] or "(không có tiêu đề)")
+        subj = QLabel(appt["subject"] or "(no title)")
         subj.setWordWrap(True)
         info.addWidget(subj)
         start = appt.get("start")
@@ -204,11 +204,11 @@ class ReminderTool(BaseTool):
     def _open_confirm(self, appt):
         from app_qt.dialogs import AppDialog
         r = AppDialog(
-            self._page, "Xác nhận",
-            f"Gửi phản hồi kết quả phỏng vấn ngay bây giờ?\n\n{appt['subject']}",
+            self._page, "Confirm",
+            f"Send the interview result now?\n\n{appt['subject']}",
             "question",
-            buttons=[("No — Đặt lịch nhắc khác", "neutral", 2),
-                     ("Yes — Soạn mail", "primary", 1)]).run()
+            buttons=[("No — Schedule a reminder", "neutral", 2),
+                     ("Yes — Compose mail", "primary", 1)]).run()
         if r == 1:
             self._open_compose(appt)
         elif r == 2:
@@ -225,51 +225,51 @@ class ReminderTool(BaseTool):
         return out
 
     def _open_compose(self, appt):
-        dlg, card, lay = build_dialog_shell(self._page, "Soạn mail phản hồi ứng viên", size="md")
+        dlg, card, lay = build_dialog_shell(self._page, "Compose candidate reply", size="md")
 
-        lb1 = QLabel("Đến"); lb1.setObjectName("FieldLabel"); lay.addWidget(lb1)
+        lb1 = QLabel("To"); lb1.setObjectName("FieldLabel"); lay.addWidget(lb1)
         to_w = QLineEdit("; ".join(self._eligible_recipients(appt)))
         lay.addWidget(to_w)
-        lb2 = QLabel("Tiêu đề"); lb2.setObjectName("FieldLabel"); lay.addWidget(lb2)
+        lb2 = QLabel("Subject"); lb2.setObjectName("FieldLabel"); lay.addWidget(lb2)
         subj_w = QLineEdit(_fill_template(self.var_subject.get().strip(), appt))
         lay.addWidget(subj_w)
-        lb3 = QLabel("Nội dung (bôi đen chữ rồi bấm B/I/U/màu để định dạng)")
+        lb3 = QLabel("Body (select text, then B/I/U/color to format)")
         lb3.setObjectName("FieldLabel"); lb3.setWordWrap(True); lay.addWidget(lb3)
         body = richtext.RichText(card, height=16)
         body.set_html(_fill_template(self.body_editor.get_html(), appt))
         lay.addWidget(body)
 
         if not self._eligible_recipients(appt):
-            widgets.hint(card, "⚠ Không tìm thấy email ứng viên (ngoài domain nội bộ) trong "
-                               "lịch này — vui lòng nhập tay ở ô 'Đến'.")
+            widgets.hint(card, "⚠ No candidate email (outside the internal domain) found "
+                               "in this event — please enter it manually in 'To'.")
 
         foot = QHBoxLayout()
 
         def do_send():
             to_value = to_w.text().strip()
             if not to_value:
-                dialogs.warning(dlg, "Thiếu người nhận", "Vui lòng nhập email người nhận.")
+                dialogs.warning(dlg, "Missing recipient", "Please enter a recipient email.")
                 return
             try:
                 outlook.send_mail(to_value, subj_w.text().strip(),
                                   body.get_text(), html=body.get_html())
             except Exception as exc:
-                dialogs.error(dlg, "Lỗi gửi mail", f"Không gửi được:\n{exc}")
+                dialogs.error(dlg, "Send failed", f"Couldn't send:\n{exc}")
                 return
             dlg.accept()
             self._dismiss(appt)
-            dialogs.success(self._page, "Đã gửi", "Đã gửi mail phản hồi ✅")
+            dialogs.success(self._page, "Sent", "Reply sent ✅")
 
-        foot.addWidget(widgets.button(card, "Gửi mail", variant="primary", icon="mail",
+        foot.addWidget(widgets.button(card, "Send", variant="primary", icon="mail",
                                       command=do_send))
-        foot.addWidget(widgets.button(card, "Hủy", variant="neutral", icon="x",
+        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
                                       command=dlg.reject))
         foot.addStretch(1)
         lay.addLayout(foot)
         dlg.exec()
 
     def _open_schedule(self, appt):
-        dlg, card, lay = build_dialog_shell(self._page, "Đặt lịch nhắc phản hồi", size="sm")
+        dlg, card, lay = build_dialog_shell(self._page, "Schedule a follow-up reminder", size="sm")
         sub = QLabel(appt["subject"]); sub.setObjectName("DialogMsg"); sub.setWordWrap(True)
         lay.addWidget(sub)
 
@@ -281,9 +281,9 @@ class ReminderTool(BaseTool):
             w = QLineEdit(value); lay.addWidget(w)
             return w
 
-        date_w = field("Ngày nhắc (dd/mm/yyyy)", default_dt.strftime("%d/%m/%Y"))
-        time_w = field("Giờ nhắc (HH:MM)", default_dt.strftime("%H:%M"))
-        subj_w = field("Tiêu đề lời nhắc", f"Phản hồi PV: {_extract_name(appt['subject'])}")
+        date_w = field("Reminder date (dd/mm/yyyy)", default_dt.strftime("%d/%m/%Y"))
+        time_w = field("Reminder time (HH:MM)", default_dt.strftime("%H:%M"))
+        subj_w = field("Reminder title", f"Interview follow-up: {_extract_name(appt['subject'])}")
 
         foot = QHBoxLayout()
 
@@ -292,25 +292,25 @@ class ReminderTool(BaseTool):
                 start = datetime.datetime.strptime(
                     f"{date_w.text().strip()} {time_w.text().strip()}", "%d/%m/%Y %H:%M")
             except ValueError:
-                dialogs.warning(dlg, "Sai định dạng", "Ngày phải là dd/mm/yyyy và giờ là HH:MM.")
+                dialogs.warning(dlg, "Invalid format", "Date must be dd/mm/yyyy and time HH:MM.")
                 return
             recipients = ", ".join(self._eligible_recipients(appt))
-            body = (f"Nhắc gửi phản hồi kết quả phỏng vấn.\n\n"
-                    f"Lịch gốc: {appt['subject']}\n"
-                    f"Ứng viên: {recipients or '(chưa rõ email)'}")
+            body = (f"Reminder to send the interview result.\n\n"
+                    f"Original event: {appt['subject']}\n"
+                    f"Candidate: {recipients or '(email unknown)'}")
             try:
                 outlook.create_appointment(subj_w.text().strip(), start,
                                            duration_minutes=30, body=body, reminder_minutes=15)
             except Exception as exc:
-                dialogs.error(dlg, "Lỗi tạo lịch", f"Không tạo được lịch nhắc:\n{exc}")
+                dialogs.error(dlg, "Calendar error", f"Couldn't create the reminder:\n{exc}")
                 return
             dlg.accept()
-            dialogs.success(self._page, "Đã đặt lịch",
-                            f"Đã tạo lời nhắc lúc {start.strftime('%d/%m/%Y %H:%M')} ✅")
+            dialogs.success(self._page, "Reminder set",
+                            f"Reminder created for {start.strftime('%d/%m/%Y %H:%M')} ✅")
 
-        foot.addWidget(widgets.button(card, "Tạo lịch nhắc", variant="primary",
+        foot.addWidget(widgets.button(card, "Create reminder", variant="primary",
                                       icon="calendar", command=do_create))
-        foot.addWidget(widgets.button(card, "Hủy", variant="neutral", icon="x",
+        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
                                       command=dlg.reject))
         foot.addStretch(1)
         lay.addLayout(foot)

@@ -425,14 +425,14 @@ class EmployeeDbTool(BaseTool):
             added += 1
 
         self._reload()
-        msg = f"Đã nhập {added} nhân viên."
+        msg = f"Imported {added} employees."
         if missing_depts:
             names = ", ".join(sorted(missing_depts)[:10])
             more = " …" if len(missing_depts) > 10 else ""
-            msg += ("\n\nKhông tìm thấy bộ phận (để trống liên kết): "
-                    f"{names}{more}\nTạo các bộ phận này ở trang 'Bộ phận' rồi "
-                    "nhập lại nếu cần gắn đúng.")
-        dialogs.success(self._root, "Hoàn tất", msg)
+            msg += ("\n\nDepartments not found (link left empty): "
+                    f"{names}{more}\nCreate them on the 'Departments' page and "
+                    "re-import if you need the link.")
+        dialogs.success(self._root, "Done", msg)
 
     @staticmethod
     def _read_excel(path):
@@ -483,25 +483,25 @@ class EmployeeDbTool(BaseTool):
     # ------------------------------------------------------------- form specs
     def _employee_form_specs(self):
         return [
-            {"kind": "section", "label": "Định danh"},
-            {"key": "code", "label": "Mã nhân viên", "kind": "text"},
-            {"key": "global_code", "label": "Global Code", "kind": "text"},
-            {"kind": "section", "label": "Thông tin cá nhân"},
-            {"key": "full_name", "label": "Họ và tên (*)", "kind": "text", "required": True},
-            {"key": "surname", "label": "Họ", "kind": "text"},
-            {"key": "middle_name", "label": "Tên đệm", "kind": "text"},
-            {"key": "name", "label": "Tên", "kind": "text"},
-            {"key": "date_of_birth", "label": "Ngày sinh (dd/mm/yyyy)", "kind": "text"},
-            {"key": "gender", "label": "Giới tính", "kind": "choice",
+            {"kind": "section", "label": "Identity"},
+            {"key": "code", "label": "Employee code", "kind": "text"},
+            {"key": "global_code", "label": "Global code", "kind": "text"},
+            {"kind": "section", "label": "Personal info"},
+            {"key": "full_name", "label": "Full name (*)", "kind": "text", "required": True},
+            {"key": "surname", "label": "Surname", "kind": "text"},
+            {"key": "middle_name", "label": "Middle name", "kind": "text"},
+            {"key": "name", "label": "Name", "kind": "text"},
+            {"key": "date_of_birth", "label": "Date of birth (dd/mm/yyyy)", "kind": "text"},
+            {"key": "gender", "label": "Gender", "kind": "choice",
              "choices": cv_schema.GENDER_CHOICES, "allow_empty": True},
-            {"key": "education", "label": "Trình độ học vấn", "kind": "text"},
-            {"key": "phone", "label": "Số điện thoại", "kind": "text"},
+            {"key": "education", "label": "Education", "kind": "text"},
+            {"key": "phone", "label": "Phone", "kind": "text"},
             {"key": "email", "label": "Email", "kind": "text"},
-            {"key": "address", "label": "Địa chỉ", "kind": "text"},
-            {"kind": "section", "label": "Công việc"},
-            {"key": "level", "label": "Cấp bậc (level)", "kind": "choice",
+            {"key": "address", "label": "Address", "kind": "text"},
+            {"kind": "section", "label": "Job"},
+            {"key": "level", "label": "Level", "kind": "choice",
              "choices": cv_schema.EMPLOYEE_LEVEL_CHOICES, "allow_empty": True},
-            {"key": "department_id", "label": "Bộ phận", "kind": "dropdown",
+            {"key": "department_id", "label": "Department", "kind": "dropdown",
              "options": _dept_options},
         ]
 
@@ -510,7 +510,7 @@ class EmployeeDbTool(BaseTool):
             repo.insert_employee(data)
             self._reload()
 
-        FormDialog(self._root, "Thêm nhân viên mới",
+        FormDialog(self._root, "Add employee",
                    self._employee_form_specs(), None, on_save=_save).run()
 
     def _edit(self, eid=None):
@@ -524,7 +524,7 @@ class EmployeeDbTool(BaseTool):
             repo.update_employee(eid, data)
             self._reload()
 
-        FormDialog(self._root, "Sửa nhân viên",
+        FormDialog(self._root, "Edit employee",
                    self._employee_form_specs(), current,
                    on_save=_save, on_delete=lambda: self._delete(eid)).run()
 
@@ -532,8 +532,8 @@ class EmployeeDbTool(BaseTool):
         """Xóa nhân viên; trả về False nếu người dùng hủy xác nhận (giữ form mở)."""
         row = repo.get_employee(eid)
         name = (row["full_name"] if row and row["full_name"] else f"#{eid}")
-        if not dialogs.confirm(self._root, "Xác nhận xóa",
-                               f'Xóa nhân viên "{name}" khỏi DB?', ok_label="Xóa"):
+        if not dialogs.confirm(self._root, "Confirm delete",
+                               f'Delete employee "{name}" from the DB?', ok_label="Delete"):
             return False
         repo.delete_employee(eid)
         self._reload()

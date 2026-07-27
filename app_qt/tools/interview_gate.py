@@ -32,43 +32,43 @@ DEFAULTS = {
 
 
 class InterviewGateTool(BaseTool):
-    name = "Gửi mail theo lịch"
-    description = "Quét lịch phỏng vấn Outlook hôm nay và soạn mail nhờ Security mở cổng."
+    name = "Gate-Open Mail"
+    description = "Scan today's Outlook interviews and draft a mail asking Security to open the gate."
     icon = "📧"
-    category = "Văn phòng"
+    category = "Office"
     order = 5
-    action_label = "Quét lịch hôm nay"
+    action_label = "Scan today's calendar"
     action_icon = "search"
     auto_startup = True
 
     def build_body(self, parent):
         cfg = config.load(SECTION, DEFAULTS)
-        widgets.section_label(parent, "Nhận diện lịch phỏng vấn")
-        self.var_keywords = widgets.text_row(parent, "Từ khóa trong tiêu đề (cách nhau bởi dấu phẩy)")
+        widgets.section_label(parent, "Interview detection")
+        self.var_keywords = widgets.text_row(parent, "Title keywords (comma-separated)")
         self.var_keywords.set(cfg["keywords"])
-        widgets.hint(parent, "Sự kiện có tiêu đề chứa MỘT trong các từ khóa trên sẽ được "
-                             "coi là lịch phỏng vấn (không phân biệt hoa thường).")
-        widgets.section_label(parent, "Người nhận")
-        self.var_to = widgets.text_row(parent, "Email nhận (nhiều email cách nhau bởi dấu ;)")
+        widgets.hint(parent, "Events whose title contains any of these keywords count "
+                             "as interviews (case-insensitive).")
+        widgets.section_label(parent, "Recipients")
+        self.var_to = widgets.text_row(parent, "To (separate emails with ;)")
         self.var_to.set(cfg["to"])
-        self.var_cc = widgets.text_row(parent, "CC (tùy chọn)")
+        self.var_cc = widgets.text_row(parent, "CC (optional)")
         self.var_cc.set(cfg["cc"])
-        widgets.section_label(parent, "Mẫu mail")
-        self.var_subject = widgets.text_row(parent, "Tiêu đề")
+        widgets.section_label(parent, "Email template")
+        self.var_subject = widgets.text_row(parent, "Subject")
         self.var_subject.set(cfg["subject"])
         self.body_box = widgets.richtext_area(
-            parent, "Nội dung (bôi đen chữ rồi bấm B/I/U/màu để định dạng)",
+            parent, "Body (select text, then B/I/U/color to format)",
             value=cfg["body"], height=9)
-        self.var_auto = widgets.checkbox(parent, "Tự động quét khi mở app mỗi sáng",
+        self.var_auto = widgets.checkbox(parent, "Auto-scan on app launch each morning",
                                          checked=cfg["auto"])
         row = QHBoxLayout()
-        row.addWidget(widgets.button(parent, "Lưu cấu hình", variant="neutral",
+        row.addWidget(widgets.button(parent, "Save config", variant="neutral",
                                      icon="save", command=self._save_config))
         row.addStretch(1)
         parent.layout().addLayout(row)
         if not outlook.available():
-            widgets.hint(parent, "⚠ Không tìm thấy Outlook (pywin32). Tính năng quét/gửi mail "
-                                 "chỉ chạy trên Windows có cài Outlook.")
+            widgets.hint(parent, "⚠ Outlook not found (pywin32). Scanning/sending mail "
+                                 "only works on Windows with Outlook installed.")
 
     def _collect(self):
         return {
@@ -83,7 +83,7 @@ class InterviewGateTool(BaseTool):
 
     def _save_config(self):
         config.save(SECTION, self._collect())
-        self.info("Đã lưu", "Đã lưu cấu hình ✅")
+        self.info("Saved", "Config saved ✅")
 
     # ---------------------------------------------------------- quét & gửi
     def run(self):
@@ -104,15 +104,15 @@ class InterviewGateTool(BaseTool):
     def _scan_and_confirm(self, parent, window=None, silent_if_empty=False):
         if not outlook.available():
             if not silent_if_empty:
-                dialogs.warning(parent, "Cần Outlook",
-                                "Tính năng này cần Outlook trên Windows (pywin32).")
+                dialogs.warning(parent, "Outlook required",
+                                "This feature needs Outlook on Windows (pywin32).")
             return
         cfg = config.load(SECTION, DEFAULTS)
         try:
             appointments = outlook.today_appointments()
         except Exception as exc:
             if not silent_if_empty:
-                dialogs.error(parent, "Lỗi đọc Outlook", f"Không đọc được lịch:\n{exc}")
+                dialogs.error(parent, "Outlook read error", f"Couldn't read the calendar:\n{exc}")
             return
         keywords = [k.strip().lower() for k in cfg["keywords"].split(",") if k.strip()]
         interviews = ([a for a in appointments
@@ -120,8 +120,8 @@ class InterviewGateTool(BaseTool):
                       if keywords else appointments)
         if not interviews:
             if not silent_if_empty:
-                dialogs.info(parent, "Không có lịch",
-                             "Hôm nay không có lịch phỏng vấn nào trong Outlook.")
+                dialogs.info(parent, "No events",
+                             "No interviews in Outlook today.")
             return
         subject, body = self._compose(interviews, cfg)
         if window is not None:
@@ -154,7 +154,7 @@ class InterviewGateTool(BaseTool):
         return cfg["subject"], body
 
     def _open_confirm(self, parent, to, cc, subject, body):
-        dlg, card, lay = build_dialog_shell(parent, "Kiểm tra & gửi mail", size="md")
+        dlg, card, lay = build_dialog_shell(parent, "Review & send email", size="md")
 
         def field(label, value, multiline=False):
             lb = QLabel(label); lb.setObjectName("FieldLabel")
@@ -168,10 +168,10 @@ class InterviewGateTool(BaseTool):
             lay.addWidget(w)
             return w
 
-        to_w = field("Đến", to)
+        to_w = field("To", to)
         cc_w = field("CC", cc)
-        subj_w = field("Tiêu đề", subject)
-        body_w = field("Nội dung (bôi đen chữ rồi bấm B/I/U/màu để định dạng)",
+        subj_w = field("Subject", subject)
+        body_w = field("Body (select text, then B/I/U/color to format)",
                        body, multiline=True)
 
         foot = QHBoxLayout()
@@ -179,21 +179,21 @@ class InterviewGateTool(BaseTool):
         def do_send():
             to_value = to_w.text().strip()
             if not to_value:
-                dialogs.warning(dlg, "Thiếu người nhận", "Vui lòng nhập email người nhận.")
+                dialogs.warning(dlg, "Missing recipient", "Please enter a recipient email.")
                 return
             try:
                 outlook.send_mail(to_value, subj_w.text().strip(),
                                   body_w.get_text(), cc=cc_w.text().strip(),
                                   html=body_w.get_html())
             except Exception as exc:
-                dialogs.error(dlg, "Lỗi gửi mail", f"Không gửi được:\n{exc}")
+                dialogs.error(dlg, "Send failed", f"Couldn't send:\n{exc}")
                 return
             dlg.accept()
-            dialogs.success(parent, "Đã gửi", "Đã gửi mail ✅")
+            dialogs.success(parent, "Sent", "Email sent ✅")
 
-        foot.addWidget(widgets.button(card, "Gửi mail", variant="primary", icon="mail",
+        foot.addWidget(widgets.button(card, "Send", variant="primary", icon="mail",
                                       command=do_send))
-        foot.addWidget(widgets.button(card, "Hủy", variant="neutral", icon="x",
+        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
                                       command=dlg.reject))
         foot.addStretch(1)
         lay.addLayout(foot)

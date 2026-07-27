@@ -17,50 +17,50 @@ except ImportError:
 
 
 class MergeExcelTool(BaseTool):
-    name = "Gộp file Excel"
-    description = "Tự động điền dữ liệu từ các file con (theo MSNV) vào file tổng hợp."
+    name = "Merge Excel"
+    description = "Fill data from child files (by employee ID) into a master file."
     icon = "📊"
-    category = "Tệp & Tài liệu"
+    category = "Files & Documents"
     order = 10
-    action_label = "Gộp dữ liệu"
+    action_label = "Merge data"
 
     def build_body(self, parent):
-        widgets.section_label(parent, "Nguồn & Đích")
+        widgets.section_label(parent, "Source & target")
         self._target = widgets.file_row(
-            parent, "File đích (.xlsx) — cột A chứa MSNV", mode="file")
+            parent, "Target file (.xlsx) — column A holds employee IDs", mode="file")
         self._folder = widgets.file_row(
-            parent, "Thư mục chứa file con (tên file bắt đầu bằng MSNV)", mode="folder")
+            parent, "Folder of child files (filenames start with the employee ID)", mode="folder")
 
-        widgets.section_label(parent, "Cấu hình")
+        widgets.section_label(parent, "Settings")
         self._target_sheet = widgets.text_row(
-            parent, "Sheet trong file đích (để trống = sheet đầu tiên)")
+            parent, "Sheet in target file (blank = first sheet)")
         self._child_sheet = widgets.text_row(
-            parent, "Sheet trong file con (để trống = sheet đầu tiên)")
+            parent, "Sheet in child file (blank = first sheet)")
         self._child_row = widgets.text_row(
-            parent, "Hàng chứa dữ liệu trong file con", placeholder="2")
+            parent, "Data row in child file", placeholder="2")
         self._child_col = widgets.text_row(
-            parent, "Cột bắt đầu đọc trong file con (VD: A)", placeholder="A")
+            parent, "Start column to read in child file (e.g. A)", placeholder="A")
         self._target_col = widgets.text_row(
-            parent, "Cột bắt đầu ghi trong file đích (VD: B)", placeholder="B")
+            parent, "Start column to write in target file (e.g. B)", placeholder="B")
 
         widgets.hint(
             parent,
-            "💡 Ví dụ: MSNV = NV001 → file con tên NV001_BaoCao.xlsx hoặc NV001.xlsx.\n"
-            "Chỉ điền vào các dòng có MSNV ở cột A nhưng chưa có dữ liệu ở các cột sau.\n"
-            "⚠ Hãy sao lưu file đích trước khi chạy — dữ liệu ghi trực tiếp.")
+            "💡 Example: ID NV001 → child file NV001_Report.xlsx or NV001.xlsx.\n"
+            "Only fills rows that have an ID in column A but no data in the following columns.\n"
+            "⚠ Back up the target file first — data is written directly.")
 
     def run(self):
         if not _OPENPYXL_OK:
-            self.error("Thiếu thư viện", "Cần cài openpyxl:\n  pip install openpyxl")
+            self.error("Missing library", "openpyxl is required:\n  pip install openpyxl")
             return
 
         target_path = self._target.get().strip()
         folder_path = self._folder.get().strip()
         if not target_path or not os.path.isfile(target_path):
-            self.error("Lỗi", "Vui lòng chọn file đích hợp lệ.")
+            self.error("Error", "Please choose a valid target file.")
             return
         if not folder_path or not os.path.isdir(folder_path):
-            self.error("Lỗi", "Vui lòng chọn thư mục chứa file con.")
+            self.error("Error", "Please choose the child-files folder.")
             return
 
         target_sheet = self._target_sheet.get().strip() or None
@@ -70,13 +70,13 @@ class MergeExcelTool(BaseTool):
             if child_row < 1:
                 raise ValueError
         except ValueError:
-            self.error("Lỗi", "Hàng dữ liệu phải là số nguyên dương (VD: 2).")
+            self.error("Error", "The data row must be a positive integer (e.g. 2).")
             return
         try:
             child_col = column_index_from_string(self._child_col.get().strip().upper() or "A")
             target_col = column_index_from_string(self._target_col.get().strip().upper() or "B")
         except Exception:
-            self.error("Lỗi", "Cột không hợp lệ — nhập theo dạng A, B, C, AB, …")
+            self.error("Error", "Invalid column — use A, B, C, AB, …")
             return
 
         try:
@@ -84,21 +84,21 @@ class MergeExcelTool(BaseTool):
                 target_path, folder_path, target_sheet, child_sheet,
                 child_row, child_col, target_col)
         except Exception as exc:
-            self.error("Lỗi", f"Có lỗi xảy ra:\n{exc}")
+            self.error("Error", f"Something went wrong:\n{exc}")
             return
 
-        lines = [f"✅ Đã điền dữ liệu: {filled} dòng."]
+        lines = [f"✅ Filled: {filled} rows."]
         if skipped:
-            lines.append(f"⏭ Bỏ qua (đã có dữ liệu): {skipped} dòng.")
+            lines.append(f"⏭ Skipped (already has data): {skipped} rows.")
         if not_found:
             preview = ", ".join(not_found[:5])
-            extra = f" (+{len(not_found) - 5} nữa)" if len(not_found) > 5 else ""
-            lines.append(f"⚠ Không tìm thấy file con: {preview}{extra}")
+            extra = f" (+{len(not_found) - 5} more)" if len(not_found) > 5 else ""
+            lines.append(f"⚠ Child files not found: {preview}{extra}")
         if errors:
             preview = "; ".join(errors[:3])
-            extra = f" (+{len(errors) - 3} lỗi nữa)" if len(errors) > 3 else ""
-            lines.append(f"❌ Lỗi đọc file con: {preview}{extra}")
-        self.info("Kết quả gộp", "\n".join(lines))
+            extra = f" (+{len(errors) - 3} more errors)" if len(errors) > 3 else ""
+            lines.append(f"❌ Child-file read errors: {preview}{extra}")
+        self.info("Merge result", "\n".join(lines))
 
 
 # --------------------------------------------------------------- logic (thuần)
@@ -150,7 +150,7 @@ def _do_merge(target_path, folder_path, target_sheet, child_sheet,
             errors.append(f"{os.path.basename(child_path)}: {exc}")
             continue
         if not child_rows or not child_rows[0]:
-            errors.append(f"{os.path.basename(child_path)}: hàng {child_data_row} rỗng")
+            errors.append(f"{os.path.basename(child_path)}: row {child_data_row} is empty")
             continue
         values = child_rows[0]
         row_num = row[0].row

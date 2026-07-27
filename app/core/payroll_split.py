@@ -155,12 +155,12 @@ def _copy_to_dest(src, dest, dest_dir):
             last_exc = exc
             time.sleep(0.7)  # chờ ổ đám mây "hiện" thư mục rồi thử lại
     raise RuntimeError(
-        "Không ghi được file kết quả tới thư mục đích.\n"
-        f"Đích: {dest}\n"
-        f"(File tạm đã tạo OK tại: {src})\n"
-        f"Chi tiết: {last_exc}\n\n"
-        "Gợi ý: thư mục đích có thể nằm trên Google Drive/OneDrive chưa sẵn "
-        "sàng. Hãy thử chọn 'Thư mục lưu kết quả' là một thư mục trên ổ C:."
+        "Couldn't write the result file to the target folder.\n"
+        f"Target: {dest}\n"
+        f"(Temp file created OK at: {src})\n"
+        f"Details: {last_exc}\n\n"
+        "Tip: the target folder may be on Google Drive/OneDrive and not ready. "
+        "Try setting 'Output folder' to a folder on the C: drive."
     )
 
 
@@ -325,7 +325,7 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
                     for link in (links or []):
                         wb.BreakLink(Name=link, Type=_XL_LINK_EXCEL)
                 except pythoncom.com_error as exc:
-                    warnings.append(f"{supplier}: không break được link ({exc})")
+                    warnings.append(f"{supplier}: couldn't break links ({exc})")
 
                 # 0) Tắt AutoFilter ở TẤT CẢ sheet TRƯỚC KHI xóa. Bắt buộc phải
                 # làm sớm: nếu filter còn bật và đang ẩn dòng thì End(xlUp) sẽ
@@ -343,7 +343,7 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
                         wb.Sheets(sheet_name).Delete()
                     except pythoncom.com_error:
                         warnings.append(
-                            f"{supplier}: không tìm thấy sheet cần xóa '{sheet_name}'")
+                            f"{supplier}: sheet to delete not found '{sheet_name}'")
 
                 # 2) Ở mỗi sheet "xóa hàng": chỉ giữ hàng thuộc NCC hiện tại
                 supplier_key = supplier.strip()
@@ -352,7 +352,7 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
                         ws = wb.Sheets(sheet_name)
                     except pythoncom.com_error:
                         warnings.append(
-                            f"{supplier}: không tìm thấy sheet '{sheet_name}' (bỏ qua)")
+                            f"{supplier}: sheet '{sheet_name}' not found (skipped)")
                         continue
 
                     top = ws.Range(_HEADER_SCAN).Value  # 1 lần đọc cả khối
@@ -360,8 +360,8 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
                     if dest_col is None:
                         # Giống macro: đây là lỗi cấu hình cột -> dừng cả tiến trình
                         raise RuntimeError(
-                            f"Sheet '{sheet_name}': không tìm thấy cột NCC "
-                            f"(các tiêu đề đã thử: {', '.join(vendor_headers)}).")
+                            f"Sheet '{sheet_name}': vendor column not found "
+                            f"(headers tried: {', '.join(vendor_headers)}).")
 
                     # Dòng cuối lấy từ UsedRange (KHÔNG dùng End(xlUp)): End(xlUp)
                     # bỏ qua dòng bị ẩn nên dễ tính thiếu; UsedRange bao trọn mọi
@@ -424,7 +424,7 @@ def _split_payroll(source_path, output_dir, suppliers, vendor_headers,
             # với Google Drive/OneDrive/ổ mạng (nơi Excel SaveAs hay thất bại).
             if not os.path.isfile(tmp_out):
                 raise RuntimeError(
-                    f"Excel không tạo được file tạm:\n{tmp_out}")
+                    f"Excel couldn't create the temp file:\n{tmp_out}")
             _copy_to_dest(tmp_out, final_out, output_dir)
             try:
                 os.remove(tmp_out)

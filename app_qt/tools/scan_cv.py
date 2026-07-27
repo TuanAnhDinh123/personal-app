@@ -42,10 +42,10 @@ def _card():
 
 
 class ScanCvTool(BaseTool):
-    name = "Quét CV"
-    description = "Đổi tên hàng loạt file CV và trích xuất Email, Số điện thoại ra Excel."
+    name = "CV Scan"
+    description = "Batch-rename CV files and extract emails & phone numbers to Excel."
     icon = "📇"
-    category = "Tệp & Tài liệu"
+    category = "Files & Documents"
     order = 10
 
     def build(self, parent=None):
@@ -58,15 +58,15 @@ class ScanCvTool(BaseTool):
 
         # ---- Card dùng chung: thư mục + từ nhiễu + lưu cấu hình ----
         shared, sl = _card()
-        widgets.section_label(shared, "Thư mục chứa CV")
-        self.var_folder = widgets.file_row(shared, "Thư mục", mode="folder")
+        widgets.section_label(shared, "CV folder")
+        self.var_folder = widgets.file_row(shared, "Folder", mode="folder")
         self.var_folder.set(cfg["folder"])
-        widgets.section_label(shared, "Từ cần xóa khi trích tên ứng viên")
+        widgets.section_label(shared, "Words to strip from candidate names")
         self.noise_box = widgets.text_area(
-            shared, "Mỗi từ / cụm từ một dòng (hoặc cách nhau bởi dấu phẩy):",
+            shared, "One word/phrase per line (or comma-separated):",
             value=cfg["noise_keywords"], height=5)
         save_row = QHBoxLayout()
-        save_row.addWidget(widgets.button(shared, "Lưu cấu hình", variant="neutral",
+        save_row.addWidget(widgets.button(shared, "Save config", variant="neutral",
                                           icon="save", command=self._save_config))
         save_row.addStretch(1)
         sl.addLayout(save_row)
@@ -76,8 +76,8 @@ class ScanCvTool(BaseTool):
         # Thẻ "shared" tự chừa CARD_PAD cho bóng → tab (không phải thẻ) bọc trong
         # container thêm lề ngang CARD_PAD để thẳng hàng mép thẻ nhìn thấy.
         tabs = QTabWidget()
-        tabs.addTab(self._build_rename_tab(cfg), "Đổi tên file")
-        tabs.addTab(self._build_extract_tab(), "Trích xuất Excel")
+        tabs.addTab(self._build_rename_tab(cfg), "Rename files")
+        tabs.addTab(self._build_extract_tab(), "Export to Excel")
         tabs_holder = QWidget()
         thl = QVBoxLayout(tabs_holder)
         thl.setContentsMargins(widgets.CARD_PAD, 0, widgets.CARD_PAD, 0)
@@ -95,7 +95,7 @@ class ScanCvTool(BaseTool):
         lay = QVBoxLayout(tab)
         lay.setContentsMargins(20, 18, 20, 18)
         lay.setSpacing(6)
-        widgets.section_label(tab, "Mã CV")
+        widgets.section_label(tab, "CV code")
 
         row = QWidget(tab)
         h = QHBoxLayout(row)
@@ -104,17 +104,17 @@ class ScanCvTool(BaseTool):
         left, right = QWidget(), QWidget()
         h.addWidget(left, 1)
         h.addWidget(right, 1)
-        self.var_prefix = widgets.digit_entry(left, "Prefix code (4 số)", "2506")
+        self.var_prefix = widgets.digit_entry(left, "Prefix code (4 digits)", "2506")
         self.var_prefix.set(cfg["prefix"])
-        self.var_start = widgets.digit_entry(right, "Start code (2 số, tăng dần)", "01")
+        self.var_start = widgets.digit_entry(right, "Start code (2 digits, incrementing)", "01")
         self.var_start.set(cfg["start"])
         lay.addWidget(row)
 
-        widgets.hint(tab, "Ví dụ: prefix=2506, start=01 → 250601_Nguyen Van A.pdf, "
+        widgets.hint(tab, "Example: prefix=2506, start=01 → 250601_Nguyen Van A.pdf, "
                           "250602_Tran Thi B.pdf, …")
         act = QHBoxLayout()
         act.setContentsMargins(0, 14, 0, 0)
-        act.addWidget(widgets.button(tab, "Đổi tên file CV", variant="success",
+        act.addWidget(widgets.button(tab, "Rename CV files", variant="success",
                                      icon="pencil", command=self.run))
         act.addStretch(1)
         lay.addLayout(act)
@@ -127,21 +127,22 @@ class ScanCvTool(BaseTool):
         lay = QVBoxLayout(tab)
         lay.setContentsMargins(20, 18, 20, 18)
         lay.setSpacing(6)
-        widgets.section_label(tab, "Trích xuất dữ liệu ra Excel")
-        self.var_dept = widgets.text_row(tab, "Phòng ban (điền vào cột APPLYING FOR)")
-        self.var_output = widgets.export_target_row(tab, "Xuất bảng tổng hợp ra")
-        widgets.hint(tab, "• Chọn 📁 Thư mục → tạo file Excel mới theo template.\n"
-                          "• Chọn 📄 File Excel → nối tiếp vào sheet 'Candidates'.")
-        widgets.section_label(tab, "Trường cần lấy")
-        self.chk_name = widgets.checkbox(tab, "Tên ứng viên (không kèm ID)")
-        self.chk_id = widgets.checkbox(tab, "ID (prefix + start code từ tên file)")
+        widgets.section_label(tab, "Export data to Excel")
+        self.var_dept = widgets.text_row(tab, "Department (fills the APPLYING FOR column)")
+        self.var_output = widgets.export_target_row(tab, "Export summary to")
+        widgets.hint(tab, "• Pick 📁 a folder → create a new Excel from the template.\n"
+                          "• Pick 📄 an Excel file → append to the 'Candidates' sheet.")
+        widgets.section_label(tab, "Fields to extract")
+        self.chk_name = widgets.checkbox(tab, "Candidate name (without ID)")
+        self.chk_id = widgets.checkbox(tab, "ID (prefix + start code from filename)")
         self.chk_email = widgets.checkbox(tab, "Email")
-        self.chk_phone = widgets.checkbox(tab, "Số điện thoại")
-        widgets.hint(tab, "Tên & ID tách từ tên file (nên đổi tên ở tab trước). "
-                          "Email & SĐT đọc từ nội dung CV (PDF/DOCX). File .doc cũ chưa hỗ trợ.")
+        self.chk_phone = widgets.checkbox(tab, "Phone")
+        widgets.hint(tab, "Name & ID come from the filename (rename them in the previous tab "
+                          "first). Email & phone are read from the CV content (PDF/DOCX). "
+                          "Legacy .doc isn't supported.")
         act = QHBoxLayout()
         act.setContentsMargins(0, 14, 0, 0)
-        act.addWidget(widgets.button(tab, "Trích xuất ra Excel", variant="primary",
+        act.addWidget(widgets.button(tab, "Export to Excel", variant="primary",
                                      icon="file", command=self._run_extract))
         act.addStretch(1)
         lay.addLayout(act)
@@ -159,17 +160,17 @@ class ScanCvTool(BaseTool):
 
     def _save_config(self):
         config.save(SECTION, self._collect())
-        self.info("Đã lưu", "Đã lưu cấu hình ✅")
+        self.info("Saved", "Config saved ✅")
 
     def _files(self):
         folder = self.var_folder.get().strip()
         if not folder or not os.path.isdir(folder):
-            self.error("Thiếu thư mục", "Vui lòng chọn thư mục chứa CV.")
+            self.error("Missing folder", "Please choose the CV folder.")
             return None, None
         files = sorted(p for p in Path(folder).iterdir()
                        if p.is_file() and p.suffix.lower() in _CV_EXTENSIONS)
         if not files:
-            self.info("Không có file", "Không tìm thấy file PDF/DOC/DOCX trong thư mục.")
+            self.info("No files", "No PDF/DOC/DOCX files found in the folder.")
             return folder, None
         return folder, files
 
@@ -187,21 +188,21 @@ class ScanCvTool(BaseTool):
     # -------------------------------------------------------------- trích xuất
     def _run_extract(self):
         if not _OPENPYXL_OK:
-            self.error("Thiếu thư viện", "Cần openpyxl để xuất Excel:\n  pip install openpyxl")
+            self.error("Missing library", "openpyxl is required to export Excel:\n  pip install openpyxl")
             return
         folder, files = self._files()
         if not files:
             return
         target = self.var_output.get().strip()
         if not target:
-            self.error("Thiếu đích xuất",
-                       "Chọn thư mục (tạo file mới) hoặc file Excel (nối tiếp).")
+            self.error("Missing target",
+                       "Pick a folder (new file) or an Excel file (append).")
             return
         dept = self.var_dept.get().strip()
         want = dict(name=self.chk_name.get(), id=self.chk_id.get(),
                     email=self.chk_email.get(), phone=self.chk_phone.get())
         if not any(want.values()):
-            self.error("Chưa chọn trường", "Hãy chọn ít nhất một trường để trích xuất.")
+            self.error("No fields selected", "Choose at least one field to extract.")
             return
         config.save(SECTION, self._collect())
 
@@ -250,34 +251,34 @@ class ScanCvTool(BaseTool):
                     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                     base = _safe_filename(f"Candidates_{dept}" if dept else "Candidates")
                     out = os.path.join(target, f"{base}_{stamp}.xlsx")
-                    mode = "mới"
+                    mode = "new"
                 elif os.path.isfile(target):
                     wb, ws = _open_existing_workbook(target)
-                    out, mode = target, "nối tiếp"
+                    out, mode = target, "appended"
                 elif target.lower().endswith(".xlsx") and os.path.isdir(os.path.dirname(target)):
                     wb, ws = _open_template_workbook()
-                    out, mode = target, "mới"
+                    out, mode = target, "new"
                 else:
-                    dlg.set_final_status("Đích không hợp lệ.")
-                    dlg.log("⚠ Hãy chọn THƯ MỤC hoặc FILE .xlsx hợp lệ.")
+                    dlg.set_final_status("Invalid target.")
+                    dlg.log("⚠ Pick a valid FOLDER or .xlsx FILE.")
                     return
                 _write_candidates(ws, rows)
                 wb.save(out)
             except PermissionError:
-                dlg.set_final_status("Không ghi được file.")
-                dlg.log(f"⚠ File đang mở trong Excel? Hãy đóng rồi thử lại:\n{target}")
+                dlg.set_final_status("Can't write file.")
+                dlg.log(f"⚠ Open in Excel? Close it and retry:\n{target}")
                 return
             except Exception as exc:
-                dlg.set_final_status("Lỗi ghi Excel.")
+                dlg.set_final_status("Excel write error.")
                 dlg.log(f"⚠ {exc}")
                 return
-            dlg.set_final_status(f"Hoàn thành — {len(rows)} CV ({mode}).")
-            dlg.log(f"\n✅ Đã lưu {len(rows)} CV vào:\n{out}")
+            dlg.set_final_status(f"Done — {len(rows)} CVs ({mode}).")
+            dlg.log(f"\n✅ Saved {len(rows)} CVs to:\n{out}")
             if errors:
-                dlg.log(f"⚠ {len(errors)} file không đọc được nội dung (xem trên).")
+                dlg.log(f"⚠ {len(errors)} files couldn't be read (see above).")
 
-        dlg = ProgressDialog(self._page, "Đang trích xuất CV…", total=total,
-                             subtitle=f"Đọc {total} file CV")
+        dlg = ProgressDialog(self._page, "Extracting CVs…", total=total,
+                             subtitle=f"Reading {total} CV files")
         dlg.start(job, on_finish)
 
 
@@ -292,16 +293,17 @@ class _RenamePreview(ModalDialog):
         self._codes = []
 
         card, lay = self.build_shell(
-            f"Tìm thấy {len(files)} file — double-click cột giữa để chỉnh tên",
+            f"Found {len(files)} files — double-click the middle column to edit the name",
             spacing=10)
 
-        sub = QLabel("Tên ứng viên tự trích từ tên file gốc; cột 'Tên file mới' cập nhật ngay.")
+        sub = QLabel("Candidate names are extracted from the original filenames; "
+                     "the 'New filename' column updates live.")
         sub.setObjectName("DialogMsg")
         lay.addWidget(sub)
 
         self.table = QTableWidget(len(files), 3)
         self.table.setHorizontalHeaderLabels(
-            ["Tên file gốc", "Tên ứng viên (sửa được)", "Tên file mới (xem trước)"])
+            ["Original filename", "Candidate name (editable)", "New filename (preview)"])
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(32)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -332,9 +334,9 @@ class _RenamePreview(ModalDialog):
         self.set_grow_region(self.table)   # cao theo cỡ lg, tự co khi màn hình thấp
 
         foot = QHBoxLayout()
-        foot.addWidget(widgets.button(card, "Đổi tên tất cả", variant="success",
+        foot.addWidget(widgets.button(card, "Rename all", variant="success",
                                       icon="check", command=self._do_rename))
-        foot.addWidget(widgets.button(card, "Hủy", variant="neutral", icon="x",
+        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
                                       command=self.reject))
         foot.addStretch(1)
         lay.addLayout(foot)
@@ -367,13 +369,13 @@ class _RenamePreview(ModalDialog):
                 renamed += 1
             except Exception as exc:
                 errors.append(f"{p.name}: {exc}")
-        msg = f"Đã đổi tên {renamed} file."
+        msg = f"Renamed {renamed} files."
         if skipped:
-            msg += f"\n{skipped} file bỏ qua (tên không đổi)."
+            msg += f"\n{skipped} files skipped (unchanged name)."
         if errors:
-            msg += "\n\nLỗi:\n" + "\n".join(errors[:8])
+            msg += "\n\nErrors:\n" + "\n".join(errors[:8])
         self.accept()
         if errors:
-            dialogs.warning(self.parent(), "Hoàn thành (có lỗi)", msg)
+            dialogs.warning(self.parent(), "Done (with errors)", msg)
         else:
-            dialogs.success(self.parent(), "Hoàn thành", msg)
+            dialogs.success(self.parent(), "Done", msg)

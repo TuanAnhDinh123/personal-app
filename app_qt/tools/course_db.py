@@ -35,11 +35,11 @@ except ImportError:
 # Cột bảng LƯỢT GHI DANH (course_employees): đầy đủ cột DB + thông tin nhân viên
 # / khóa học (join) để bảng đọc được.
 _COURSE_COLUMNS = [
-    ("code",            "Mã NV",      100, "w"),
-    ("full_name",       "Họ tên",     180, "w"),
-    ("department_name", "Bộ phận",    150, "w"),
-    ("status",          "Trạng thái", 120, "center"),
-    ("note",            "Ghi chú",    220, "w"),
+    ("code",            "Emp code",   100, "w"),
+    ("full_name",       "Full name",  180, "w"),
+    ("department_name", "Department", 150, "w"),
+    ("status",          "Status",     120, "center"),
+    ("note",            "Note",       220, "w"),
 ]
 
 # Section config lưu "việc quét còn dở": các TRANG bị lỗi của lần quét trước, để
@@ -52,14 +52,14 @@ _PENDING_KEY = "pending_scan"
 def _course_label(course):
     """Nhãn khóa học cho ô lọc: '#<id> — <tên>' (id đứng đầu → dễ nhận khóa mới
     nhất; kèm id nên KHÔNG trùng dù hai khóa cùng tên)."""
-    return f"#{course['course_id']} — {course['title'] or 'Khóa học'}"
+    return f"#{course['course_id']} — {course['title'] or 'Course'}"
 
 
 class CourseDbTool(BaseTool):
-    name = "Quản lý khóa học"
-    description = "Tra cứu lượt ghi danh & cập nhật trạng thái học (SQLite)."
+    name = "Course Manager"
+    description = "Browse enrollments & update learning status (SQLite)."
     icon = "🎓"
-    category = "Nhân sự"
+    category = "Human Resources"
     order = 20
     fills_height = True
 
@@ -72,7 +72,7 @@ class CourseDbTool(BaseTool):
         self._root = card
         self._course_default_set = False
 
-        widgets.section_label(card, "Tìm kiếm khóa học")
+        widgets.section_label(card, "Search courses")
         self._build_search_bar(lay)
 
         self.table = DataTable(_COURSE_COLUMNS, pk="enrollment_id",
@@ -97,20 +97,20 @@ class CourseDbTool(BaseTool):
         # dữ liệu của MỘT khóa học (mặc định là khóa có id lớn nhất). Nạp lại
         # danh sách mỗi khi bung dropdown → luôn lấy từ bảng courses (kể cả khi
         # trang đã bị cache và có khóa mới thêm sau đó).
-        self.sel_course = widgets.FilterSelect("Khóa học", allow_all=False)
+        self.sel_course = widgets.FilterSelect("Course", allow_all=False)
         self.sel_course.set_open_hook(self._load_course_options)
-        self.sel_status = widgets.FilterSelect("Trạng thái")
+        self.sel_status = widgets.FilterSelect("Status")
         self.sel_status.set_options(cv_schema.COURSE_STATUS_CHOICES)
         for w in (self.sel_course, self.sel_status):
             w.changed.connect(self._reload)
             filters.addWidget(w, 1)
         filters.addStretch(1)
         self._btn_scan = widgets.button(
-            self._root, "Quét chữ ký (AI)", variant="info", icon="sparkles",
+            self._root, "Scan signatures (AI)", variant="info", icon="sparkles",
             command=self._scan_signatures)
         filters.addWidget(self._btn_scan)
         self._btn_export = widgets.button(
-            self._root, "Xuất Excel", variant="primary", icon="save",
+            self._root, "Export to Excel", variant="primary", icon="save",
             command=self._export_roster)
         filters.addWidget(self._btn_export)
         lay.addLayout(filters)
@@ -137,8 +137,8 @@ class CourseDbTool(BaseTool):
             course_id=course_id, status=self.sel_status.value())
         self.table.set_rows(rows)
         self.count_lbl.setText(
-            f"Hiển thị {len(rows)} lượt ghi danh · "
-            f"Tổng trong DB: {repo.count_course_employees()}")
+            f"Showing {len(rows)} enrollments · "
+            f"Total in DB: {repo.count_course_employees()}")
 
     # -------------------------------------------------------------- sửa
     def _edit(self, enrollment_id=None):
@@ -146,7 +146,7 @@ class CourseDbTool(BaseTool):
             return
         current = repo.get_enrollment(enrollment_id)
         specs = [
-            {"key": "status", "label": "Trạng thái học", "kind": "choice",
+            {"key": "status", "label": "Learning status", "kind": "choice",
              "choices": cv_schema.COURSE_STATUS_CHOICES, "allow_empty": True},
         ]
 
@@ -154,7 +154,7 @@ class CourseDbTool(BaseTool):
             repo.update_enrollment(enrollment_id, {"status": data.get("status")})
             self._reload()
 
-        FormDialog(self._root, "Cập nhật trạng thái học",
+        FormDialog(self._root, "Update learning status",
                    specs, current, on_save=_save).run()
 
     # ---------------------------------------------------------- xuất Excel
@@ -164,30 +164,30 @@ class CourseDbTool(BaseTool):
     # phận (short_name), thiếu thì fallback về tên đầy đủ.
     def _export_roster(self):
         if not _OPENPYXL_OK:
-            return dialogs.error(self._root, "Thiếu thư viện",
-                                 "Cần openpyxl để xuất Excel:\n  pip install openpyxl")
+            return dialogs.error(self._root, "Missing library",
+                                 "openpyxl is required to export Excel:\n  pip install openpyxl")
         from app.core import excel_template
 
         tpl = (app_settings.get("course_template_path") or "").strip()
         if not tpl:
             return dialogs.error(
-                self._root, "Chưa cấu hình template",
-                "Hãy vào Cài đặt → Xuất Excel khóa học và chọn file template trước.")
+                self._root, "No template configured",
+                "Go to Settings → Course roster export and choose a template file first.")
         if not os.path.isfile(tpl):
-            return dialogs.error(self._root, "Không tìm thấy template",
-                                 f"File template không tồn tại:\n{tpl}")
+            return dialogs.error(self._root, "Template not found",
+                                 f"The template file doesn't exist:\n{tpl}")
 
         course_id = self._course_opts.get(self.sel_course.value())
         if not course_id:
-            return dialogs.info(self._root, "Chưa chọn khóa học",
-                                "Hãy chọn một khóa học để xuất.")
+            return dialogs.info(self._root, "No course selected",
+                                "Please choose a course to export.")
 
         not_started = cv_schema.COURSE_STATUS_CHOICES[0]   # "Not started"
         rows = repo.search_course_employees(course_id=course_id, status=not_started)
         if not rows:
             return dialogs.info(
-                self._root, "Không có dữ liệu",
-                f'Khóa học này không có nhân viên nào ở trạng thái "{not_started}".')
+                self._root, "No data",
+                f'This course has no employees with status "{not_started}".')
 
         course = repo.get_course(course_id)
         ct = course["course_type"]
@@ -219,7 +219,7 @@ class CourseDbTool(BaseTool):
         ext = ".xlsm" if tpl.lower().endswith(".xlsm") else ".xlsx"
         safe = re.sub(r'[\\/:*?"<>|]', "_", course["title"] or "roster").strip() or "roster"
         path, _ = QFileDialog.getSaveFileName(
-            self._root, "Xuất roster khóa học", f"{safe}{ext}", "Excel (*.xlsx *.xlsm)")
+            self._root, "Export course roster", f"{safe}{ext}", "Excel (*.xlsx *.xlsm)")
         if not path:
             return
         if not path.lower().endswith((".xlsx", ".xlsm")):
@@ -230,14 +230,14 @@ class CourseDbTool(BaseTool):
                 tpl, path, context, export_rows,
                 row_fields={"code", "full_name", "department_short", "note", "stt"})
         except PermissionError:
-            return dialogs.error(self._root, "Không ghi được file",
-                                 f"File Excel đang mở? Hãy đóng rồi thử lại:\n{path}")
+            return dialogs.error(self._root, "Can't write file",
+                                 f"Is the Excel file open? Close it and retry:\n{path}")
         except Exception as exc:   # noqa: BLE001 — báo lại cho UI, không chặn luồng
-            return dialogs.error(self._root, "Lỗi xuất Excel", str(exc))
+            return dialogs.error(self._root, "Excel export error", str(exc))
 
         dialogs.success(
-            self._root, "Hoàn tất",
-            f'Đã xuất {len(export_rows)} nhân viên ("{not_started}") vào:\n{path}')
+            self._root, "Done",
+            f'Exported {len(export_rows)} employees ("{not_started}") to:\n{path}')
 
     # ---------------------------------------------------- quét chữ ký bằng AI
     # HR scan cả tập bảng điểm danh đã ký thành MỘT file PDF nhiều trang → chọn
@@ -250,20 +250,20 @@ class CourseDbTool(BaseTool):
         model = (gen.get("ai_model") or "").strip() or app_settings.DEFAULTS["ai_model"]
         if not api_key:
             return dialogs.error(
-                self._root, "Chưa có API key",
-                "Hãy vào Cài đặt → AI (Gemini) và nhập API key trước.")
+                self._root, "No API key",
+                "Go to Settings → AI (Gemini) and enter your API key first.")
 
         course_id = self._course_opts.get(self.sel_course.value())
         if not course_id:
-            return dialogs.info(self._root, "Chưa chọn khóa học",
-                                "Hãy chọn một khóa học để quét.")
+            return dialogs.info(self._root, "No course selected",
+                                "Please choose a course to scan.")
 
         not_started = cv_schema.COURSE_STATUS_CHOICES[0]   # "Not started"
         roster = repo.search_course_employees(course_id=course_id, status=not_started)
         if not roster:
             return dialogs.info(
-                self._root, "Không có dữ liệu",
-                f'Khóa học này không có nhân viên nào ở trạng thái "{not_started}".')
+                self._root, "No data",
+                f'This course has no employees with status "{not_started}".')
 
         # Lần quét trước còn trang lỗi của ĐÚNG khóa này và file vẫn còn → cho
         # quét tiếp mấy trang đó thay vì gửi lại cả tập.
@@ -272,15 +272,15 @@ class CourseDbTool(BaseTool):
         if pending:
             todo = pending["pages"]
             choice = dialogs.AppDialog(
-                self._root, "Còn trang chưa quét được",
-                f"Lần quét trước của khóa này còn {len(todo)} trang lỗi "
-                f"(trang {', '.join(str(n) for n in todo)}) trong file:\n"
+                self._root, "Pages left to scan",
+                f"The previous scan of this course still has {len(todo)} failed pages "
+                f"(pages {', '.join(str(n) for n in todo)}) in file:\n"
                 f"{os.path.basename(pending['path'])}\n\n"
-                "Quét tiếp mấy trang đó, hay chọn file khác để quét lại từ đầu?",
+                "Continue with those pages, or choose another file to scan from scratch?",
                 "question",
-                buttons=[("Hủy", "neutral", 0),
-                         ("Chọn file khác", "neutral", 2),
-                         (f"Quét tiếp {len(todo)} trang", "primary", 1)]).run()
+                buttons=[("Cancel", "neutral", 0),
+                         ("Choose another file", "neutral", 2),
+                         (f"Scan {len(todo)} more pages", "primary", 1)]).run()
             if not choice:
                 return
             if choice == 1:
@@ -288,18 +288,18 @@ class CourseDbTool(BaseTool):
 
         if not path:
             path, _ = QFileDialog.getOpenFileName(
-                self._root, "Chọn file scan chữ ký (ảnh/PDF nhiều trang)", "",
-                "Ảnh & PDF (*.png *.jpg *.jpeg *.webp *.pdf)")
+                self._root, "Choose the signature scan file (image / multi-page PDF)", "",
+                "Images & PDF (*.png *.jpg *.jpeg *.webp *.pdf)")
             if not path:
                 return
         if not signature_scan.is_supported(path):
-            return dialogs.error(self._root, "Định dạng không hỗ trợ",
-                                 "Chỉ hỗ trợ ảnh (PNG/JPG/WEBP) hoặc PDF.")
+            return dialogs.error(self._root, "Unsupported format",
+                                 "Only images (PNG/JPG/WEBP) or PDF are supported.")
         try:
             with open(path, "rb") as f:
                 file_bytes = f.read()
         except Exception as exc:   # noqa: BLE001
-            return dialogs.error(self._root, "Lỗi đọc file", str(exc))
+            return dialogs.error(self._root, "Read error", str(exc))
 
         # Tách file thành ẢNH từng trang. PDF gửi thẳng dễ bị model gán chữ ký
         # lệch lên dòng trên (xem docstring app.core.signature_scan).
@@ -307,7 +307,7 @@ class CourseDbTool(BaseTool):
             pages = signature_scan.render_pages(
                 file_bytes, signature_scan.guess_mime(path), only=only)
         except Exception as exc:   # noqa: BLE001
-            return dialogs.error(self._root, "Không tách được trang", str(exc))
+            return dialogs.error(self._root, "Couldn't split pages", str(exc))
 
         roster_min = [{"code": r["code"] or "", "full_name": r["full_name"] or ""}
                       for r in roster]
@@ -321,39 +321,38 @@ class CourseDbTool(BaseTool):
             for i, (no, blob, page_mime) in enumerate(pages, start=1):
                 if ctx.cancelled:
                     return page_rows, failed, True
-                ctx.status(f"Trang {no} ({i}/{total}) — đang gửi cho AI ({model})…")
+                ctx.status(f"Page {no} ({i}/{total}) — sending to AI ({model})…")
 
                 def on_retry(attempt, wait, reason, n=no):
-                    ctx.log(f"… trang {n}: {reason} — thử lại lần {attempt} sau {wait}s")
+                    ctx.log(f"… page {n}: {reason} — retry {attempt} in {wait}s")
 
                 try:
                     data = signature_scan.detect_signatures(
                         api_key, model, blob, page_mime, roster_min,
                         on_retry=on_retry, should_cancel=lambda: ctx.cancelled)
                 except signature_scan.Cancelled:
-                    ctx.log(f"✋ Đã hủy khi đang xử lý trang {no}.")
+                    ctx.log(f"✋ Cancelled while processing page {no}.")
                     return page_rows, failed, True
                 except Exception as exc:   # noqa: BLE001
                     failed.append((no, str(exc)))
-                    ctx.log(f"⛔ Trang {no} lỗi: {exc}")
+                    ctx.log(f"⛔ Page {no} failed: {exc}")
                     ctx.step()
                     continue
                 rows = data.get("rows", []) or []
                 page_rows.append(rows)
                 n_signed = sum(1 for r in rows if r.get("signed"))
-                ctx.log(f"✅ Trang {no}: {len(rows)} dòng, {n_signed} đã ký")
+                ctx.log(f"✅ Page {no}: {len(rows)} rows, {n_signed} signed")
                 ctx.step()
             return page_rows, failed, False
 
         def on_finish(dlg, result):
             page_rows, failed, cancelled = result
             if cancelled:
-                dlg.set_final_status("Đã hủy — chưa cập nhật trạng thái nào.")
+                dlg.set_final_status("Cancelled — no statuses updated.")
                 return
             if failed and not page_rows:
-                dlg.set_final_status(f"Không quét được trang nào ({len(failed)} lỗi).")
-                dlg.log("👉 Thường là hết hạn mức key — chờ ít phút rồi bấm "
-                        "'Quét chữ ký (AI)' để quét lại.")
+                dlg.set_final_status(f"No pages could be scanned ({len(failed)} errors).")
+                dlg.log("👉 Wait a moment, then click 'Scan signatures (AI)' to try again.")
                 return
 
             # Gộp kết quả các trang rồi đối chiếu theo MÃ NV với roster.
@@ -375,11 +374,11 @@ class CourseDbTool(BaseTool):
             self._review_attendance(signed, unsigned, unmatched,
                                     [no for no, _ in failed], course_id, path)
 
-        what = (f"quét tiếp trang {', '.join(str(n) for n, _, _ in pages)}"
-                if only else f"{total} trang")
-        dlg = ProgressDialog(self._root, "Đang nhận diện chữ ký…", total=total,
+        what = (f"scanning pages {', '.join(str(n) for n, _, _ in pages)}"
+                if only else f"{total} pages")
+        dlg = ProgressDialog(self._root, "Detecting signatures…", total=total,
                              subtitle=f"{os.path.basename(path)} — {what}, "
-                                      f"bằng {model}")
+                                      f"with {model}")
         dlg.start(job, on_finish)
 
     # ------------------------------------------- ghi nhớ trang quét lỗi (resume)
@@ -419,15 +418,15 @@ class CourseDbTool(BaseTool):
         completed = cv_schema.COURSE_STATUS_CHOICES[-1]   # "Completed"
         total = len(signed_rows) + len(unsigned_rows)
         dlg = ModalDialog(self._root, size="md")
-        card, lay = dlg.build_shell("Xác nhận điểm danh")
+        card, lay = dlg.build_shell("Confirm attendance")
 
         hint = QLabel(
-            f"AI thấy {len(signed_rows)}/{total} nhân viên đã ký "
-            f'→ sẽ chuyển sang "{completed}".\n'
-            + (f"{len(unsigned_rows)} người dưới đây KHÔNG thấy chữ ký. Tick những "
-               "ai thực ra đã ký để tính luôn, rồi bấm Xác nhận."
+            f"The AI found {len(signed_rows)}/{total} employees signed "
+            f'→ they will move to "{completed}".\n'
+            + (f"The {len(unsigned_rows)} people below have NO signature. Tick anyone "
+               "who actually signed to include them, then click Confirm."
                if unsigned_rows else
-               "Không còn ai thiếu chữ ký — bấm Xác nhận để cập nhật."))
+               "No one is missing a signature — click Confirm to update."))
         hint.setObjectName("Hint")
         hint.setWordWrap(True)
         lay.addWidget(hint)
@@ -435,9 +434,9 @@ class CourseDbTool(BaseTool):
         table = None
         if unsigned_rows:
             cols = [
-                ("code",            "Mã NV",   110, "w"),
-                ("full_name",       "Họ tên",  200, "w"),
-                ("department_name", "Bộ phận", 150, "w"),
+                ("code",            "Emp code",   110, "w"),
+                ("full_name",       "Full name",  200, "w"),
+                ("department_name", "Department", 150, "w"),
             ]
             table = DataTable(cols, pk="enrollment_id", checkable=True)
             table.set_rows(unsigned_rows)   # KHÔNG tick sẵn — mặc định là chưa ký
@@ -446,11 +445,11 @@ class CourseDbTool(BaseTool):
 
         pages_txt = ", ".join(str(n) for n in failed_pages)
         for text in (
-            (f"⚠ Chưa quét được trang {pages_txt}. Người ở mấy trang đó đang nằm "
-             "trong danh sách trên (chưa có dữ liệu) — đừng tick. Bấm Xác nhận để "
-             "lưu phần đã quét, rồi bấm 'Quét chữ ký (AI)' lần nữa và chọn "
-             f"'Quét tiếp {len(failed_pages)} trang'." if failed_pages else ""),
-            ("AI thấy chữ ký ở mã không thuộc khóa này (bỏ qua): "
+            (f"⚠ Pages {pages_txt} couldn't be scanned. People on those pages are "
+             "in the list above (no data yet) — don't tick them. Click Confirm to "
+             "save what was scanned, then click 'Scan signatures (AI)' again and choose "
+             f"'Scan {len(failed_pages)} more pages'." if failed_pages else ""),
+            ("The AI found signatures for codes not in this course (ignored): "
              + ", ".join(f"{p} {n}".strip() for p, n in unmatched[:15]))
             if unmatched else "",
         ):
@@ -472,11 +471,11 @@ class CourseDbTool(BaseTool):
             dlg.accept()
             self._reload()
             dialogs.success(
-                self._root, "Hoàn tất",
-                f'Đã cập nhật {len(rows)} nhân viên sang "{completed}"'
-                + (f", trong đó {len(extra)} người bạn tick thêm." if extra else ".")
-                + (f"\n\nCòn trang {pages_txt} chưa quét được — bấm "
-                   "'Quét chữ ký (AI)' để quét tiếp." if failed_pages else ""))
+                self._root, "Done",
+                f'Updated {len(rows)} employees to "{completed}"'
+                + (f", including {len(extra)} you ticked." if extra else ".")
+                + (f"\n\nPages {pages_txt} still aren't scanned — click "
+                   "'Scan signatures (AI)' to continue." if failed_pages else ""))
 
         def _cancel():
             # Không cập nhật gì → cũng đừng ghi nhớ trang lỗi, vì lần sau phải
@@ -486,9 +485,9 @@ class CourseDbTool(BaseTool):
 
         foot = QHBoxLayout()
         foot.addStretch(1)
-        foot.addWidget(widgets.button(card, "Hủy", variant="neutral", icon="x",
+        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
                                       command=_cancel))
-        foot.addWidget(widgets.button(card, "Xác nhận", variant="success",
+        foot.addWidget(widgets.button(card, "Confirm", variant="success",
                                       icon="check", command=_confirm))
         lay.addLayout(foot)
         dlg.exec()

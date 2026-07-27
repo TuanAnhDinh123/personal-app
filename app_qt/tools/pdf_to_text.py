@@ -28,9 +28,9 @@ except ImportError:
 
 # nhãn + màu badge theo nguồn text của trang
 _SOURCE_BADGE = {
-    "text": ("Lớp text", theme.PALETTE["--info"]),
+    "text": ("Text layer", theme.PALETTE["--info"]),
     "ocr":  ("OCR", theme.PALETTE["--success"]),
-    "scan": ("Scan – chưa OCR", theme.PALETTE["--warning"]),
+    "scan": ("Scan – no OCR", theme.PALETTE["--warning"]),
 }
 
 
@@ -59,9 +59,9 @@ class _ImageView(QScrollArea):
 
 class PdfToTextTool(BaseTool):
     name = "PDF → Text"
-    description = "Trích văn bản từ PDF (Word xuất ra hoặc bản scan) và đối chiếu với bản gốc."
+    description = "Extract text from PDFs (Word-exported or scanned) and compare with the original."
     icon = "📝"
-    category = "Tệp & Tài liệu"
+    category = "Files & Documents"
     order = 15
     fills_height = True
 
@@ -80,8 +80,8 @@ class PdfToTextTool(BaseTool):
 
         if not _FITZ_OK:
             card, lay = self._card()
-            widgets.section_label(card, "Thiếu thư viện")
-            widgets.hint(card, "Tính năng này cần PyMuPDF. Cài rồi mở lại app:\n"
+            widgets.section_label(card, "Missing library")
+            widgets.hint(card, "This feature needs PyMuPDF. Install it and reopen the app:\n"
                                "    pip install pymupdf pytesseract")
             outer.addWidget(card)
             outer.addStretch(1)
@@ -106,28 +106,28 @@ class PdfToTextTool(BaseTool):
     # ---------------------------------------------------------- điều khiển
     def _build_controls(self, outer):
         card, lay = self._card()
-        self.var_file = widgets.file_row(card, "File PDF", mode="file")
+        self.var_file = widgets.file_row(card, "PDF file", mode="file")
 
         opts = QHBoxLayout()
         opts.setSpacing(8)
-        opts.addWidget(QLabel("Ngôn ngữ OCR"))
+        opts.addWidget(QLabel("OCR language"))
         self.ent_lang = QLineEdit("vie+eng")
         self.ent_lang.setFixedWidth(110)
         opts.addWidget(self.ent_lang)
         opts.addSpacing(12)
-        opts.addWidget(QLabel("Độ nét scan"))
+        opts.addWidget(QLabel("Scan quality"))
         self.cb_dpi = widgets.ComboBox()
         self.cb_dpi.addItems(list(_OCR_DPI_OPTIONS))
-        self.cb_dpi.setCurrentText("Cân bằng (300 DPI)")
+        self.cb_dpi.setCurrentText("Balanced (300 DPI)")
         opts.addWidget(self.cb_dpi)
         opts.addSpacing(12)
-        self.chk_force = QCheckBox("Luôn OCR (kể cả khi có lớp text)")
+        self.chk_force = QCheckBox("Always OCR (even if a text layer exists)")
         opts.addWidget(self.chk_force)
         opts.addStretch(1)
         lay.addLayout(opts)
 
         bar = QHBoxLayout()
-        self._run_btn = widgets.button(card, "Trích văn bản", variant="primary",
+        self._run_btn = widgets.button(card, "Extract text", variant="primary",
                                        icon="play", command=self._start_extract)
         bar.addWidget(self._run_btn)
         self._status = QLabel("")
@@ -137,8 +137,9 @@ class PdfToTextTool(BaseTool):
         lay.addLayout(bar)
 
         if not tesseract_available():
-            widgets.hint(card, "💡 PDF từ Word trích được ngay. PDF scan cần cài Tesseract-OCR "
-                               "(github.com/UB-Mannheim/tesseract/wiki, nhớ tick gói Vietnamese).")
+            widgets.hint(card, "💡 Word-exported PDFs extract instantly. Scanned PDFs need "
+                               "Tesseract-OCR (github.com/UB-Mannheim/tesseract/wiki — "
+                               "include the Vietnamese pack).")
         outer.addWidget(card)
 
     # ---------------------------------------------------------- viewer
@@ -152,7 +153,7 @@ class PdfToTextTool(BaseTool):
         ll.setContentsMargins(12, 10, 12, 12)
         ll.setSpacing(8)
         nav = QHBoxLayout()
-        title = QLabel("Bản gốc")
+        title = QLabel("Original")
         title.setObjectName("SectionLabel")
         nav.addWidget(title)
         nav.addStretch(1)
@@ -178,7 +179,7 @@ class PdfToTextTool(BaseTool):
         rl = QVBoxLayout(right)
         rl.setContentsMargins(12, 10, 12, 12)
         rl.setSpacing(8)
-        rtitle = QLabel("Văn bản trích được (có thể sửa)")
+        rtitle = QLabel("Extracted text (editable)")
         rtitle.setObjectName("SectionLabel")
         rl.addWidget(rtitle)
         self._text = widgets.TextEdit()
@@ -198,9 +199,9 @@ class PdfToTextTool(BaseTool):
     def _build_footer(self, outer):
         bar = QHBoxLayout()
         bar.setContentsMargins(widgets.CARD_PAD, 0, widgets.CARD_PAD, 0)
-        self._copy_btn = widgets.button(None, "Sao chép trang này", variant="neutral",
+        self._copy_btn = widgets.button(None, "Copy this page", variant="neutral",
                                         icon="copy", command=self._copy_current)
-        self._save_btn = widgets.button(None, "Lưu toàn bộ ra .txt", variant="success",
+        self._save_btn = widgets.button(None, "Save all as .txt", variant="success",
                                         icon="save", command=self._save_txt)
         bar.addWidget(self._copy_btn)
         bar.addWidget(self._save_btn)
@@ -213,17 +214,17 @@ class PdfToTextTool(BaseTool):
             return
         path = self.var_file.get().strip()
         if not path or not os.path.isfile(path):
-            self.error("Lỗi", "Vui lòng chọn một file PDF hợp lệ.")
+            self.error("Error", "Please choose a valid PDF file.")
             return
         if self.chk_force.isChecked() and not tesseract_available():
-            self.error("Chưa có Tesseract",
-                       'Bạn bật "Luôn OCR" nhưng chưa cài Tesseract-OCR.\n'
-                       "Hãy cài Tesseract hoặc tắt tùy chọn này.")
+            self.error("Tesseract missing",
+                       'You enabled "Always OCR" but Tesseract-OCR isn\'t installed.\n'
+                       "Install it or turn off this option.")
             return
 
         self._busy = True
         self._run_btn.setEnabled(False)
-        self._status.setText("Đang mở PDF…")
+        self._status.setText("Opening PDF…")
         lang = self.ent_lang.text().strip() or "vie+eng"
         dpi = _OCR_DPI_OPTIONS.get(self.cb_dpi.currentText(), 300)
         force = self.chk_force.isChecked()
@@ -234,7 +235,7 @@ class PdfToTextTool(BaseTool):
 
         self._task = Task(work, self._page)
         self._task.signals.progress.connect(
-            lambda dt: self._status.setText(f"Đang xử lý trang {dt[0]}/{dt[1]}…"))
+            lambda dt: self._status.setText(f"Processing page {dt[0]}/{dt[1]}…"))
         self._task.signals.finished.connect(lambda pages: self._on_done(path, pages))
         self._task.signals.failed.connect(self._on_error)
         self._task.start()
@@ -243,7 +244,7 @@ class PdfToTextTool(BaseTool):
         self._busy = False
         self._run_btn.setEnabled(True)
         self._status.setText("")
-        self.error("Lỗi", f"Không trích được văn bản:\n{msg}")
+        self.error("Error", f"Couldn't extract text:\n{msg}")
 
     def _on_done(self, path, pages):
         self._busy = False
@@ -258,11 +259,11 @@ class PdfToTextTool(BaseTool):
         self._cur = 0
         n_ocr = sum(1 for p in pages if p["source"] == "ocr")
         n_scan = sum(1 for p in pages if p["source"] == "scan")
-        msg = f"✅ Xong {len(pages)} trang."
+        msg = f"✅ Done, {len(pages)} pages."
         if n_ocr:
-            msg += f" OCR: {n_ocr} trang."
+            msg += f" OCR: {n_ocr} pages."
         if n_scan:
-            msg += f" ⚠ {n_scan} trang scan chưa OCR (thiếu Tesseract)."
+            msg += f" ⚠ {n_scan} scanned pages not OCR'd (Tesseract missing)."
         self._status.setText(msg)
         self._refresh_view()
 
@@ -323,23 +324,23 @@ class PdfToTextTool(BaseTool):
             return
         self._commit_text()
         QApplication.clipboard().setText(self._pages[self._cur]["text"])
-        self._status.setText(f"📋 Đã sao chép trang {self._cur + 1}.")
+        self._status.setText(f"📋 Copied page {self._cur + 1}.")
 
     def _save_txt(self):
         if not self._pages:
             return
         self._commit_text()
         src = self.var_file.get().strip()
-        default = (os.path.splitext(os.path.basename(src))[0] + ".txt") if src else "ket_qua.txt"
-        path, _ = QFileDialog.getSaveFileName(self._page, "Lưu văn bản", default,
-                                              "Văn bản (*.txt)")
+        default = (os.path.splitext(os.path.basename(src))[0] + ".txt") if src else "result.txt"
+        path, _ = QFileDialog.getSaveFileName(self._page, "Save text", default,
+                                              "Text (*.txt)")
         if not path:
             return
-        parts = [f"--- Trang {i + 1} ---\n{p['text']}" for i, p in enumerate(self._pages)]
+        parts = [f"--- Page {i + 1} ---\n{p['text']}" for i, p in enumerate(self._pages)]
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write("\n\n".join(parts))
         except Exception as exc:
-            self.error("Lỗi", f"Không lưu được file:\n{exc}")
+            self.error("Error", f"Couldn't save the file:\n{exc}")
             return
-        self._status.setText(f"💾 Đã lưu: {os.path.basename(path)}")
+        self._status.setText(f"💾 Saved: {os.path.basename(path)}")

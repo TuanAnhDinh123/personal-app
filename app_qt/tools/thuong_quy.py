@@ -25,51 +25,51 @@ _DEFAULTS = {
 
 
 class ThuongQuyTool(BaseTool):
-    name = "Thưởng quý"
-    description = "Tổng hợp lỗi chấm công cả quý vào sheet tổng hợp để xét thưởng."
+    name = "Quarterly Bonus"
+    description = "Aggregate a quarter's attendance issues into a summary sheet for bonus review."
     icon = "🏆"
-    category = "Tệp & Tài liệu"
+    category = "Files & Documents"
     order = 16
-    action_label = "Tổng hợp"
+    action_label = "Aggregate"
 
     def build_body(self, parent):
         cfg = config.load(_SECTION, _DEFAULTS)
 
-        widgets.section_label(parent, "File nguồn")
+        widgets.section_label(parent, "Source file")
         self._source = widgets.file_row(
-            parent, "File Dữ Liệu Chấm Công (chứa các sheet tháng + sheet quý)", mode="file")
+            parent, "Attendance data file (with monthly sheets + a quarter sheet)", mode="file")
         self._source.set(cfg.get("source", ""))
 
-        widgets.section_label(parent, "Cấu hình")
+        widgets.section_label(parent, "Settings")
         self._quarter = widgets.dropdown(
-            parent, "Quý tổng hợp (cũng là tên sheet đích)", ["Q1", "Q2", "Q3", "Q4"])
+            parent, "Quarter to aggregate (also the target sheet name)", ["Q1", "Q2", "Q3", "Q4"])
         self._quarter.set(cfg.get("quarter", "Q4"))
-        self._months = widgets.text_row(parent, "3 sheet tháng trong quý — tự sinh theo Quý")
+        self._months = widgets.text_row(parent, "The quarter's 3 monthly sheets — auto-filled")
         self._months.set(cfg.get("month_sheets", ""))
         # Gắn trace SAU khi đã nạp giá trị đã lưu, để lần mở đầu không ghi đè.
         self._quarter.widget.currentTextChanged.connect(self._on_quarter_change)
 
-        self._year = widgets.text_row(parent, "Năm (để tính Thứ 7/CN cho account 40)")
+        self._year = widgets.text_row(parent, "Year (to compute Sat/Sun for account 40)")
         self._year.set(cfg.get("year", ""))
 
-        widgets.section_label(parent, "Tên các cột đích (khớp tiêu đề ở dòng 3 sheet quý)")
-        self._hf = widgets.text_row(parent, "Cột cho mã bắt đầu 'F' (quên quẹt thẻ)")
+        widgets.section_label(parent, "Target column names (match headers in row 3 of the quarter sheet)")
+        self._hf = widgets.text_row(parent, "Column for codes starting 'F' (missed card scan)")
         self._hf.set(cfg.get("header_f", ""))
-        self._he = widgets.text_row(parent, "Cột cho mã bắt đầu 'E'")
+        self._he = widgets.text_row(parent, "Column for codes starting 'E'")
         self._he.set(cfg.get("header_e", ""))
-        self._hn = widgets.text_row(parent, "Cột cho ô là SỐ giờ lẻ (đi trễ/về sớm)")
+        self._hn = widgets.text_row(parent, "Column for numeric hour cells (late/early leave)")
         self._hn.set(cfg.get("header_num", ""))
-        self._hk = widgets.text_row(parent, "Cột cho ô trống / '0-8' / '0-12' (nghỉ không lý do)")
+        self._hk = widgets.text_row(parent, "Column for blank / '0-8' / '0-12' cells (unexcused absence)")
         self._hk.set(cfg.get("header_empty", ""))
 
         widgets.hint(
             parent,
-            "💡 Quy ước file chấm công: cột ngày bắt đầu ở cột I; MSNV ở cột B; account "
-            "ở cột G; số ngày ở DÒNG 1; dữ liệu từ DÒNG 2; cột ngày kết thúc ngay trước ô "
-            "'X' ở dòng 1 (không có 'X' thì tới cột AM).\n"
-            "✍ Tool CHỈ điền vào các cột kết quả trong sheet quý rồi lưu THẲNG vào file "
-            "gốc — hãy ĐÓNG file trước khi chạy.\n"
-            "📌 Cấu hình được lưu lại mỗi lần bấm Tổng hợp.")
+            "💡 Attendance file layout: date columns start at column I; employee ID in column B; "
+            "account in column G; day counts in ROW 1; data from ROW 2; the end date column is "
+            "just before the 'X' in row 1 (no 'X' → up to column AM).\n"
+            "✍ The tool ONLY fills the result columns in the quarter sheet, then saves straight "
+            "into the original file — CLOSE it before running.\n"
+            "📌 Settings are saved each time you click Aggregate.")
 
     def _on_quarter_change(self, *_):
         months = QUARTER_MONTHS.get(self._quarter.get())
@@ -94,26 +94,26 @@ class ThuongQuyTool(BaseTool):
         })
 
         if not source or not os.path.isfile(source):
-            self.error("Lỗi", "Vui lòng chọn file Dữ Liệu Chấm Công hợp lệ.")
+            self.error("Error", "Please choose a valid attendance data file.")
             return
         if len(months) != 3:
-            self.error("Lỗi", "Cần đúng 3 sheet tháng, cách nhau bằng dấu phẩy.")
+            self.error("Error", "Exactly 3 monthly sheets are required, comma-separated.")
             return
         if not target_sheet:
-            self.error("Lỗi", "Chưa chọn quý tổng hợp.")
+            self.error("Error", "No quarter selected.")
             return
         if not all([header_f, header_e, header_num, header_empty]):
-            self.error("Lỗi", "Chưa nhập đủ tên 4 cột đích.")
+            self.error("Error", "All 4 target column names are required.")
             return
         try:
             year = int(year_txt)
         except ValueError:
-            self.error("Lỗi", "Năm phải là số (VD: 2024).")
+            self.error("Error", "Year must be a number (e.g. 2024).")
             return
         try:
             import win32com.client  # noqa: F401
         except ImportError:
-            self.error("Thiếu thư viện", "Cần pywin32 để điều khiển Excel:\n  pip install pywin32")
+            self.error("Missing library", "pywin32 is required to control Excel:\n  pip install pywin32")
             return
 
         try:
@@ -122,20 +122,20 @@ class ThuongQuyTool(BaseTool):
                 year=year, header_f=header_f, header_e=header_e,
                 header_num=header_num, header_empty=header_empty)
         except Exception as exc:
-            self.error("Lỗi", f"Có lỗi xảy ra khi tổng hợp:\n{exc}")
+            self.error("Error", f"Error while aggregating:\n{exc}")
             return
 
         lines = [
-            f"✅ Đã tổng hợp {target_sheet} vào:\n   {os.path.basename(source)}", "",
-            f"• Số ô đã điền: {stats['cells_written']}",
-            f"• Nhân viên có lỗi chấm công: {stats['employees_hit']}",
+            f"✅ Aggregated {target_sheet} into:\n   {os.path.basename(source)}", "",
+            f"• Cells filled: {stats['cells_written']}",
+            f"• Employees with attendance issues: {stats['employees_hit']}",
         ]
         if stats["not_found"]:
             nf = stats["not_found"]
             preview = ", ".join(nf[:8])
-            extra = f" (+{len(nf) - 8} nữa)" if len(nf) > 8 else ""
-            lines.append(f"⚠ MSNV có trong tháng nhưng không thấy ở sheet quý: {preview}{extra}")
+            extra = f" (+{len(nf) - 8} more)" if len(nf) > 8 else ""
+            lines.append(f"⚠ IDs present in months but missing from the quarter sheet: {preview}{extra}")
         if stats["warnings"]:
             lines.append("")
             lines += [f"⚠ {w}" for w in stats["warnings"][:8]]
-        self.info("Kết quả Thưởng Quý", "\n".join(lines))
+        self.info("Quarterly Bonus result", "\n".join(lines))

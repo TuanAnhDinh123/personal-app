@@ -166,7 +166,7 @@ def _aggregate_quarter(source_path, month_sheets, target_sheet, year,
                 (header_num, col_num), (header_empty, col_empty)] if col is None]
             if missing:
                 raise RuntimeError(
-                    f"Sheet '{target_sheet}' dòng {_TARGET_HEADER_ROW} thiếu cột: "
+                    f"Sheet '{target_sheet}' row {_TARGET_HEADER_ROW} is missing columns: "
                     + "; ".join(missing))
 
             # 2) Bản đồ MSNV -> dòng ở sheet quý (lấy lần xuất hiện đầu tiên)
@@ -187,7 +187,7 @@ def _aggregate_quarter(source_path, month_sheets, target_sheet, year,
                 try:
                     ws = wb.Sheets(sheet_name)
                 except pythoncom.com_error:
-                    warnings.append(f"Không tìm thấy sheet tháng '{sheet_name}' (bỏ qua)")
+                    warnings.append(f"Monthly sheet '{sheet_name}' not found (skipped)")
                     continue
 
                 end_row = ws.Cells(ws.Rows.Count, _MONTH_MSNV_COL).End(_XL_UP).Row
