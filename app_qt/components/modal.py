@@ -29,7 +29,7 @@ SHELL_MARGIN = 24
 _BASE_W, _BASE_H = 520, 480
 
 MODAL_SM = (_BASE_W, _BASE_H)                                   # 520 × 480
-MODAL_MD = (round(_BASE_W * 1.5), round(_BASE_H * 3))        # 650 × 720
+MODAL_MD = (round(_BASE_W * 1.5), round(_BASE_H * 1.5))        # 650 × 720
 MODAL_LG = (round(_BASE_W * 2),  round(_BASE_H * 1.75))          # 780 × 960
 
 SIZES = {"sm": MODAL_SM, "md": MODAL_MD, "lg": MODAL_LG}

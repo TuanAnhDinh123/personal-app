@@ -22,8 +22,12 @@ _ALIGN = {
 _CHECK_KEY = "__check__"
 
 # ── Kích thước cột checkbox (px) — chỉnh tùy ý ──
-CHECK_COL_WIDTH = 30    # bề rộng cả cột checkbox
+CHECK_COL_WIDTH = 32    # bề rộng cả cột checkbox
 CHECK_BOX_INSET = 8     # lề trái của ô tick trong cột (để không dính sát biên)
+
+# ── Nét kẻ dọc mờ giữa các cột ở hàng tiêu đề — chỉnh tùy ý ──
+HEADER_DIVIDER_INSET = 9        # thu ngắn mỗi đầu (px): nét không cao bằng header
+HEADER_DIVIDER_COLOR = "--border-strong"   # khóa màu trong theme.PALETTE
 
 
 def _draw_checkbox(painter, rect, checked, partial=False):
@@ -211,14 +215,43 @@ class _RowHoverDelegate(QStyledItemDelegate):
             _draw_checkbox(painter, option.rect, model.is_row_checked(index.row()))
 
 
-class _CheckHeader(QHeaderView):
-    """Header ngang có ô 'chọn tất cả' ở cột checkbox (3 trạng thái: none/some/all)."""
+class _TableHeader(QHeaderView):
+    """Header ngang có nét kẻ dọc NGẮN giữa các cột.
+
+    Không dùng `border-right` trong QSS vì border của Qt luôn cao bằng cả
+    section; ở đây tự vẽ nên thu ngắn được 2 đầu (HEADER_DIVIDER_INSET).
+    """
 
     def __init__(self, table):
         super().__init__(Qt.Horizontal, table)
         self._table = table
         self.setSectionsClickable(True)
         self.setHighlightSections(False)
+
+    def paintSection(self, painter, rect, logical_index):
+        super().paintSection(painter, rect, logical_index)
+        # Cột cuối không kẻ (nét sẽ đè lên viền phải của bảng). Tính theo cột
+        # đang HIỆN — cột bị ẩn (chọn cột hiển thị) không được coi là "còn cột sau".
+        if self._has_visible_after(self.visualIndex(logical_index)):
+            self._draw_divider(painter, rect)
+
+    def _has_visible_after(self, visual_index):
+        return any(not self.isSectionHidden(self.logicalIndex(v))
+                   for v in range(visual_index + 1, self.count()))
+
+    def _draw_divider(self, painter, rect):
+        inset = min(HEADER_DIVIDER_INSET, rect.height() // 2 - 1)
+        if inset < 0:
+            return
+        painter.save()
+        painter.setPen(QPen(QColor(theme.PALETTE[HEADER_DIVIDER_COLOR]), 1))
+        x = rect.right()
+        painter.drawLine(x, rect.top() + inset, x, rect.bottom() - inset)
+        painter.restore()
+
+
+class _CheckHeader(_TableHeader):
+    """Header ngang có ô 'chọn tất cả' ở cột checkbox (3 trạng thái: none/some/all)."""
 
     def paintSection(self, painter, rect, logical_index):
         super().paintSection(painter, rect, logical_index)
@@ -254,8 +287,8 @@ class DataTable(QTableView):
             columns = [(_CHECK_KEY, "", cw, "center")] + list(columns)
         self._model = DictTableModel(columns, pk=pk, link_keys=link_keys)
         self.setModel(self._model)
-        if self._checkable:
-            self.setHorizontalHeader(_CheckHeader(self))
+        self.setHorizontalHeader(
+            _CheckHeader(self) if self._checkable else _TableHeader(self))
         self._link_cols = {i for i, c in enumerate(columns)
                            if c[0] in self._model.link_keys}
         self._on_link = on_link
@@ -275,8 +308,17 @@ class DataTable(QTableView):
         # Mặc định QHeaderView có minimumSectionSize ~30px (theo style) → đặt
         # width nhỏ hơn sẽ bị kẹp lại. Hạ min để cột checkbox thu gọn được.
         header.setMinimumSectionSize(24)
+        # Cột HIỆN cuối cùng nới ra hết bề rộng bảng — không chừa khoảng trắng
+        # bên phải. Bảng nào có cột `stretch_key` thì cột đó đã ăn hết phần dư
+        # nên cờ này thành vô hại; bảng không khai báo mới dùng tới.
+        header.setStretchLastSection(True)
+        # Nhớ bề rộng KHAI BÁO của từng cột để trả lại khi cột thôi làm cột giãn
+        # (xem _apply_stretch — dùng khi người dùng ẩn/hiện cột).
+        self._stretch_key = stretch_key
+        self._widths = {}
         for i, col in enumerate(columns):
             width = col[2] if len(col) > 2 else 120
+            self._widths[i] = width
             self.setColumnWidth(i, width)
             key = col[0]
             if key == _CHECK_KEY:
@@ -306,6 +348,55 @@ class DataTable(QTableView):
         if self._sort_col >= 0:            # giữ nguyên sort người dùng đã chọn
             self._model.sort(self._sort_col, self._sort_order)
         self._refresh_header_check()
+
+    # ---------------------------------------------------------- ẩn / hiện cột
+    # Bảng có RẤT NHIỀU cột (vd nhân viên) → không hiện hết cho đỡ rối. Tool dựng
+    # một ColumnPicker (components/column_picker.py) rồi gọi set_visible_keys().
+    def data_columns(self):
+        """[(key, title)] các cột DỮ LIỆU (bỏ cột checkbox) — để dựng menu chọn cột."""
+        return [(c[0], c[1]) for c in self._model.columns if c[0] != _CHECK_KEY]
+
+    def visible_keys(self):
+        """Danh sách key các cột dữ liệu đang hiện, theo đúng thứ tự khai báo."""
+        return [c[0] for i, c in enumerate(self._model.columns)
+                if c[0] != _CHECK_KEY and not self.isColumnHidden(i)]
+
+    def set_visible_keys(self, keys):
+        """Chỉ hiện các cột có key trong `keys`; cột checkbox luôn hiện.
+
+        `keys` rỗng/None → hiện lại TẤT CẢ cột (khỏi ra bảng trống nếu cấu hình
+        lưu trước đó không còn khớp với danh sách cột hiện tại).
+        """
+        wanted = set(keys or ())
+        for i, col in enumerate(self._model.columns):
+            if col[0] == _CHECK_KEY:
+                continue
+            self.setColumnHidden(i, bool(wanted) and col[0] not in wanted)
+        self._apply_stretch()
+
+    def _apply_stretch(self):
+        """Chọn lại cột GIÃN sau khi ẩn/hiện cột.
+
+        Bình thường là `stretch_key`; nếu cột đó đang bị ẩn thì để cột hiện cuối
+        cùng giãn, tránh chừa một khoảng trắng bên phải bảng.
+        """
+        if not self._stretch_key:
+            return
+        header = self.horizontalHeader()
+        visible = [i for i in range(self._model.columnCount())
+                   if not self.isColumnHidden(i)
+                   and self._model.columns[i][0] != _CHECK_KEY]
+        if not visible:
+            return
+        target = next((i for i in visible
+                       if self._model.columns[i][0] == self._stretch_key),
+                      visible[-1])
+        for i in visible:
+            if i == target:
+                header.setSectionResizeMode(i, QHeaderView.Stretch)
+            elif header.sectionResizeMode(i) == QHeaderView.Stretch:
+                header.setSectionResizeMode(i, QHeaderView.Interactive)
+                self.setColumnWidth(i, self._widths.get(i, 120))
 
     # ------------------------------------------------------------- checkbox chọn
     def checked_rows(self):

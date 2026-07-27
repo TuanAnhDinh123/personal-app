@@ -11,10 +11,12 @@ from PySide6.QtWidgets import (
     QFileDialog, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout,
 )
 
+from app.core import config
 from app.core import cv_repository as repo
 from app.core import cv_schema
 from app_qt import dialogs, theme, widgets
 from app_qt.base_tool import BaseTool
+from app_qt.components.column_picker import ColumnPicker
 from app_qt.components.form_dialog import FormDialog
 from app_qt.components.modal import ModalDialog
 from app_qt.components.table import DataTable
@@ -82,7 +84,7 @@ def _cell_str(value):
 #  BỀ RỘNG (px) CÁC CỘT BẢNG NHÂN VIÊN — chỉnh tùy ý ở đây.
 # ─────────────────────────────────────────────────────────────────────────
 EMP_COL_WIDTHS = {
-    "employee_id":     40,
+    "employee_id":     56,   # vừa đủ 4 ký tự (kể cả padding 8px 2 bên)
     "code":            90,
     "global_code":     100,
     "full_name":       170,
@@ -120,10 +122,38 @@ _EMP_COLUMNS = [
     ("address",         "Address",     _W["address"],         "w"),
 ]
 
+# Bảng còn được bổ sung nhiều cột nữa → UI KHÔNG hiện hết. Đây là các cột hiện
+# MẶC ĐỊNH; người dùng bật/tắt thêm ở dropdown "Columns" (lựa chọn được lưu lại).
+_EMP_DEFAULT_COLUMNS = [
+    "employee_id", "code", "global_code", "full_name",
+    "date_of_birth", "phone", "email", "department_name",
+]
+
+# Section cấu hình để nhớ tập cột người dùng đã chọn (%APPDATA%/…/config.json).
+_CFG_SECTION = "employee_db"
+_CFG_COLUMNS = "visible_columns"
+
 
 def _dept_options():
     return {d["department_name"] or f"#{d['department_id']}": d["department_id"]
             for d in repo.list_departments()}
+
+
+def _level_options():
+    """Danh sách cho ô lọc Level: lấy theo bảng danh mục `levels` (Master Data →
+    Levels), giữ đúng thứ tự sort_order.
+
+    Kèm thêm ở CUỐI các giá trị level đang có trong dữ liệu nhân viên nhưng
+    KHÔNG nằm trong danh mục (vd '1', '2', 'Specialist' nhập từ Excel) — nếu bỏ
+    đi thì những nhân viên đó không lọc được bằng ô này. So trùng bỏ hoa/thường
+    nên 'Team leader' không lặp lại khi danh mục đã có 'Team Leader'.
+    """
+    names = [r["level_name"].strip() for r in repo.list_levels()
+             if r["level_name"] and r["level_name"].strip()]
+    known = {n.lower() for n in names}
+    extras = sorted({v for v in repo.list_employee_levels()
+                     if v.lower() not in known}, key=str.lower)
+    return names + extras
 
 
 class EmployeeDbTool(BaseTool):
@@ -145,11 +175,13 @@ class EmployeeDbTool(BaseTool):
 
         widgets.section_label(card, "Search employees")
         self._build_search_bar(lay)
-        self._build_toolbar(lay)
 
+        # Dựng bảng TRƯỚC thanh nút (nút "Columns" cần tham chiếu tới bảng),
+        # nhưng thêm vào layout SAU để thứ tự hiển thị vẫn là: nút → bảng.
         self.table = DataTable(_EMP_COLUMNS, pk="employee_id",
                                stretch_key="email", on_double=self._edit,
                                checkable=True)
+        self._build_toolbar(lay)
         lay.addWidget(self.table, 1)
 
         self.count_lbl = QLabel("")
@@ -196,7 +228,7 @@ class EmployeeDbTool(BaseTool):
         self.sel_gender = widgets.FilterSelect("Gender")
         self.sel_level = widgets.FilterSelect("Level")
         self.sel_gender.set_options(cv_schema.GENDER_CHOICES)
-        self.sel_level.set_options(cv_schema.EMPLOYEE_LEVEL_CHOICES)
+        self.sel_level.set_options(_level_options())   # nạp lại ở _reload()
         for w in (self.sel_dept, self.sel_gender, self.sel_level):
             w.setFixedWidth(180)
             w.changed.connect(self._reload)
@@ -215,14 +247,33 @@ class EmployeeDbTool(BaseTool):
         bar.addWidget(B(None, "Import from Excel", variant="primary", icon="download",
                         command=self._batch_import))
         bar.addStretch(1)
+        bar.addWidget(self._build_column_picker())
         bar.addWidget(B(None, "Reload", variant="neutral", icon="refresh", command=self._reload))
         lay.addLayout(bar)
+
+    def _build_column_picker(self):
+        """Dropdown tích chọn cột hiển thị; nhớ lựa chọn qua config.json."""
+        saved = config.load(_CFG_SECTION).get(_CFG_COLUMNS)
+
+        def _save(keys):
+            cfg = config.load(_CFG_SECTION)
+            cfg[_CFG_COLUMNS] = list(keys)
+            config.save(_CFG_SECTION, cfg)
+
+        self.col_picker = ColumnPicker(self.table, _EMP_DEFAULT_COLUMNS,
+                                       on_change=_save)
+        if saved:
+            self.col_picker.set_keys(saved, notify=False)
+        return self.col_picker
 
     # -------------------------------------------------------------- dữ liệu
     def _reload(self):
         dept_opts = _dept_options()
         self.sel_dept.set_options(dept_opts.keys())
         dept_id = dept_opts.get(self.sel_dept.value())
+        # Nạp lại danh mục Level mỗi lần tìm → thêm/sửa cấp bậc ở trang Master
+        # Data → Levels là thấy ngay, không cần mở lại tool.
+        self.sel_level.set_options(_level_options())
 
         rows = repo.search_employees(
             self.ent_kw.text(), department_id=dept_id,

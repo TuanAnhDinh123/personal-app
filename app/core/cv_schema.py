@@ -16,7 +16,7 @@ QUY ƯỚC THIẾT KẾ (theo yêu cầu):
 ────────────────────────────────────────────────────────────────────────────
 SƠ ĐỒ QUAN HỆ (mềm, không ràng buộc FK)
 
-  departments ──1:N──> positions (+ jd_title, jd_file_path)
+  departments ──1:N──> positions (+ jd_file_path)
                           │
                           │ 1:N
                           ▼
@@ -24,8 +24,8 @@ SƠ ĐỒ QUAN HỆ (mềm, không ràng buộc FK)
 
   • departments (phòng ban)  1—N  positions (vị trí)
   • positions   (vị trí)     1—N  candidates
-  • MỖI VỊ TRÍ CHỈ CÓ 1 JD → thông tin JD (tiêu đề + đường dẫn file) nằm THẲNG
-    trong bảng positions; KHÔNG còn bảng job_descriptions riêng.
+  • MỖI VỊ TRÍ CHỈ CÓ 1 JD → đường dẫn file JD nằm THẲNG trong bảng positions
+    (tiêu đề JD = luôn dùng tên vị trí); KHÔNG còn bảng job_descriptions riêng.
   • Đường dẫn file lưu thẳng: candidates.cv_file_path, positions.jd_file_path
     (không còn bảng document_files — file thực tế đã nằm sẵn trên máy).
 
@@ -34,6 +34,15 @@ SƠ ĐỒ QUAN HỆ (mềm, không ràng buộc FK)
   • Một khóa học (courses) có NHIỀU nhân viên; một nhân viên tham gia NHIỀU
     khóa học. Mỗi dòng trong course_employees = 1 lượt ghi danh (course_id +
     employee_id, unique để không ghi danh trùng).
+
+  DANH MỤC DÙNG CHUNG (master data — nạp sẵn từ file Code.xlsx):
+  • departments    (cột B + C)  — tên bộ phận + mã viết tắt
+  • employee_types (cột D + E)  — loại nhân viên (WC/WCA/IBC/…) + nhóm Blue/White Collar
+  • cost_centers   (cột F + G)  — mã trung tâm chi phí (VN1001…) + Group Function;
+    gán cho nhân viên để GOM NHÓM tính chi phí vận hành của từng team
+  • levels         (cột H)      — cấp bậc (Director, Manager, Officer…)
+  Dữ liệu khởi tạo nằm trong `SEED_DATA` bên dưới, được
+  `cv_repository._seed_master_data()` nạp MỘT LẦN cho mỗi DB (xem bảng app_meta).
 ────────────────────────────────────────────────────────────────────────────
 
 LƯU Ý khi sửa về sau:
@@ -55,8 +64,49 @@ CREATE TABLE IF NOT EXISTS departments (
     updated_at      DATETIME DEFAULT (datetime('now', 'localtime'))
 );
 
+-- ─────────────────── MASTER: LOẠI NHÂN VIÊN (Employee type) ──────────
+-- Mã loại nhân viên dùng khi khai báo hồ sơ: WC / WCA / IBC / IBCA / DBC / DBCA.
+-- `collar` = nhóm lao động (Blue Collar / White Collar) — xem COLLAR_CHOICES.
+CREATE TABLE IF NOT EXISTS employee_types (
+    employee_type_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code             VARCHAR,             -- mã loại (WC, WCA, IBC…)
+    collar           VARCHAR,             -- Blue Collar / White Collar
+    description      TEXT,
+    created_at       DATETIME DEFAULT (datetime('now', 'localtime')),
+    updated_at       DATETIME DEFAULT (datetime('now', 'localtime'))
+);
+
+-- ──────────────── MASTER: TRUNG TÂM CHI PHÍ (Cost center) ─────────────
+-- Gán cho nhân viên để gom thành từng nhóm khi tính chi phí vận hành của team.
+-- `group_function` = nhóm chức năng cấp trên (VNPlant / Corporate / R&D).
+CREATE TABLE IF NOT EXISTS cost_centers (
+    cost_center_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    code             VARCHAR,             -- mã cost center (VN1001, VN3000…)
+    group_function   VARCHAR,             -- VNPlant / Corporate / R&D
+    name             VARCHAR,             -- tên gọi (tùy chọn, tự đặt thêm)
+    description      TEXT,
+    created_at       DATETIME DEFAULT (datetime('now', 'localtime')),
+    updated_at       DATETIME DEFAULT (datetime('now', 'localtime'))
+);
+
+-- ───────────────────────── MASTER: CẤP BẬC (Level) ────────────────────
+CREATE TABLE IF NOT EXISTS levels (
+    level_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    level_name  VARCHAR,                  -- Director, Manager, Officer…
+    sort_order  INT,                      -- thứ tự hiển thị (nhỏ → trước)
+    description TEXT,
+    created_at  DATETIME DEFAULT (datetime('now', 'localtime')),
+    updated_at  DATETIME DEFAULT (datetime('now', 'localtime'))
+);
+
+-- ─────────────── KEY-VALUE nội bộ (đánh dấu đã nạp seed, v.v.) ────────
+CREATE TABLE IF NOT EXISTS app_meta (
+    key   VARCHAR PRIMARY KEY,
+    value VARCHAR
+);
+
 -- ────────── MASTER: VỊ TRÍ TUYỂN DỤNG (kèm luôn JD của vị trí đó) ──────
--- Mỗi vị trí chỉ có ĐÚNG 1 mô tả công việc (JD) → 2 cột jd_* nằm ngay đây.
+-- Mỗi vị trí chỉ có ĐÚNG 1 mô tả công việc (JD) → cột jd_file_path nằm ngay đây.
 CREATE TABLE IF NOT EXISTS positions (
     position_id    INTEGER PRIMARY KEY AUTOINCREMENT,
     department_id  INT,                 -- tham chiếu mềm → departments.department_id
@@ -65,7 +115,6 @@ CREATE TABLE IF NOT EXISTS positions (
     level          VARCHAR,             -- cấp bậc (Junior/Senior/Lead…)
     headcount      INT,                 -- số lượng cần tuyển
     status         VARCHAR,             -- Đang tuyển / Tạm dừng / Đã đóng
-    jd_title       VARCHAR,             -- tiêu đề JD (để trống = dùng tên vị trí)
     jd_file_path   VARCHAR,             -- đường dẫn file JD trên máy
     mail_cc        VARCHAR,             -- CC mặc định khi gửi mail mời PV
     mail_subject   VARCHAR,             -- tiêu đề mẫu mail (hỗ trợ {name}{possion}{date}{time})
@@ -158,6 +207,9 @@ CREATE INDEX IF NOT EXISTS idx_employees_dept     ON employees(department_id);
 CREATE INDEX IF NOT EXISTS idx_ce_course           ON course_employees(course_id);
 CREATE INDEX IF NOT EXISTS idx_ce_employee         ON course_employees(employee_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ce_unique    ON course_employees(course_id, employee_id);
+CREATE INDEX IF NOT EXISTS idx_emptype_code        ON employee_types(code);
+CREATE INDEX IF NOT EXISTS idx_costcenter_code     ON cost_centers(code);
+CREATE INDEX IF NOT EXISTS idx_levels_name         ON levels(level_name);
 """
 
 # =============================================================================
@@ -188,15 +240,16 @@ MIGRATIONS: list[str] = [
     "ALTER TABLE positions ADD COLUMN mail_cc VARCHAR",
     "ALTER TABLE positions ADD COLUMN mail_subject VARCHAR",
     "ALTER TABLE positions ADD COLUMN mail_body TEXT",
-    # MỖI VỊ TRÍ = 1 JD → thông tin JD nằm luôn trong bảng positions (thêm cột
-    # cho DB đã tồn tại). Bảng job_descriptions cũ bị XÓA HẲN, dữ liệu trong đó
-    # KHÔNG chuyển sang (nhập lại ở form vị trí) — xem
+    # MỖI VỊ TRÍ = 1 JD → đường dẫn file JD nằm luôn trong bảng positions (thêm
+    # cột cho DB đã tồn tại). Bảng job_descriptions cũ bị XÓA HẲN, dữ liệu trong
+    # đó KHÔNG chuyển sang (nhập lại ở form vị trí) — xem
     # cv_repository._drop_job_descriptions().
-    "ALTER TABLE positions ADD COLUMN jd_title VARCHAR",
     "ALTER TABLE positions ADD COLUMN jd_file_path VARCHAR",
     # Bỏ các cột không dùng nữa (SQLite ≥ 3.35 hỗ trợ DROP COLUMN; DB mới đã
     # không có sẵn các cột này nên câu lệnh sẽ bị bỏ qua an toàn).
     "ALTER TABLE departments DROP COLUMN department_code",
+    # Bỏ tiêu đề JD riêng — luôn dùng tên vị trí (positions.position_title).
+    "ALTER TABLE positions DROP COLUMN jd_title",
     # Đổi tên cột course_employees.result → status (DB cũ). Bảng tạo mới đã có sẵn
     # cột 'status' nên câu lệnh này ném OperationalError ("no such column: result")
     # và được init_db() bỏ qua an toàn.
@@ -204,6 +257,136 @@ MIGRATIONS: list[str] = [
     # Mã viết tắt bộ phận (vd FIN, IT, R&D) — thêm cho DB đã tồn tại.
     "ALTER TABLE departments ADD COLUMN short_name VARCHAR",
 ]
+
+# =============================================================================
+#  SEED — DỮ LIỆU KHỞI TẠO cho các bảng danh mục (nguồn: file Code.xlsx).
+#
+#  Cách chạy: `cv_repository._seed_master_data()` gọi trong init_db().
+#    • Mỗi khối chỉ nạp MỘT LẦN cho mỗi file .db — dấu vết ghi ở bảng app_meta
+#      với khóa "seed:<bảng>:v<version>". Xóa dòng đó nếu muốn nạp lại.
+#    • Trong một lần nạp, dòng đã có sẵn (trùng theo cột ở `match`) sẽ bị bỏ qua
+#      → chạy lại không tạo bản ghi trùng, và KHÔNG đụng vào dữ liệu bạn tự nhập.
+#    • Muốn bổ sung danh mục về sau: thêm dòng vào `rows` rồi TĂNG `version`.
+# =============================================================================
+SEED_DATA: dict[str, dict] = {
+    # ── Cột B (Department) + C (Department (2)) của Code.xlsx ───────────
+    # Bỏ 1 dòng trùng khít ở cuối file gốc: "Global Procurement / Gpr".
+    "departments": {
+        "version": 1,
+        "columns": ("department_name", "short_name"),
+        "match": ("department_name",),     # đã có tên này rồi → bỏ qua
+        "rows": [
+            ("Facilities Control",               "FC"),
+            ("Sales SEA",                        "Sale"),
+            ("Global Supply Quality",            "Gpr"),
+            ("Finance",                          "FIN"),
+            ("Global Operations",                "BOM"),
+            ("Global Procurement",               "Gpr"),
+            ("Production",                       "PD"),
+            ("Manufacturing Engineering",        "ME"),
+            ("Production Planning",              "PL"),
+            ("Logistics",                        "LG"),
+            ("Quality Assurance",                "QA"),
+            ("Human Resource & Administration",  "HR"),
+            ("Research & Development",           "R&D"),
+            ("Global Planning",                  "GP"),
+            ("Global Logistics",                 "GL"),
+            ("Materials Management",             "MM"),
+            ("Information Technology",           "IT"),
+            ("Local COM",                        "COM"),
+            ("Global COM",                       "GCOM"),
+            ("Purchasing/Indirect Material",     "Gpr"),
+        ],
+    },
+    # ── Cột D (Employee type (2)) + E (BC/WC) ───────────────────────────
+    # LƯU Ý: trong file gốc cột E chỉ có 3 ô và KHÔNG thẳng hàng với cột D
+    # (D2=WC nhưng E2=Blue Collar). Ở đây suy ra theo nghĩa của mã:
+    #   WC/WCA = White Collar · IBC/IBCA (Indirect) & DBC/DBCA (Direct) = Blue Collar.
+    # Nếu quy ước công ty khác → sửa lại cột `collar` ngay bên dưới.
+    "employee_types": {
+        "version": 1,
+        "columns": ("code", "collar"),
+        "match": ("code",),
+        "rows": [
+            ("WC",   "White Collar"),
+            ("WCA",  "White Collar"),
+            ("IBC",  "Blue Collar"),
+            ("IBCA", "Blue Collar"),
+            ("DBC",  "Blue Collar"),
+            ("DBCA", "Blue Collar"),
+        ],
+    },
+    # ── Cột F (Cost center) + G (Group Function) ────────────────────────
+    "cost_centers": {
+        "version": 1,
+        "columns": ("code", "group_function"),
+        "match": ("code",),
+        "rows": [
+            ("VN1001", "VNPlant"),
+            ("VN1002", "VNPlant"),
+            ("VN1003", "VNPlant"),
+            ("VN1004", "VNPlant"),
+            ("VN1005", "VNPlant"),
+            ("VN1006", "VNPlant"),
+            ("VN1007", "VNPlant"),
+            ("VN1008", "VNPlant"),
+            ("VN1011", "VNPlant"),
+            ("VN1012", "VNPlant"),
+            ("VN1021", "VNPlant"),
+            ("VN1023", "VNPlant"),
+            ("VN1024", "VNPlant"),
+            ("VN1031", "Corporate"),
+            ("VN1032", "Corporate"),
+            ("VN1033", "VNPlant"),
+            ("VN1035", "Corporate"),
+            ("VN1041", "Corporate"),
+            ("VN1042", "VNPlant"),
+            ("VN1051", "Corporate"),
+            ("VN1052", "Corporate"),
+            ("VN1054", "VNPlant"),
+            ("VN1071", "Corporate"),
+            ("VN1072", "Corporate"),
+            ("VN3000", "R&D"),
+            ("VN3001", "R&D"),
+            ("VN3007", "Corporate"),
+            ("VN3017", "R&D"),
+            ("VN3024", "R&D"),
+            ("VN3034", "R&D"),
+            ("VN3041", "R&D"),
+            ("VN3051", "R&D"),
+            ("VN3061", "R&D"),
+            ("VN4112", "Corporate"),
+            ("VN4120", "Corporate"),
+            ("VN4211", "Corporate"),
+            ("VN6021", "Corporate"),
+            ("VN7010", "Corporate"),
+            ("VN7031", "Corporate"),
+            ("VN7032", "Corporate"),
+            ("VN7040", "Corporate"),
+            ("VN7043", "Corporate"),
+        ],
+    },
+    # ── Cột H (Tên Cấp) — giữ nguyên thứ tự trong file (sort_order) ─────
+    "levels": {
+        "version": 1,
+        "columns": ("level_name", "sort_order"),
+        "match": ("level_name",),
+        "rows": [
+            ("Director",          1),
+            ("Manager",           2),
+            ("Officer",           3),
+            ("Engineer",          4),
+            ("Supervisor",        5),
+            ("Technician",        6),
+            ("Clerk",             7),
+            ("Lead Operator",     8),
+            ("Assistant Manager", 9),
+            ("Operator",          10),
+            ("Technician Lead",   11),
+            ("Team Leader",       12),
+        ],
+    },
+}
 
 # Gợi ý cho các ô chọn ở giao diện (sửa tùy ý).
 STATUS_CHOICES = ["New", "Contacted", "Interview", "Passed", "Rejected", "On hold"]
@@ -214,6 +397,10 @@ GENDER_CHOICES = ["Male", "Female", "Other"]
 EMPLOYEE_LEVEL_CHOICES = [
     "Intern", "Fresher", "Junior", "Middle", "Senior", "Lead", "Manager",
 ]
+
+# Danh mục nhân viên: nhóm lao động & nhóm chức năng của cost center.
+COLLAR_CHOICES = ["Blue Collar", "White Collar"]
+GROUP_FUNCTION_CHOICES = ["VNPlant", "Corporate", "R&D"]
 
 # Loại khóa học — lưu dạng INT trong cột courses.course_type (chỉ số = giá trị lưu).
 COURSE_TYPE_CHOICES = ["inhouse", "external", "funded"]  # 0, 1, 2
@@ -226,4 +413,5 @@ COURSE_STATUS_CHOICES = ["Not started", "Completed"]
 _MANAGED_TABLES = [
     "departments", "positions", "candidates",
     "employees", "courses", "course_employees",
+    "employee_types", "cost_centers", "levels",
 ]

@@ -303,6 +303,7 @@ class _RenamePreview(ModalDialog):
         self.table.setHorizontalHeaderLabels(
             ["Tên file gốc", "Tên ứng viên (sửa được)", "Tên file mới (xem trước)"])
         self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(32)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
         hdr = self.table.horizontalHeader()

@@ -15,7 +15,7 @@ from app.core import cv_schema
 # Cột được phép ghi cho từng bảng (chặn khóa lạ lọt vào câu INSERT/UPDATE).
 DEPARTMENT_FIELDS = ["department_name", "short_name", "manager_name", "description"]
 POSITION_FIELDS = ["department_id", "position_code", "position_title", "level",
-                   "headcount", "status", "jd_title", "jd_file_path",
+                   "headcount", "status", "jd_file_path",
                    "mail_cc", "mail_subject", "mail_body"]
 CANDIDATE_FIELDS = [
     "full_name", "email", "phone", "date_of_birth", "address",
@@ -30,6 +30,9 @@ EMPLOYEE_FIELDS = [
 ]
 COURSE_FIELDS = ["title", "content", "date", "location", "course_type"]
 COURSE_EMPLOYEE_FIELDS = ["course_id", "employee_id", "status", "note"]
+EMPLOYEE_TYPE_FIELDS = ["code", "collar", "description"]
+COST_CENTER_FIELDS = ["code", "group_function", "name", "description"]
+LEVEL_FIELDS = ["level_name", "sort_order", "description"]
 
 # PK của mỗi bảng (dùng cho update/delete generic).
 _PK = {
@@ -39,6 +42,9 @@ _PK = {
     "employees": "employee_id",
     "courses": "course_id",
     "course_employees": "enrollment_id",
+    "employee_types": "employee_type_id",
+    "cost_centers": "cost_center_id",
+    "levels": "level_id",
 }
 
 
@@ -135,6 +141,7 @@ def init_db() -> None:
         _migrate_document_files(conn)
         _drop_job_descriptions(conn)
         _backfill_timestamps(conn)
+        _seed_master_data(conn)
 
 
 def _table_exists(conn, name) -> bool:
@@ -201,6 +208,39 @@ def _backfill_timestamps(conn: sqlite3.Connection) -> None:
                     f"WHERE {col} IS NULL")
 
 
+def _seed_master_data(conn: sqlite3.Connection) -> None:
+    """Nạp dữ liệu khởi tạo cho các bảng danh mục (cv_schema.SEED_DATA).
+
+    • Mỗi khối seed chỉ chạy MỘT LẦN cho mỗi file .db — đánh dấu bằng khóa
+      "seed:<bảng>:v<version>" trong bảng app_meta. Nhờ vậy nếu người dùng xóa
+      bớt danh mục thì lần mở sau KHÔNG bị nạp lại.
+    • Ngay trong lần nạp, dòng nào đã tồn tại (so theo các cột ở `match`, bỏ
+      hoa/thường & khoảng trắng thừa) sẽ được bỏ qua → không tạo bản ghi trùng
+      với dữ liệu người dùng đã tự nhập trước đó.
+    • Muốn nạp lại: xóa dòng tương ứng trong app_meta (hoặc tăng `version` ở
+      SEED_DATA khi bổ sung danh mục mới).
+    """
+    for table, spec in cv_schema.SEED_DATA.items():
+        if not _table_exists(conn, table):
+            continue
+        key = f"seed:{table}:v{spec.get('version', 1)}"
+        if conn.execute("SELECT 1 FROM app_meta WHERE key = ?", (key,)).fetchone():
+            continue
+        cols = list(spec["columns"])
+        match = list(spec.get("match") or cols)
+        placeholders = ", ".join("?" for _ in cols)
+        where = " AND ".join(
+            f"LOWER(TRIM(COALESCE({c}, ''))) = LOWER(TRIM(?))" for c in match)
+        sql = (f"INSERT INTO {table} ({', '.join(cols)}) SELECT {placeholders} "
+               f"WHERE NOT EXISTS (SELECT 1 FROM {table} WHERE {where})")
+        for row in spec["rows"]:
+            values = dict(zip(cols, row))
+            conn.execute(sql, list(row) + [values[c] for c in match])
+        conn.execute(
+            "INSERT OR REPLACE INTO app_meta (key, value) VALUES "
+            "(?, datetime('now', 'localtime'))", (key,))
+
+
 def _migrate_document_files(conn: sqlite3.Connection) -> None:
     """Bỏ bảng document_files (thiết kế cũ) → đưa đường dẫn CV về candidates.
 
@@ -229,9 +269,9 @@ def _migrate_document_files(conn: sqlite3.Connection) -> None:
 def _drop_job_descriptions(conn: sqlite3.Connection) -> None:
     """Xóa hẳn bảng job_descriptions (thiết kế cũ).
 
-    Mỗi vị trí chỉ có ĐÚNG 1 JD nên JD nằm luôn trong 2 cột positions.jd_title /
-    jd_file_path. Dữ liệu trong bảng cũ KHÔNG chuyển sang (theo yêu cầu — nhập
-    lại ở form vị trí), cũng không giữ bản sao. Chạy an toàn nhiều lần.
+    Mỗi vị trí chỉ có ĐÚNG 1 JD nên JD nằm luôn trong cột positions.jd_file_path.
+    Dữ liệu trong bảng cũ KHÔNG chuyển sang (theo yêu cầu — nhập lại ở form vị
+    trí), cũng không giữ bản sao. Chạy an toàn nhiều lần.
     """
     conn.execute("DROP TABLE IF EXISTS job_descriptions")
 
@@ -297,6 +337,101 @@ def update_department(dept_id, data: dict) -> None:
 
 def delete_department(dept_id) -> None:
     _delete("departments", dept_id)
+
+
+# ──────────────────────── LOẠI NHÂN VIÊN (employee_types) ───────────────
+
+def list_employee_types():
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT * FROM employee_types ORDER BY code").fetchall()
+
+
+def list_employee_type_codes() -> list[str]:
+    """Chỉ lấy danh sách mã (WC, WCA…) — tiện đổ vào ô chọn ở giao diện."""
+    return [r["code"] for r in list_employee_types() if r["code"]]
+
+
+def get_employee_type(type_id):
+    return _get("employee_types", type_id)
+
+
+def insert_employee_type(data: dict) -> int:
+    return _insert("employee_types", EMPLOYEE_TYPE_FIELDS, data)
+
+
+def update_employee_type(type_id, data: dict) -> None:
+    _update("employee_types", EMPLOYEE_TYPE_FIELDS, type_id, data)
+
+
+def delete_employee_type(type_id) -> None:
+    _delete("employee_types", type_id)
+
+
+# ─────────────────────── TRUNG TÂM CHI PHÍ (cost_centers) ────────────────
+
+def list_cost_centers(group_function: str = ""):
+    """Danh sách cost center, lọc tùy chọn theo Group Function (VNPlant/Corporate/R&D)."""
+    sql = "SELECT * FROM cost_centers"
+    params: list = []
+    if group_function:
+        sql += " WHERE group_function = ?"
+        params.append(group_function)
+    sql += " ORDER BY code"
+    with get_connection() as conn:
+        return conn.execute(sql, params).fetchall()
+
+
+def list_cost_center_codes(group_function: str = "") -> list[str]:
+    return [r["code"] for r in list_cost_centers(group_function) if r["code"]]
+
+
+def get_cost_center(cost_center_id):
+    return _get("cost_centers", cost_center_id)
+
+
+def insert_cost_center(data: dict) -> int:
+    return _insert("cost_centers", COST_CENTER_FIELDS, data)
+
+
+def update_cost_center(cost_center_id, data: dict) -> None:
+    _update("cost_centers", COST_CENTER_FIELDS, cost_center_id, data)
+
+
+def delete_cost_center(cost_center_id) -> None:
+    _delete("cost_centers", cost_center_id)
+
+
+# ───────────────────────────── CẤP BẬC (levels) ──────────────────────────
+
+def list_levels():
+    """Cấp bậc theo thứ tự sort_order (dòng chưa đặt thứ tự xếp xuống cuối)."""
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT * FROM levels "
+            "ORDER BY COALESCE(sort_order, 9999), level_name").fetchall()
+
+
+def list_level_names() -> list[str]:
+    """Tên cấp bậc để đổ vào ô chọn; DB rỗng → dùng tạm danh sách mặc định."""
+    names = [r["level_name"] for r in list_levels() if r["level_name"]]
+    return names or list(cv_schema.EMPLOYEE_LEVEL_CHOICES)
+
+
+def get_level(level_id):
+    return _get("levels", level_id)
+
+
+def insert_level(data: dict) -> int:
+    return _insert("levels", LEVEL_FIELDS, data)
+
+
+def update_level(level_id, data: dict) -> None:
+    _update("levels", LEVEL_FIELDS, level_id, data)
+
+
+def delete_level(level_id) -> None:
+    _delete("levels", level_id)
 
 
 # ───────────────────────────── VỊ TRÍ ───────────────────────────────────
@@ -437,6 +572,20 @@ def list_employees():
             "ORDER BY e.full_name").fetchall()
 
 
+def list_employee_levels() -> list[str]:
+    """Các giá trị `level` khác nhau ĐANG CÓ trong bảng employees (bỏ rỗng).
+
+    Dữ liệu nhập từ Excel có thể chứa giá trị NGOÀI danh mục `levels` (vd mã số
+    '1', '2', '-'), nên ô lọc cần biết để vẫn tìm được những nhân viên đó.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT TRIM(level) AS lv FROM employees "
+            "WHERE level IS NOT NULL AND TRIM(level) <> '' "
+            "ORDER BY lv").fetchall()
+    return [r["lv"] for r in rows]
+
+
 def search_employees(keyword: str = "", department_id=None, gender: str = "",
                      level: str = "", codes=None):
     """Tìm nhân viên: từ khóa quét MỌI cột text; lọc theo bộ phận / giới tính /
@@ -474,7 +623,10 @@ def search_employees(keyword: str = "", department_id=None, gender: str = "",
         sql.append("AND e.gender = ?")
         params.append(gender)
     if level:
-        sql.append("AND e.level = ?")
+        # So khớp bỏ hoa/thường + khoảng trắng thừa: dữ liệu cũ có cả
+        # 'Team Leader' lẫn 'Team leader' → chọn 1 mục trong danh mục `levels`
+        # phải ra HẾT các nhân viên đó.
+        sql.append("AND UPPER(TRIM(e.level)) = UPPER(TRIM(?))")
         params.append(level)
     sql.append("ORDER BY e.employee_id DESC")
     with get_connection() as conn:

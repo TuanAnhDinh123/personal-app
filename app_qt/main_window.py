@@ -365,7 +365,7 @@ class MainWindow(QMainWindow):
     # CARD_PAD, nên để thẻ nằm ở ~38px như cũ: lề trang = 38 − CARD_PAD; tiêu đề
     # thụt thêm CARD_PAD để thẳng hàng mép thẻ nhìn thấy. Nội dung KHÔNG-phải-thẻ
     # trong body (nút, tab, splitter…) cần tự thêm lề ngang CARD_PAD để cùng hàng.
-    CONTENT_EDGE = 38    # mép trái nội dung nhìn thấy, tính từ mép vùng nội dung
+    CONTENT_EDGE = 30    # mép trái nội dung nhìn thấy, tính từ mép vùng nội dung
 
     def _page_shell(self, icon, color, title, subtitle, body, fills_height=False):
         """Khung trang: header (chip + tiêu đề) + body (bọc scroll nếu cần)."""

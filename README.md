@@ -159,13 +159,18 @@ Sửa · Xóa · Mở CV · Nhập từ Excel · Tải lại**.
   với người đã có, tool cảnh báo và cho quyết định vẫn lưu hay không. Khi *Nhập
   từ Excel* có thể chọn **bỏ qua các bản trùng** (email/SĐT — cả trong file lẫn
   so với DB).
-- **Master data** tách thành nhóm **Master Data** riêng ở sidebar, gồm 3 trang:
-  **Bộ phận · Vị trí tuyển dụng · Khóa học** — mỗi trang thêm/sửa/xóa riêng.
-  (Các trang này không hiện thẻ ở Trang chủ.)
+- **Master data** tách thành nhóm **Master Data** riêng ở sidebar, gồm 6 trang:
+  **Departments · Employee types · Levels · Cost centers · Positions · Courses**
+  — mỗi trang là một bảng + thanh *Add / Edit / Delete / Reload* (dùng chung
+  `CrudTablePanel`), thêm/sửa/xóa riêng. (Các trang này không hiện thẻ ở Trang
+  chủ.) Bốn trang danh mục nhân sự đã có **dữ liệu nạp sẵn** từ `Code.xlsx`:
+  20 bộ phận · 6 loại nhân viên · 12 cấp bậc · 42 cost center.
+  Muốn thêm/bớt cột hay ô nhập của một trang → sửa `_master_specs()` trong
+  [app_qt/tools/candidate_db.py](app_qt/tools/candidate_db.py).
 - **JD nằm trong vị trí**: mỗi vị trí chỉ có **đúng 1 mô tả công việc**, nên
-  *tiêu đề JD* + *file JD* nhập ngay trong form của trang **Vị trí tuyển dụng**
-  (cột `positions.jd_title` / `positions.jd_file_path`). Không còn bảng
-  `job_descriptions` lẫn trang master "Mô tả công việc (JD)" riêng.
+  *file JD* nhập ngay trong form của trang **Vị trí tuyển dụng**
+  (cột `positions.jd_file_path`); tiêu đề JD luôn lấy theo **tên vị trí**. Không
+  còn bảng `job_descriptions` lẫn trang master "Mô tả công việc (JD)" riêng.
 - Nút **📥 Nhập từ Excel** đọc thẳng file kết quả do tool *Quét CV bằng AI* xuất
   ra (tự khớp cột theo tiêu đề), ghi hàng loạt vào DB. Có thể chọn thư mục chứa
   CV để lưu **đường dẫn đầy đủ** vào cột `cv_file_path`.
@@ -190,14 +195,26 @@ Thiết kế cơ sở dữ liệu tách riêng để dễ chỉnh:
 | `app/tools/candidate_db.py` | **Giao diện** tool + form nhập liệu tổng quát. |
 
 **Các bảng** (quan hệ mềm, không dùng khóa ngoại; mọi cột cho phép NULL trừ PK):
-`departments` (phòng ban) → `positions` (vị trí, **kèm JD**: `jd_title` +
-`jd_file_path`, và mẫu mail mời PV) → `candidates` (ứng viên, có `cv_file_path`);
+`departments` (phòng ban) → `positions` (vị trí, **kèm JD**: `jd_file_path`, và
+mẫu mail mời PV) → `candidates` (ứng viên, có `cv_file_path`);
 ngoài ra `employees` (nhân viên) và `courses` ↔ `course_employees` (đào tạo).
 Đường dẫn file lưu thẳng vào cột — không có bảng file riêng.
 
+**Bảng danh mục (master data)** — nạp sẵn dữ liệu từ file `Code.xlsx`:
+`departments` (tên + mã viết tắt), `employee_types` (WC/WCA/IBC/IBCA/DBC/DBCA +
+nhóm Blue/White Collar), `cost_centers` (mã VN1001… + Group Function
+VNPlant/Corporate/R&D — dùng để gom nhân viên theo nhóm khi tính chi phí vận
+hành), `levels` (Director, Manager, Officer…).
+
+> **Dữ liệu khởi tạo**: khai báo ở `SEED_DATA` (cv_schema.py), nạp bởi
+> `_seed_master_data()` — mỗi khối chỉ chạy **một lần** cho mỗi file .db (đánh
+> dấu ở bảng `app_meta`), và bỏ qua dòng đã tồn tại nên không tạo bản ghi trùng.
+> Muốn nạp lại: xóa khóa `seed:<bảng>:v1` trong `app_meta`. Bổ sung danh mục về
+> sau: thêm dòng vào `rows` rồi tăng `version`.
+
 > **Bảng `job_descriptions` đã bị bỏ**: JD nằm trong `positions`. Khi mở tool
 > trên DB cũ, `init_db()` **xóa hẳn** bảng đó — dữ liệu JD cũ **không** được
-> chuyển sang, 2 cột `jd_*` để trống, nhập lại ở form vị trí.
+> chuyển sang, cột `jd_file_path` để trống, nhập lại ở form vị trí.
 
 > Vì thiết kế cố tình **không dùng khóa ngoại**, các cột `*_id` chỉ là tham
 > chiếu mềm — ứng dụng tự đảm bảo liên kết. `init_db()` tự tạo bảng khi mở tool;

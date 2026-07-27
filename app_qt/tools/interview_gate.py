@@ -6,14 +6,12 @@ Dùng lại app.core.outlook (COM) — chỉ dựng lại giao diện bằng Qt.
 """
 import datetime
 import re
+from html import escape
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QTextEdit, QVBoxLayout,
-)
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit
 
 from app.core import config, outlook
-from app_qt import dialogs, widgets
+from app_qt import dialogs, richtext, widgets
 from app_qt.base_tool import BaseTool
 from app_qt.components.dialog_base import build_dialog_shell
 
@@ -58,7 +56,9 @@ class InterviewGateTool(BaseTool):
         widgets.section_label(parent, "Mẫu mail")
         self.var_subject = widgets.text_row(parent, "Tiêu đề")
         self.var_subject.set(cfg["subject"])
-        self.body_box = widgets.text_area(parent, "Nội dung", value=cfg["body"], height=9)
+        self.body_box = widgets.richtext_area(
+            parent, "Nội dung (bôi đen chữ rồi bấm B/I/U/màu để định dạng)",
+            value=cfg["body"], height=9)
         self.var_auto = widgets.checkbox(parent, "Tự động quét khi mở app mỗi sáng",
                                          checked=cfg["auto"])
         row = QHBoxLayout()
@@ -76,7 +76,7 @@ class InterviewGateTool(BaseTool):
             "to": self.var_to.get().strip(),
             "cc": self.var_cc.get().strip(),
             "subject": self.var_subject.get().strip(),
-            "body": self.body_box.get(),
+            "body": self.body_box.get_html(),
             "auto": bool(self.var_auto.get()),
             "last_scan": config.load(SECTION, DEFAULTS).get("last_scan", ""),
         }
@@ -140,6 +140,7 @@ class InterviewGateTool(BaseTool):
         return m.group(1).strip() if m else subject
 
     def _compose(self, interviews, cfg):
+        """Trả về (tiêu đề, thân mail HTML) — danh sách lịch chèn trước 'Cảm ơn'."""
         lines = []
         for a in interviews:
             t = a["start"].strftime("%H:%M") if a["start"] else "??:??"
@@ -147,26 +148,21 @@ class InterviewGateTool(BaseTool):
             line = f"- {t} — {name}"
             if a["location"]:
                 line += f" ({a['location']})"
-            lines.append(line)
-        listing = "\n".join(lines)
-        subject = cfg["subject"]
-        body = cfg["body"]
-        idx = body.rfind("\nCảm ơn")
-        if idx != -1:
-            body = body[:idx].rstrip() + f"\n\n{listing}" + body[idx:]
-        else:
-            body = body.rstrip() + f"\n\n{listing}"
-        return subject, body
+            lines.append(escape(line))
+        listing = "<br>".join(lines)
+        body = richtext.insert_html(cfg["body"], listing, before_text="Cảm ơn")
+        return cfg["subject"], body
 
     def _open_confirm(self, parent, to, cc, subject, body):
         dlg, card, lay = build_dialog_shell(parent, "Kiểm tra & gửi mail", size="md")
 
         def field(label, value, multiline=False):
             lb = QLabel(label); lb.setObjectName("FieldLabel")
+            lb.setWordWrap(True)
             lay.addWidget(lb)
             if multiline:
-                w = widgets.TextEdit(); w.setAcceptRichText(False); w.setPlainText(value)
-                w.setMinimumHeight(220)
+                w = richtext.RichText(card, height=2)
+                w.set_html(value)
             else:
                 w = QLineEdit(value)
             lay.addWidget(w)
@@ -175,7 +171,8 @@ class InterviewGateTool(BaseTool):
         to_w = field("Đến", to)
         cc_w = field("CC", cc)
         subj_w = field("Tiêu đề", subject)
-        body_w = field("Nội dung", body, multiline=True)
+        body_w = field("Nội dung (bôi đen chữ rồi bấm B/I/U/màu để định dạng)",
+                       body, multiline=True)
 
         foot = QHBoxLayout()
 
@@ -186,7 +183,8 @@ class InterviewGateTool(BaseTool):
                 return
             try:
                 outlook.send_mail(to_value, subj_w.text().strip(),
-                                  body_w.toPlainText(), cc=cc_w.text().strip())
+                                  body_w.get_text(), cc=cc_w.text().strip(),
+                                  html=body_w.get_html())
             except Exception as exc:
                 dialogs.error(dlg, "Lỗi gửi mail", f"Không gửi được:\n{exc}")
                 return

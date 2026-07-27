@@ -3,7 +3,8 @@
 Port của app/tools/candidate_db.py. Tầng dữ liệu (app.core.cv_repository,
 app.core.cv_schema) dùng lại 100% — chỉ dựng lại giao diện bằng Qt:
     • Tool chính "Quản lý CV ứng viên": tìm kiếm + bảng + CRUD + nhập Excel.
-    • 3 trang Master Data: Bộ phận · Vị trí · Khóa học (dùng CrudTablePanel).
+    • 6 trang Master Data (dùng CrudTablePanel): Bộ phận · Loại nhân viên ·
+      Cấp bậc · Cost center · Vị trí · Khóa học.
 
 Mỗi vị trí chỉ có ĐÚNG 1 mô tả công việc (JD) nên JD không còn trang riêng —
 tiêu đề + file JD nhập ngay trong form của trang "Vị trí tuyển dụng".
@@ -46,7 +47,7 @@ except ImportError:
 #  (Cột checkbox 'chọn' nằm ở app_qt/components/table.py → CHECK_COL_WIDTH.)
 # ─────────────────────────────────────────────────────────────────────────
 CAND_COL_WIDTHS = {
-    "candidate_id":    40,
+    "candidate_id":    56,   # vừa đủ 4 ký tự (kể cả padding 8px 2 bên)
     "full_name":       180,
     "email":           210,
     "phone":           120,
@@ -348,8 +349,6 @@ def _master_specs():
                 # Mỗi vị trí chỉ có 1 JD → nhập ngay tại form vị trí (không còn
                 # trang master "Mô tả công việc (JD)" riêng).
                 {"kind": "section", "label": "Job description (JD)"},
-                {"key": "jd_title", "label": "JD title (blank = use the position title)",
-                 "kind": "text"},
                 {"key": "jd_file_path", "label": "JD file (local path)",
                  "kind": "file",
                  "filetypes": [("PDF/Word/Text", "*.pdf *.doc *.docx *.txt"),
@@ -361,6 +360,70 @@ def _master_specs():
                 {"key": "mail_body", "label": "Email body (use {name} "
                  "{possion} {date} {time_start} {time_end})", "kind": "richtext",
                  "height": 20, "grow": True},
+            ],
+        },
+        # ── Danh mục nhân sự (nạp sẵn từ Code.xlsx — xem cv_schema.SEED_DATA) ──
+        "employee_type": {
+            "title": "employee type", "pk": "employee_type_id",
+            "list_fn": repo.list_employee_types,
+            "get": repo.get_employee_type, "insert": repo.insert_employee_type,
+            "update": repo.update_employee_type, "delete": repo.delete_employee_type,
+            "columns": [
+                ("employee_type_id", "ID", 50),
+                ("code", "Code", 100),
+                ("collar", "Collar", 140),
+                ("description", "Description", 300),
+            ],
+            "form": [
+                {"key": "code", "label": "Code (*) — e.g. WC, WCA, IBC, DBCA",
+                 "kind": "text", "required": True},
+                {"key": "collar", "label": "Collar", "kind": "choice",
+                 "choices": cv_schema.COLLAR_CHOICES, "allow_empty": True},
+                {"key": "description", "label": "Description",
+                 "kind": "textarea", "height": 3},
+            ],
+        },
+        "cost_center": {
+            "title": "cost center", "pk": "cost_center_id",
+            "list_fn": repo.list_cost_centers,
+            "get": repo.get_cost_center, "insert": repo.insert_cost_center,
+            "update": repo.update_cost_center, "delete": repo.delete_cost_center,
+            "columns": [
+                ("cost_center_id", "ID", 50),
+                ("code", "Cost center", 110),
+                ("group_function", "Group function", 130),
+                ("name", "Name", 190),
+                ("description", "Description", 260),
+            ],
+            "form": [
+                {"key": "code", "label": "Cost center code (*) — e.g. VN1001",
+                 "kind": "text", "required": True},
+                {"key": "group_function", "label": "Group function",
+                 "kind": "choice", "choices": cv_schema.GROUP_FUNCTION_CHOICES,
+                 "allow_empty": True},
+                {"key": "name", "label": "Name (optional)", "kind": "text"},
+                {"key": "description", "label": "Description",
+                 "kind": "textarea", "height": 3},
+            ],
+        },
+        "level": {
+            "title": "level", "pk": "level_id",
+            "list_fn": repo.list_levels,
+            "get": repo.get_level, "insert": repo.insert_level,
+            "update": repo.update_level, "delete": repo.delete_level,
+            "columns": [
+                ("level_id", "ID", 50),
+                ("level_name", "Level", 190),
+                ("sort_order", "Order", 70, "center"),
+                ("description", "Description", 300),
+            ],
+            "form": [
+                {"key": "level_name", "label": "Level name (*) — e.g. Manager",
+                 "kind": "text", "required": True},
+                {"key": "sort_order", "label": "Display order (smaller = higher)",
+                 "kind": "int"},
+                {"key": "description", "label": "Description",
+                 "kind": "textarea", "height": 3},
             ],
         },
         "course": {
@@ -426,6 +489,30 @@ class DepartmentTool(_MasterPageTool):
     icon = "🏢"
     order = 10
     spec_key = "department"
+
+
+class EmployeeTypeTool(_MasterPageTool):
+    name = "Employee types"
+    description = "Employee type codes (WC/WCA/IBC/IBCA/DBC/DBCA) and their collar group."
+    icon = "🏷"
+    order = 12
+    spec_key = "employee_type"
+
+
+class LevelTool(_MasterPageTool):
+    name = "Levels"
+    description = "Job level directory (Director, Manager, Officer…)."
+    icon = "🎖"
+    order = 14
+    spec_key = "level"
+
+
+class CostCenterTool(_MasterPageTool):
+    name = "Cost centers"
+    description = "Cost centers & group functions — group employees to compute team running cost."
+    icon = "🏦"
+    order = 16
+    spec_key = "cost_center"
 
 
 class PositionTool(_MasterPageTool):

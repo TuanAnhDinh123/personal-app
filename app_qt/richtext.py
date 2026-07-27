@@ -6,7 +6,9 @@ set_html để các tool (reminder…) dùng như cũ.
 """
 import re
 
-from PySide6.QtGui import QColor, QTextCharFormat, QTextListFormat
+from PySide6.QtGui import (
+    QColor, QTextCharFormat, QTextCursor, QTextDocument, QTextListFormat,
+)
 from PySide6.QtWidgets import (
     QColorDialog, QHBoxLayout, QPushButton, QVBoxLayout, QWidget,
 )
@@ -16,6 +18,40 @@ from app_qt.widgets import TextEdit
 
 def _looks_like_html(s):
     return bool(s) and re.search(r"<[a-zA-Z/!]", s) is not None
+
+
+def insert_html(body, snippet_html, before_text=""):
+    """Chèn `snippet_html` thành một đoạn riêng vào thân mail HTML.
+
+    Tìm thấy `before_text` (lần xuất hiện CUỐI, vd dòng "Cảm ơn") thì chèn ngay
+    trước đoạn chứa nó, không thì thêm vào cuối. Đi qua QTextDocument thay vì
+    ghép chuỗi để không phá cấu trúc HTML do QTextEdit sinh ra.
+    """
+    doc = QTextDocument()
+    if _looks_like_html(body):
+        doc.setHtml(body)
+    else:
+        doc.setPlainText(body or "")
+
+    hit = QTextCursor()
+    if before_text:
+        probe = doc.find(before_text)
+        while not probe.isNull():          # lấy lần khớp cuối cùng
+            hit = probe
+            probe = doc.find(before_text, probe)
+
+    cur = QTextCursor(doc)
+    if hit.isNull():
+        cur.movePosition(QTextCursor.End)
+        cur.insertBlock()
+    else:
+        cur.setPosition(hit.selectionStart())
+        cur.movePosition(QTextCursor.StartOfBlock)
+        cur.insertBlock()                  # tách ra một đoạn trống phía trên
+        cur.movePosition(QTextCursor.PreviousBlock)
+    cur.setCharFormat(QTextCharFormat())   # danh sách không thừa hưởng định dạng dòng mốc
+    cur.insertHtml(snippet_html)
+    return doc.toHtml()
 
 
 class RichText(QWidget):

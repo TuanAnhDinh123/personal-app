@@ -264,6 +264,51 @@ QPushButton[variant="neutral"] {
 }
 QPushButton[variant="neutral"]:hover { background: {{--neutral-hover}}; }
 
+/* Nút có dropdown (setMenu) — vd nút "Columns" chọn cột hiển thị: chừa chỗ
+   bên phải rồi vẽ mũi chevron thay cho mũi tên mặc định của style. */
+QPushButton[variant="neutral"]::menu-indicator {
+    image: url("{{CHEVRON_ICON}}");
+    width: 12px;
+    height: 12px;
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    right: 8px;
+}
+
+/* ============================================================
+   MENU (context menu bảng, dropdown chọn cột…)
+   ============================================================ */
+QMenu {
+    background: {{--card-bg}};
+    border: 1px solid {{--border-strong}};
+    border-radius: 10px;
+    padding: 6px;
+    color: {{--text}};
+    font-size: 13px;
+}
+QMenu::item {
+    padding: 7px 16px 7px 14px;
+    border-radius: 8px;
+    background: transparent;
+}
+/* Menu có ô tick (dropdown chọn cột) — chừa chỗ bên trái cho ô tick. */
+#ColumnMenu::item { padding-left: 34px; }
+QMenu::item:selected { background: {{--accent-soft}}; color: {{--text}}; }
+QMenu::item:disabled { color: {{--text-faint}}; }
+QMenu::separator { height: 1px; background: {{--border}}; margin: 5px 8px; }
+QMenu::indicator {
+    width: 16px; height: 16px;
+    left: 10px;
+    border-radius: 5px;
+    border: 1px solid {{--border-strong}};
+    background: {{--input-bg}};
+}
+QMenu::indicator:checked {
+    background: {{--accent}};
+    border: 1px solid {{--accent}};
+    image: url("{{CHECK_ICON}}");
+}
+
 /* ============================================================
    THANH CUỘN
    ============================================================ */
@@ -320,6 +365,19 @@ QTableView::item:selected {
     background: {{--accent-soft}};
     color: {{--text}};
 }
+/* Ô nhập inline khi double-click cell: rule QLineEdit chung có padding 9px và
+   bo góc 10px → trong hàng cao ~26px chữ bị đẩy ra ngoài vùng thấy được.
+   Ghi đè để editor vừa khít ô và đọc/sửa được. */
+QTableView QLineEdit, QTableView QComboBox, QTableView QSpinBox,
+QTableView QPlainTextEdit, QTableView QTextEdit {
+    padding: 1px 6px;
+    margin: 0px;
+    min-height: 0px;
+    border-radius: 4px;
+    border: 1px solid {{--accent}};
+    background: {{--input-bg}};
+    color: {{--text}};
+}
 QHeaderView::section {
     background: {{--input-bg}};
     color: {{--text-muted}};
@@ -328,6 +386,9 @@ QHeaderView::section {
     border-bottom: 1px solid {{--border}};
     font-weight: 600;
 }
+/* Kẻ dọc mờ giữa các cột tiêu đề KHÔNG dùng border-right ở đây: border luôn cao
+   bằng cả section. Nét ngắn (thu 2 đầu) do _TableHeader trong
+   app_qt/components/table.py tự vẽ — xem HEADER_DIVIDER_* để chỉnh. */
 
 /* ============================================================
    TAB

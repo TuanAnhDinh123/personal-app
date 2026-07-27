@@ -312,6 +312,20 @@ def text_area(parent, label, value="", height=8):
     return TextValue(edit)
 
 
+def richtext_area(parent, label, value="", height=8):
+    """Ô soạn thảo có định dạng (B/I/U/màu/bullet). Trả về RichText.
+
+    Đọc/ghi bằng .get_html() / .get_text() / .set_html() — dùng cho các ô soạn
+    thân mail để gửi đi dạng HTML.
+    """
+    from app_qt.richtext import RichText   # import cục bộ: richtext lại dùng widgets
+    block, v = _field_block(parent, label)
+    editor = RichText(block, height=height)
+    editor.set_html(value)
+    v.addWidget(editor)
+    return editor
+
+
 def dropdown(parent, label, options):
     """Danh sách chọn (combobox). Trả về ChoiceValue."""
     block, v = _field_block(parent, label)
