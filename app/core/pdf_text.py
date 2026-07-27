@@ -31,7 +31,7 @@ except ImportError:
 
 # Ngưỡng ký tự để coi một trang là "có lớp text". Dưới ngưỡng → coi là scan.
 _MIN_TEXT_CHARS = 12
-_OCR_DPI_OPTIONS = {"Nhanh (200 DPI)": 200, "Cân bằng (300 DPI)": 300, "Nét (400 DPI)": 400}
+_OCR_DPI_OPTIONS = {"Fast (200 DPI)": 200, "Balanced (300 DPI)": 300, "Sharp (400 DPI)": 400}
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +93,7 @@ def extract_pages(pdf_path, ocr_lang="vie+eng", ocr_dpi=300,
 # ---------------------------------------------------------------------------
 
 _SOURCE_BADGE = {
-    "text": ("Lớp text", "info"),
+    "text": ("Text layer", "info"),
     "ocr": ("OCR", "success"),
-    "scan": ("Scan – chưa OCR", "warning"),
+    "scan": ("Scan – no OCR", "warning"),
 }

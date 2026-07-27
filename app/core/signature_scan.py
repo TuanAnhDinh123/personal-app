@@ -113,12 +113,12 @@ def render_pages(file_bytes: bytes, mime_type: str, dpi: int = _RENDER_DPI,
         import fitz          # PyMuPDF
     except ImportError:
         raise RuntimeError(
-            "Cần cài PyMuPDF để tách trang PDF trước khi gửi cho AI:\n"
+            "PyMuPDF is required to split PDF pages before sending to the AI:\n"
             "  pip install pymupdf") from None
     try:
         doc = fitz.open(stream=file_bytes, filetype="pdf")
     except Exception as exc:                                      # noqa: BLE001
-        raise RuntimeError(f"Không mở được file PDF: {exc}") from exc
+        raise RuntimeError(f"Couldn't open the PDF file: {exc}") from exc
     try:
         pages = [(no, page.get_pixmap(dpi=dpi).tobytes("png"), "image/png")
                  for no, page in enumerate(doc, start=1)
@@ -128,9 +128,9 @@ def render_pages(file_bytes: bytes, mime_type: str, dpi: int = _RENDER_DPI,
         doc.close()
     if not pages:
         raise RuntimeError(
-            f"File PDF này có {n_total} trang, không có trang nào trong số cần quét "
+            f"This PDF has {n_total} pages; none of the requested pages exist "
             f"({', '.join(str(n) for n in sorted(want))})."
-            if want else "File PDF không có trang nào.")
+            if want else "This PDF has no pages.")
     return pages
 
 
@@ -214,7 +214,7 @@ def detect_signatures(api_key: str, model: str, file_bytes: bytes, mime_type: st
     """
     api_key = (api_key or "").strip()
     if not api_key:
-        raise ValueError("Chưa có API key — hãy nhập API key Gemini ở Cài đặt.")
+        raise ValueError("No API key — please enter your Gemini API key in Settings.")
     prompt = _build_prompt(roster)
 
     last_error = ""
@@ -231,7 +231,7 @@ def detect_signatures(api_key: str, model: str, file_bytes: bytes, mime_type: st
             if on_retry:
                 on_retry(attempt, wait, last_error)
             _interruptible_sleep(wait, should_cancel)
-    raise RuntimeError(f"Thất bại sau {_MAX_RETRIES} lần thử — {last_error}")
+    raise RuntimeError(f"Failed after {_MAX_RETRIES} attempts — {last_error}")
 
 
 def _detect_once(api_key: str, model: str, file_bytes: bytes, mime_type: str,
@@ -273,19 +273,19 @@ def _detect_once(api_key: str, model: str, file_bytes: bytes, mime_type: str,
             raise TransientError(f"HTTP {exc.code}: {msg}") from exc
         raise RuntimeError(f"HTTP {exc.code}: {msg}") from exc
     except urllib.error.URLError as exc:
-        raise TransientError(f"Lỗi kết nối mạng: {exc.reason}") from exc
+        raise TransientError(f"Network error: {exc.reason}") from exc
 
     try:
         text = payload["candidates"][0]["content"]["parts"][0]["text"]
     except (KeyError, IndexError):
         reason = payload.get("promptFeedback", {}).get("blockReason")
         raise RuntimeError(
-            "Không nhận được nội dung từ mô hình"
-            + (f" (bị chặn: {reason})" if reason else ""))
+            "No content returned by the model"
+            + (f" (blocked: {reason})" if reason else ""))
     try:
         data = json.loads(text)
     except ValueError:
-        raise RuntimeError("Mô hình trả về không đúng JSON.")
+        raise RuntimeError("The model returned invalid JSON.")
     if not isinstance(data, dict):
-        raise RuntimeError("Mô hình trả về không đúng định dạng mong đợi.")
+        raise RuntimeError("The model returned an unexpected format.")
     return data

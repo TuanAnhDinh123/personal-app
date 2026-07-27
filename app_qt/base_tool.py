@@ -13,12 +13,12 @@ from app_qt import dialogs, widgets
 
 class BaseTool(ABC):
     # --- Metadata: ghi đè ở class con ---
-    name: str = "Công cụ"
+    name: str = "Tool"
     description: str = ""
     icon: str = "🔧"
-    category: str = "Khác"
+    category: str = "Other"
     order: int = 100
-    action_label: str = "Thực hiện"
+    action_label: str = "Run"
     action_style: str = "primary"     # variant nút chính
     action_icon: str = "play"
     auto_startup: bool = False
@@ -65,7 +65,7 @@ class BaseTool(ABC):
         ...
 
     def run(self) -> None:
-        dialogs.success(self._page, "Hoàn tất", f'Task "{self.name}" đã hoàn thành ✅')
+        dialogs.success(self._page, "Done", f'Task "{self.name}" completed ✅')
 
     def startup(self, window) -> None:
         """Chạy tự động khi mở app (chỉ khi auto_startup=True)."""
@@ -77,6 +77,6 @@ class BaseTool(ABC):
     def error(self, title, msg):
         dialogs.error(getattr(self, "_page", None), title, msg)
 
-    def confirm(self, title, msg, ok_label="Đồng ý", cancel_label="Hủy"):
+    def confirm(self, title, msg, ok_label="OK", cancel_label="Cancel"):
         return dialogs.confirm(getattr(self, "_page", None), title, msg,
                                ok_label, cancel_label)

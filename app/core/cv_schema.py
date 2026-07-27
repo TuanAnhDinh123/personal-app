@@ -206,11 +206,11 @@ MIGRATIONS: list[str] = [
 ]
 
 # Gợi ý cho các ô chọn ở giao diện (sửa tùy ý).
-STATUS_CHOICES = ["Mới", "Đã liên hệ", "Phỏng vấn", "Đạt", "Loại", "Chờ"]
-POSITION_STATUS_CHOICES = ["Đang tuyển", "Tạm dừng", "Đã đóng"]
+STATUS_CHOICES = ["New", "Contacted", "Interview", "Passed", "Rejected", "On hold"]
+POSITION_STATUS_CHOICES = ["Open", "Paused", "Closed"]
 
 # Nhân viên: giới tính & cấp bậc (level) — dùng cho ô lọc + form nhập.
-GENDER_CHOICES = ["Nam", "Nữ", "Khác"]
+GENDER_CHOICES = ["Male", "Female", "Other"]
 EMPLOYEE_LEVEL_CHOICES = [
     "Intern", "Fresher", "Junior", "Middle", "Senior", "Lead", "Manager",
 ]

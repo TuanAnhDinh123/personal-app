@@ -32,7 +32,7 @@ def build():
     # ---- Nhóm AI (Gemini) ----
     inner = _group_card(outer_lay)
     widgets.section_label(inner, "AI (Gemini)")
-    fields["api_key"] = widgets.text_row(inner, "API key Gemini")
+    fields["api_key"] = widgets.text_row(inner, "Gemini API key")
     fields["api_key"].set(data["api_key"])
     fields["ai_model"] = widgets.model_select_row(
         inner, "AI Model",
@@ -44,9 +44,9 @@ def build():
 
     # ---- Nhóm Xuất Excel ----
     inner = _group_card(outer_lay)
-    widgets.section_label(inner, "Xuất Excel khóa học")
+    widgets.section_label(inner, "Course roster export")
     fields["course_template_path"] = widgets.file_row(
-        inner, "File Excel mẫu (roster khóa học)", mode="file")
+        inner, "Template Excel file (course roster)", mode="file")
     fields["course_template_path"].set(data["course_template_path"])
 
     # ---- Nút lưu ----
@@ -62,9 +62,9 @@ def build():
             "course_template_path": fields["course_template_path"].get().strip(),
         }
         settings.save(values)
-        dialogs.success(outer, "Đã lưu", "Đã lưu cài đặt ✅")
+        dialogs.success(outer, "Saved", "Settings saved ✅")
 
-    btn = widgets.button(outer, "Lưu cài đặt", variant="primary", icon="save", command=save)
+    btn = widgets.button(outer, "Save settings", variant="primary", icon="save", command=save)
     actions.addWidget(btn)
     actions.addStretch(1)
     outer_lay.addLayout(actions)

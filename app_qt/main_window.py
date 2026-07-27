@@ -290,7 +290,7 @@ class MainWindow(QMainWindow):
             self._build_nav_group(master)
 
         self._divider()
-        self._add_nav("settings", "⚙", "Cài đặt", lambda: self._show("settings"), theme.ACCENT)
+        self._add_nav("settings", "⚙", "Settings", lambda: self._show("settings"), theme.ACCENT)
         self._nav_layout.addStretch(1)
 
         outer.addWidget(widgets.scroll_area(nav_holder), 1)
@@ -412,8 +412,8 @@ class MainWindow(QMainWindow):
     def _build_settings(self):
         body = settings_page.build()
         return self._page_shell(
-            "⚙", theme.ACCENT, "Cài đặt",
-            "Thiết lập dùng chung cho toàn bộ ứng dụng.", body)
+            "⚙", theme.ACCENT, "Settings",
+            "Shared settings for the whole app.", body)
 
     # ----------------------------------------------------------- trang chủ
     def _build_home(self):
@@ -429,7 +429,7 @@ class MainWindow(QMainWindow):
         t.setObjectName("PageTitle")
         t.setContentsMargins(pad, 0, 0, 0)
         outer.addWidget(t)
-        s = QLabel("Chọn một công cụ bên dưới để bắt đầu.")
+        s = QLabel("Pick a tool below to get started.")
         s.setObjectName("PageSubtitle")
         s.setContentsMargins(pad, 0, 0, 0)
         outer.addWidget(s)

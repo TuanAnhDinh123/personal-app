@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 from app_qt import dialogs, widgets
 from app_qt.components.modal import ModalDialog
 
-_NONE = "— Chưa chọn —"
+_NONE = "— None —"
 
 
 def _num(text, kind):
@@ -31,7 +31,7 @@ def _num(text, kind):
 
 def _filter_str(filetypes):
     if not filetypes:
-        return "Tất cả (*.*)"
+        return "All files (*.*)"
     return ";;".join(f"{label} ({pat})" for label, pat in filetypes)
 
 
@@ -67,13 +67,13 @@ class FormDialog(ModalDialog):
         # footer
         foot = QHBoxLayout()
         foot.setContentsMargins(0, 6, 0, 0)
-        foot.addWidget(widgets.button(card, "Lưu", variant="success", icon="save",
+        foot.addWidget(widgets.button(card, "Save", variant="success", icon="save",
                                       command=self._save))
-        foot.addWidget(widgets.button(card, "Hủy", variant="neutral", icon="x",
+        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
                                       command=self.reject))
         foot.addStretch(1)
         if on_delete is not None:
-            foot.addWidget(widgets.button(card, "Xóa", variant="danger", icon="trash",
+            foot.addWidget(widgets.button(card, "Delete", variant="danger", icon="trash",
                                           command=self._delete))
         lay.addLayout(foot)
 
@@ -160,11 +160,11 @@ class FormDialog(ModalDialog):
                 ft = spec.get("filetypes")
 
                 def _pick(e=edit, f=ft):
-                    p, _ = QFileDialog.getOpenFileName(self, "Chọn file", "", _filter_str(f))
+                    p, _ = QFileDialog.getOpenFileName(self, "Choose file", "", _filter_str(f))
                     if p:
                         e.setText(p)
 
-                row.addWidget(widgets.button(form, "Chọn…", variant="neutral",
+                row.addWidget(widgets.button(form, "Browse…", variant="neutral",
                                              icon="folder", command=_pick))
                 self._form_col.addLayout(row)
                 self._getters[key] = lambda e=edit: e.text().strip() or None
@@ -201,7 +201,7 @@ class FormDialog(ModalDialog):
         data = {k: g() for k, g in self._getters.items()}
         for k, lbl in self._required.items():
             if not data.get(k):
-                dialogs.warning(self, "Thiếu thông tin", f'Vui lòng nhập "{lbl}".')
+                dialogs.warning(self, "Missing information", f'Please enter "{lbl}".')
                 return
         if self._on_save is not None:
             if self._on_save(data) is False:

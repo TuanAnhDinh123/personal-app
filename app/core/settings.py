@@ -65,7 +65,7 @@ def list_models(api_key, timeout=30):
     """
     api_key = (api_key or "").strip()
     if not api_key:
-        raise ValueError("Chưa có API key — hãy nhập API key Gemini trước.")
+        raise ValueError("No API key — please enter your Gemini API key first.")
 
     req = urllib.request.Request(
         f"{_MODELS_URL}?pageSize=200",
@@ -84,7 +84,7 @@ def list_models(api_key, timeout=30):
             pass
         raise RuntimeError(f"HTTP {exc.code}: {msg}") from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"Lỗi kết nối mạng: {exc.reason}") from exc
+        raise RuntimeError(f"Network error: {exc.reason}") from exc
 
     models = []
     for m in payload.get("models", []):

@@ -22,14 +22,14 @@ class CrudTablePanel(QWidget):
 
         bar = QHBoxLayout()
         bar.setSpacing(6)
-        bar.addWidget(widgets.button(self, "Thêm", variant="success", icon="plus",
+        bar.addWidget(widgets.button(self, "Add", variant="success", icon="plus",
                                      command=self._add))
-        bar.addWidget(widgets.button(self, "Sửa", variant="info", icon="pencil",
+        bar.addWidget(widgets.button(self, "Edit", variant="info", icon="pencil",
                                      command=self._edit))
-        bar.addWidget(widgets.button(self, "Xóa", variant="danger", icon="trash",
+        bar.addWidget(widgets.button(self, "Delete", variant="danger", icon="trash",
                                      command=self._delete))
         bar.addStretch(1)
-        bar.addWidget(widgets.button(self, "Tải lại", variant="neutral", icon="refresh",
+        bar.addWidget(widgets.button(self, "Reload", variant="neutral", icon="refresh",
                                      command=self.reload))
         lay.addLayout(bar)
 
@@ -51,12 +51,12 @@ class CrudTablePanel(QWidget):
     def _selected(self):
         rid = self.table.selected_id()
         if rid is None:
-            dialogs.info(self, "Chưa chọn", "Vui lòng chọn một dòng.")
+            dialogs.info(self, "Nothing selected", "Please select a row.")
         return rid
 
     def _add(self):
         FormDialog(
-            self, "Thêm " + self.spec["title"], self.spec["form"], None,
+            self, "Add " + self.spec["title"], self.spec["form"], None,
             on_save=lambda data: (self.spec["insert"](data), self._changed()),
             size=self.spec.get("modal_size", "sm")
         ).run()
@@ -69,7 +69,7 @@ class CrudTablePanel(QWidget):
     def _edit_id(self, rid):
         current = self.spec["get"](rid)
         FormDialog(
-            self, "Sửa " + self.spec["title"], self.spec["form"], current,
+            self, "Edit " + self.spec["title"], self.spec["form"], current,
             on_save=lambda data: (self.spec["update"](rid, data), self._changed()),
             size=self.spec.get("modal_size", "sm")
         ).run()
@@ -78,8 +78,8 @@ class CrudTablePanel(QWidget):
         rid = self._selected()
         if rid is None:
             return
-        if dialogs.confirm(self, "Xác nhận xóa",
-                           f'Xóa {self.spec["title"]} #{rid}?',
-                           ok_label="Xóa"):
+        if dialogs.confirm(self, "Confirm delete",
+                           f'Delete {self.spec["title"]} #{rid}?',
+                           ok_label="Delete"):
             self.spec["delete"](rid)
             self._changed()

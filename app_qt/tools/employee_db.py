@@ -104,20 +104,20 @@ _W = EMP_COL_WIDTHS
 # Cột bảng NHÂN VIÊN: (khóa, tiêu đề, rộng, canh lề). Liệt kê đầy đủ mọi cột.
 _EMP_COLUMNS = [
     ("employee_id",     "ID",          _W["employee_id"],     "center"),
-    ("code",            "Mã NV",       _W["code"],            "w"),
-    ("global_code",     "Global Code", _W["global_code"],     "w"),
-    ("full_name",       "Họ tên",      _W["full_name"],       "w"),
-    ("surname",         "Họ",          _W["surname"],         "w"),
-    ("middle_name",     "Tên đệm",     _W["middle_name"],     "w"),
-    ("name",            "Tên",         _W["name"],            "w"),
-    ("date_of_birth",   "Ngày sinh",   _W["date_of_birth"],   "center"),
-    ("gender",          "Giới tính",   _W["gender"],          "center"),
-    ("education",       "Học vấn",     _W["education"],       "w"),
-    ("phone",           "SĐT",         _W["phone"],           "w"),
+    ("code",            "Emp code",    _W["code"],            "w"),
+    ("global_code",     "Global code", _W["global_code"],     "w"),
+    ("full_name",       "Full name",   _W["full_name"],       "w"),
+    ("surname",         "Surname",     _W["surname"],         "w"),
+    ("middle_name",     "Middle name", _W["middle_name"],     "w"),
+    ("name",            "Name",        _W["name"],            "w"),
+    ("date_of_birth",   "Date of birth", _W["date_of_birth"], "center"),
+    ("gender",          "Gender",      _W["gender"],          "center"),
+    ("education",       "Education",   _W["education"],       "w"),
+    ("phone",           "Phone",       _W["phone"],           "w"),
     ("email",           "Email",       _W["email"],           "w"),
     ("level",           "Level",       _W["level"],           "center"),
-    ("department_name", "Bộ phận",     _W["department_name"], "w"),
-    ("address",         "Địa chỉ",     _W["address"],         "w"),
+    ("department_name", "Department",  _W["department_name"], "w"),
+    ("address",         "Address",     _W["address"],         "w"),
 ]
 
 
@@ -127,10 +127,10 @@ def _dept_options():
 
 
 class EmployeeDbTool(BaseTool):
-    name = "Quản lý nhân viên"
-    description = "Tìm kiếm, thêm/sửa/xóa hồ sơ nhân viên (SQLite)."
+    name = "Employees"
+    description = "Search, add/edit/delete employee records (SQLite)."
     icon = "👥"
-    category = "Nhân sự"
+    category = "Human Resources"
     order = 10
     fills_height = True
 
@@ -143,7 +143,7 @@ class EmployeeDbTool(BaseTool):
         lay.setSpacing(10)
         self._root = card
 
-        widgets.section_label(card, "Tìm kiếm nhân viên")
+        widgets.section_label(card, "Search employees")
         self._build_search_bar(lay)
         self._build_toolbar(lay)
 
@@ -168,7 +168,7 @@ class EmployeeDbTool(BaseTool):
         # bởi dấu cách), khớp CHÍNH XÁC từng mã.
         self.ent_codes = QLineEdit()
         self.ent_codes.setPlaceholderText(
-            "Tìm theo mã NV — dán nhiều mã, cách nhau bởi dấu cách…")
+            "Search by employee code — paste multiple codes separated by spaces…")
         self.ent_codes.setClearButtonEnabled(True)
         self.ent_codes.addAction(widgets.svg_icon("idcard", theme.TEXT_MUTED, 16),
                                  QLineEdit.LeadingPosition)
@@ -179,7 +179,7 @@ class EmployeeDbTool(BaseTool):
         filters = QHBoxLayout()
         filters.setSpacing(10)
         self.ent_kw = QLineEdit()
-        self.ent_kw.setPlaceholderText("Tìm kiếm…")
+        self.ent_kw.setPlaceholderText("Search…")
         self.ent_kw.setClearButtonEnabled(True)
         self.ent_kw.addAction(widgets.svg_icon("search", theme.TEXT_MUTED, 16),
                               QLineEdit.LeadingPosition)
@@ -192,8 +192,8 @@ class EmployeeDbTool(BaseTool):
 
         # Ba ô select để bề rộng CỐ ĐỊNH & bằng nhau (nếu không, combo tự giãn
         # theo nội dung dài nhất — vd tên bộ phận — nuốt hết chỗ của ô text).
-        self.sel_dept = widgets.FilterSelect("Bộ phận")
-        self.sel_gender = widgets.FilterSelect("Giới tính")
+        self.sel_dept = widgets.FilterSelect("Department")
+        self.sel_gender = widgets.FilterSelect("Gender")
         self.sel_level = widgets.FilterSelect("Level")
         self.sel_gender.set_options(cv_schema.GENDER_CHOICES)
         self.sel_level.set_options(cv_schema.EMPLOYEE_LEVEL_CHOICES)
@@ -201,7 +201,7 @@ class EmployeeDbTool(BaseTool):
             w.setFixedWidth(180)
             w.changed.connect(self._reload)
             filters.addWidget(w, 0)
-        filters.addWidget(widgets.button(None, "Đặt lại", variant="neutral",
+        filters.addWidget(widgets.button(None, "Reset", variant="neutral",
                                          icon="eraser", command=self._clear_filters), 0)
         lay.addLayout(filters)
 
@@ -209,13 +209,13 @@ class EmployeeDbTool(BaseTool):
         bar = QHBoxLayout()
         bar.setSpacing(6)
         B = widgets.button
-        bar.addWidget(B(None, "Thêm mới", variant="success", icon="plus", command=self._add))
+        bar.addWidget(B(None, "Add", variant="success", icon="plus", command=self._add))
         bar.addWidget(B(None, "Enroll", variant="info", icon="award",
                         command=self._enroll_to_course))
-        bar.addWidget(B(None, "Nhập từ Excel", variant="primary", icon="download",
+        bar.addWidget(B(None, "Import from Excel", variant="primary", icon="download",
                         command=self._batch_import))
         bar.addStretch(1)
-        bar.addWidget(B(None, "Tải lại", variant="neutral", icon="refresh", command=self._reload))
+        bar.addWidget(B(None, "Reload", variant="neutral", icon="refresh", command=self._reload))
         lay.addLayout(bar)
 
     # -------------------------------------------------------------- dữ liệu
@@ -230,7 +230,7 @@ class EmployeeDbTool(BaseTool):
             codes=self.ent_codes.text().split())
         self.table.set_rows(rows)
         self.count_lbl.setText(
-            f"Hiển thị {len(rows)} nhân viên · Tổng trong DB: {repo.count_employees()}")
+            f"Showing {len(rows)} employees · Total in DB: {repo.count_employees()}")
 
     def _clear_filters(self):
         self.ent_kw.clear()
@@ -242,7 +242,7 @@ class EmployeeDbTool(BaseTool):
     def _selected_id(self):
         eid = self.table.selected_id()
         if eid is None:
-            dialogs.info(self._root, "Chưa chọn", "Vui lòng chọn một nhân viên trong bảng.")
+            dialogs.info(self._root, "Nothing selected", "Please select an employee in the table.")
         return eid
 
     # -------------------------------------------- ghi danh vào khóa học (Enroll)
@@ -251,13 +251,13 @@ class EmployeeDbTool(BaseTool):
     def _enroll_to_course(self):
         rows = self.table.checked_rows()
         if not rows:
-            dialogs.info(self._root, "Chưa chọn",
-                         "Hãy tick chọn ít nhất một nhân viên để thêm vào khóa học.")
+            dialogs.info(self._root, "Nothing selected",
+                         "Tick at least one employee to enroll in a course.")
             return
         courses = repo.list_courses()
         if not courses:
-            dialogs.info(self._root, "Chưa có khóa học",
-                         "Chưa có khóa học nào trong hệ thống để thêm nhân viên vào.")
+            dialogs.info(self._root, "No courses",
+                         "There are no courses to enroll employees into yet.")
             return
         course_id = self._pick_course(courses, len(rows))
         if course_id is None:
@@ -277,22 +277,22 @@ class EmployeeDbTool(BaseTool):
 
         title = next((c["title"] for c in courses
                       if c["course_id"] == course_id), "") or f"#{course_id}"
-        msg = f'Đã thêm {added} nhân viên vào khóa "{title}".'
+        msg = f'Enrolled {added} employees in "{title}".'
         if skipped:
-            msg += f"\nBỏ qua {skipped} người đã ghi danh trước đó."
-        dialogs.success(self._root, "Hoàn tất", msg)
+            msg += f"\nSkipped {skipped} already enrolled."
+        dialogs.success(self._root, "Done", msg)
 
     def _pick_course(self, courses, n_selected):
         """Modal chọn 1 khóa học. Trả về course_id đã chọn, hoặc None nếu hủy."""
         dlg = ModalDialog(self._root, "sm")
         card, lay = dlg.build_shell("Enroll to course")
 
-        info = QLabel(f"Thêm {n_selected} nhân viên đã chọn vào khóa học:")
+        info = QLabel(f"Enroll {n_selected} selected employees in a course:")
         info.setObjectName("DialogMsg")
         info.setWordWrap(True)
         lay.addWidget(info)
 
-        lbl = QLabel("Khóa học")
+        lbl = QLabel("Course")
         lbl.setObjectName("FieldLabel")
         lay.addWidget(lbl)
         combo = widgets.ComboBox(card)
@@ -311,7 +311,7 @@ class EmployeeDbTool(BaseTool):
         foot = QHBoxLayout()
         foot.addWidget(widgets.button(card, "OK", variant="success", icon="check",
                                       command=_ok))
-        foot.addWidget(widgets.button(card, "Hủy", variant="neutral", icon="x",
+        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
                                       command=dlg.reject))
         foot.addStretch(1)
         lay.addLayout(foot)
@@ -327,32 +327,32 @@ class EmployeeDbTool(BaseTool):
     # ----------------------------------------------------- nhập hàng loạt Excel
     def _batch_import(self):
         if not _OPENPYXL_OK:
-            dialogs.error(self._root, "Thiếu thư viện",
-                          "Cần openpyxl để đọc Excel:\n  pip install openpyxl")
+            dialogs.error(self._root, "Missing library",
+                          "openpyxl is required to read Excel:\n  pip install openpyxl")
             return
         path, _ = QFileDialog.getOpenFileName(
-            self._root, "Chọn file Excel danh sách nhân viên", "",
-            "Excel (*.xlsx *.xlsm);;Tất cả (*.*)")
+            self._root, "Choose the employee list Excel file", "",
+            "Excel (*.xlsx *.xlsm);;All files (*.*)")
         if not path:
             return
         try:
             rows, unknown = self._read_excel(path)
         except Exception as exc:
-            dialogs.error(self._root, "Lỗi đọc file", f"Không đọc được Excel:\n{exc}")
+            dialogs.error(self._root, "Read error", f"Couldn't read Excel:\n{exc}")
             return
         if not rows:
-            dialogs.info(self._root, "Trống", "Không tìm thấy dòng dữ liệu hợp lệ.")
+            dialogs.info(self._root, "Empty", "No valid data rows found.")
             return
 
         note = ""
         if unknown:
-            note = ("\n\nCác cột không nhận diện được (bỏ qua): "
+            note = ("\n\nUnrecognized columns (skipped): "
                     + ", ".join(unknown[:10])
                     + (" …" if len(unknown) > 10 else ""))
         if not dialogs.confirm(
-                self._root, "Xác nhận nhập",
-                f"Đọc được {len(rows)} nhân viên từ file.\n\nNhập vào DB?{note}",
-                ok_label="Nhập"):
+                self._root, "Confirm import",
+                f"Found {len(rows)} employees in the file.\n\nImport into the DB?{note}",
+                ok_label="Import"):
             return
 
         # Tra department_id theo TÊN bộ phận (khớp không phân biệt hoa/thường).

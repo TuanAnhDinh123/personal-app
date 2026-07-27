@@ -34,7 +34,7 @@ class RichText(QWidget):
         bar.addWidget(self._tb("U", self._underline, underline=True))
         bar.addWidget(self._tb("A🎨", self._color))
         bar.addWidget(self._tb("• List", self._bullet))
-        bar.addWidget(self._tb("✕ Định dạng", self._clear))
+        bar.addWidget(self._tb("✕ Clear", self._clear))
         bar.addStretch(1)
         lay.addLayout(bar)
 
@@ -71,7 +71,7 @@ class RichText(QWidget):
         self.text.setFocus()
 
     def _color(self):
-        col = QColorDialog.getColor(QColor("#1f2735"), self, "Chọn màu chữ")
+        col = QColorDialog.getColor(QColor("#1f2735"), self, "Choose text color")
         if col.isValid():
             self.text.setTextColor(col)
         self.text.setFocus()

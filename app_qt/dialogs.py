@@ -110,7 +110,7 @@ def error(parent, title, message):
     return AppDialog(parent, title, message, "error").run()
 
 
-def confirm(parent, title, message, ok_label="Đồng ý", cancel_label="Hủy"):
+def confirm(parent, title, message, ok_label="OK", cancel_label="Cancel"):
     """Trả về True nếu người dùng bấm nút đồng ý."""
     d = AppDialog(parent, title, message, "question", buttons=[
         (cancel_label, "neutral", 0),

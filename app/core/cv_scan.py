@@ -195,12 +195,12 @@ def _extract_cv_text(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix == ".pdf":
         if not _FITZ_OK:
-            raise RuntimeError("Cần cài PyMuPDF để đọc PDF: pip install pymupdf")
+            raise RuntimeError("PyMuPDF is required to read PDFs: pip install pymupdf")
         return _read_pdf_text(path)
     if suffix == ".docx":
         return _read_docx_text(path)
     # .doc cũ (định dạng nhị phân) không đọc được nếu không có Word/thư viện
-    raise ValueError("Định dạng .doc cũ chưa hỗ trợ — hãy lưu lại thành .docx hoặc .pdf")
+    raise ValueError("Legacy .doc isn't supported — please save it as .docx or .pdf")
 
 
 def _find_email(text: str) -> str:
@@ -295,11 +295,11 @@ def _open_template_workbook():
     tpl = _template_path()
     if not tpl.exists():
         raise FileNotFoundError(
-            f"Không tìm thấy file template:\n{tpl}")
+            f"Template file not found:\n{tpl}")
     wb = openpyxl.load_workbook(tpl)
     if CANDIDATES_SHEET not in wb.sheetnames:
         raise ValueError(
-            f"Template thiếu sheet '{CANDIDATES_SHEET}'.")
+            f"Template is missing the '{CANDIDATES_SHEET}' sheet.")
     return wb, wb[CANDIDATES_SHEET]
 
 
@@ -308,6 +308,6 @@ def _open_existing_workbook(path: str):
     wb = openpyxl.load_workbook(path)
     if CANDIDATES_SHEET not in wb.sheetnames:
         raise ValueError(
-            f"File Excel không có sheet '{CANDIDATES_SHEET}'.\n"
-            "Hãy chọn file đúng mẫu hoặc chọn một thư mục để tạo file mới.")
+            f"This Excel file has no '{CANDIDATES_SHEET}' sheet.\n"
+            "Choose a file that matches the template, or pick a folder to create a new one.")
     return wb, wb[CANDIDATES_SHEET]

@@ -74,16 +74,16 @@ BORDER_STRONG = PALETTE["--border-strong"]
 FONT_FAMILY = "Segoe UI"
 
 CATEGORY_COLORS = {
-    "Tệp & Tài liệu": PALETTE["--cat-files"],
-    "Văn phòng":      PALETTE["--cat-office"],
-    "Tuyển dụng":     PALETTE["--cat-hr"],
-    "Nhân sự":        PALETTE["--cat-data"],
-    "Demo":           PALETTE["--accent"],
+    "Files & Documents": PALETTE["--cat-files"],
+    "Office":            PALETTE["--cat-office"],
+    "Recruitment":       PALETTE["--cat-hr"],
+    "Human Resources":   PALETTE["--cat-data"],
+    "Demo":              PALETTE["--accent"],
 }
 
 # Thứ tự hiển thị nhóm ở sidebar / trang chủ (nhóm không có trong đây xếp sau,
 # theo tên). "Master Data" luôn được main_window tách xuống cuối riêng.
-CATEGORY_ORDER = ["Tuyển dụng", "Nhân sự", "Tệp & Tài liệu", "Văn phòng"]
+CATEGORY_ORDER = ["Recruitment", "Human Resources", "Files & Documents", "Office"]
 
 
 def category_color(category):

@@ -338,7 +338,7 @@ class FilterSelect(QWidget):
     """
 
     changed = Signal()
-    _ALL = "— Tất cả —"   # dòng đầu trong menu để bỏ chọn, quay về 'tất cả'
+    _ALL = "— All —"   # dòng đầu trong menu để bỏ chọn, quay về 'tất cả'
 
     def __init__(self, title, parent=None, allow_all=True):
         super().__init__(parent)
@@ -465,7 +465,7 @@ class _FetchCombo(ComboBox):
     def _start_fetch(self):
         import threading
         self._loading = True
-        self._set_status("Đang tải danh sách model…")
+        self._set_status("Loading models…")
 
         def work():
             try:
@@ -487,7 +487,7 @@ class _FetchCombo(ComboBox):
             i = self.findText(current)
             self.setCurrentIndex(i) if i >= 0 else self.setEditText(current)
         self.blockSignals(False)
-        self._set_status("" if models else "Không có model khả dụng cho key này.")
+        self._set_status("" if models else "No models available for this key.")
         # Người dùng vẫn đang mở danh sách → mở lại để thấy list vừa tải.
         if self.view().isVisible():
             self.hidePopup()
@@ -495,7 +495,7 @@ class _FetchCombo(ComboBox):
 
     def _on_failed(self, msg):
         self._loading = False
-        self._set_status(f"Không tải được danh sách model: {msg}")
+        self._set_status(f"Couldn't load models: {msg}")
         if self.view().isVisible():
             self.hidePopup()
 
@@ -546,16 +546,16 @@ def file_row(parent, label, mode="file"):
 
     def browse():
         if mode == "folder":
-            path = QFileDialog.getExistingDirectory(parent, "Chọn thư mục")
+            path = QFileDialog.getExistingDirectory(parent, "Choose folder")
         elif mode == "save":
             path, _ = QFileDialog.getSaveFileName(
-                parent, "Lưu file", "", "Excel (*.xlsx)")
+                parent, "Save file", "", "Excel (*.xlsx)")
         else:
-            path, _ = QFileDialog.getOpenFileName(parent, "Chọn file")
+            path, _ = QFileDialog.getOpenFileName(parent, "Choose file")
         if path:
             edit.setText(path)
 
-    btn = button(block, "Chọn…", variant="neutral", command=browse)
+    btn = button(block, "Browse…", variant="neutral", command=browse)
     row.addWidget(btn)
     v.addLayout(row)
     return StringValue(edit)
@@ -570,17 +570,17 @@ def export_target_row(parent, label):
     row.addWidget(edit, 1)
 
     def pick_folder():
-        p = QFileDialog.getExistingDirectory(parent, "Chọn thư mục")
+        p = QFileDialog.getExistingDirectory(parent, "Choose folder")
         if p:
             edit.setText(p)
 
     def pick_file():
-        p, _ = QFileDialog.getOpenFileName(parent, "Chọn file Excel", "", "Excel (*.xlsx)")
+        p, _ = QFileDialog.getOpenFileName(parent, "Choose Excel file", "", "Excel (*.xlsx)")
         if p:
             edit.setText(p)
 
-    row.addWidget(button(block, "Thư mục", variant="neutral", command=pick_folder))
-    row.addWidget(button(block, "File Excel", variant="neutral", command=pick_file))
+    row.addWidget(button(block, "Folder", variant="neutral", command=pick_folder))
+    row.addWidget(button(block, "Excel file", variant="neutral", command=pick_file))
     v.addLayout(row)
     return StringValue(edit)
 

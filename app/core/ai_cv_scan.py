@@ -45,7 +45,7 @@ DEFAULTS = {
 }
 
 # Tên folder (ngang cấp) chứa các CV đã quét xong, để lần sau không quét lại.
-_DONE_SUFFIX = "_da_quet"
+_DONE_SUFFIX = "_scanned"
 
 _API_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -74,17 +74,17 @@ _RESPONSE_SCHEMA = {
 # Cột xuất ra Excel: (khóa trong JSON, tiêu đề hiển thị, độ rộng cột).
 # 'batch' = tên thư mục chứa CV (batch1, batch2…), do tool gán vào mỗi dòng.
 _COLUMNS = [
-    ("batch",       "Batch",            14),
-    ("file",        "Tên file",         28),
-    ("cv_path",     "Đường dẫn CV",     52),
-    ("name",        "Họ tên",           22),
-    ("dob",         "Ngày sinh",        14),
-    ("email",       "Email",            28),
-    ("phone",       "Số điện thoại",    16),
-    ("fit_score",   "Điểm phù hợp",     13),
-    ("fit_summary", "Đánh giá phù hợp", 46),
-    ("strengths",   "Ưu điểm",          46),
-    ("weaknesses",  "Nhược điểm",       46),
+    ("batch",       "Batch",         14),
+    ("file",        "File name",     28),
+    ("cv_path",     "CV path",       52),
+    ("name",        "Full name",     22),
+    ("dob",         "Date of birth", 14),
+    ("email",       "Email",         28),
+    ("phone",       "Phone",         16),
+    ("fit_score",   "Fit score",     13),
+    ("fit_summary", "Fit summary",   46),
+    ("strengths",   "Strengths",     46),
+    ("weaknesses",  "Weaknesses",    46),
 ]
 
 
@@ -95,7 +95,7 @@ def read_jd_file(path: str) -> str:
     """
     p = Path(path)
     if not p.is_file():
-        raise FileNotFoundError(f"Không tìm thấy file JD: {path}")
+        raise FileNotFoundError(f"JD file not found: {path}")
     suffix = p.suffix.lower()
     if suffix == ".txt":
         return p.read_text(encoding="utf-8", errors="ignore")
@@ -110,29 +110,29 @@ def _build_prompt(jd: str, extra: str = "") -> str:
     jd    — nội dung mô tả công việc (đọc từ file JD người dùng chọn).
     extra — yêu cầu bổ sung tùy ý người dùng nhập thêm cho AI.
     """
-    jd = jd.strip() or "(Không có mô tả công việc cụ thể — hãy đánh giá tổng quát.)"
+    jd = jd.strip() or "(No specific job description — give a general assessment.)"
     extra = extra.strip()
     extra_block = ""
     if extra:
         extra_block = (
-            "\n=== YÊU CẦU BỔ SUNG TỪ NGƯỜI DÙNG ===\n"
+            "\n=== ADDITIONAL INSTRUCTIONS FROM THE USER ===\n"
             f"{extra}\n"
-            "=== HẾT YÊU CẦU BỔ SUNG ===\n"
+            "=== END OF ADDITIONAL INSTRUCTIONS ===\n"
         )
     return (
-        "Bạn là chuyên viên tuyển dụng. Hãy đọc kỹ CV trong file PDF đính kèm "
-        "và trích xuất thông tin ứng viên, đồng thời đánh giá mức độ phù hợp với "
-        "mô tả công việc (JD) dưới đây.\n\n"
-        "=== MÔ TẢ CÔNG VIỆC (JD) ===\n"
+        "You are a recruiter. Read the CV in the attached PDF carefully, extract "
+        "the candidate's information, and assess how well they fit the job "
+        "description (JD) below.\n\n"
+        "=== JOB DESCRIPTION (JD) ===\n"
         f"{jd}\n"
-        "=== HẾT JD ===\n"
+        "=== END OF JD ===\n"
         f"{extra_block}\n"
-        "Yêu cầu:\n"
-        "- Trả lời hoàn toàn bằng tiếng Việt.\n"
-        "- 'fit_score' là số nguyên 0-100 thể hiện độ khớp giữa CV và JD.\n"
-        "- Nếu thông tin nào không tìm thấy trong CV thì để chuỗi rỗng.\n"
-        "- 'strengths' và 'weaknesses' viết mỗi ý một dòng, ngắn gọn.\n"
-        "Chỉ trả về đúng đối tượng JSON theo schema đã cho."
+        "Requirements:\n"
+        "- Respond entirely in English.\n"
+        "- 'fit_score' is an integer 0-100 for how well the CV matches the JD.\n"
+        "- Leave a field as an empty string if not found in the CV.\n"
+        "- Write 'strengths' and 'weaknesses' as short one-line bullet points.\n"
+        "Return only the JSON object matching the given schema."
     )
 
 
@@ -169,7 +169,7 @@ def _call_gemini(api_key: str, model: str, jd: str, pdf_bytes: bytes,
             if on_retry:
                 on_retry(attempt, wait, last_error)
             _interruptible_sleep(wait, should_cancel)
-    raise RuntimeError(f"Thất bại sau {_MAX_RETRIES} lần thử — {last_error}")
+    raise RuntimeError(f"Failed after {_MAX_RETRIES} attempts — {last_error}")
 
 
 class _TransientError(Exception):
@@ -235,7 +235,7 @@ def _call_gemini_once(api_key: str, model: str, jd: str, pdf_bytes: bytes,
         raise RuntimeError(f"HTTP {exc.code}: {msg}") from exc
     except urllib.error.URLError as exc:
         # Timeout / mất mạng thường là tạm thời → cho thử lại.
-        raise _TransientError(f"Lỗi kết nối mạng: {exc.reason}") from exc
+        raise _TransientError(f"Network error: {exc.reason}") from exc
 
     try:
         text = payload["candidates"][0]["content"]["parts"][0]["text"]
@@ -243,12 +243,12 @@ def _call_gemini_once(api_key: str, model: str, jd: str, pdf_bytes: bytes,
         # Có thể bị chặn do safety hoặc phản hồi rỗng.
         reason = payload.get("promptFeedback", {}).get("blockReason")
         raise RuntimeError(
-            f"Không nhận được nội dung từ mô hình"
-            + (f" (bị chặn: {reason})" if reason else ""))
+            f"No content returned by the model"
+            + (f" (blocked: {reason})" if reason else ""))
     try:
         data = json.loads(text)
     except ValueError:
-        raise RuntimeError("Mô hình trả về không đúng JSON.")
+        raise RuntimeError("The model returned invalid JSON.")
     if isinstance(data, dict) and data.get("name"):
         data["name"] = normalize_name(data["name"])
     return data

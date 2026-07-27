@@ -65,36 +65,48 @@ _W = CAND_COL_WIDTHS
 
 # Cột bảng ỨNG VIÊN: (khóa, tiêu đề, rộng, canh lề[, formatter]).
 _CAND_COLUMNS = [
-    ("candidate_id",    "ID",         _W["candidate_id"],    "center"),
-    ("full_name",       "Họ tên",     _W["full_name"],       "w"),
-    ("email",           "Email",      _W["email"],           "w"),
-    ("phone",           "SĐT",        _W["phone"],           "w"),
-    ("position_title",  "Vị trí",     _W["position_title"],  "w"),
-    ("fit_score",       "Điểm",       _W["fit_score"],       "center"),
-    ("cv_file_path",    "CV",         _W["cv_file_path"],    "w",
+    ("candidate_id",    "ID",            _W["candidate_id"],    "center"),
+    ("full_name",       "Full name",     _W["full_name"],       "w"),
+    ("email",           "Email",         _W["email"],           "w"),
+    ("phone",           "Phone",         _W["phone"],           "w"),
+    ("position_title",  "Position",      _W["position_title"],  "w"),
+    ("fit_score",       "Score",         _W["fit_score"],       "center"),
+    ("cv_file_path",    "CV",            _W["cv_file_path"],    "w",
      lambda v: os.path.basename(str(v)) if v else ""),
-    ("department_name", "Bộ phận",    _W["department_name"], "w"),
-    ("batch",           "Batch",      _W["batch"],           "center"),
-    ("status",          "Trạng thái", _W["status"],          "center"),
-    ("date_of_birth",   "Ngày sinh",  _W["date_of_birth"],   "center"),
-    ("applied_at",      "Ngày nộp",   _W["applied_at"],      "center"),
-    ("note",            "Ghi chú",    _W["note"],            "w",
+    ("department_name", "Department",    _W["department_name"], "w"),
+    ("batch",           "Batch",         _W["batch"],           "center"),
+    ("status",          "Status",        _W["status"],          "center"),
+    ("date_of_birth",   "Date of birth", _W["date_of_birth"],   "center"),
+    ("applied_at",      "Applied",       _W["applied_at"],      "center"),
+    ("note",            "Note",          _W["note"],            "w",
      lambda v: (str(v).replace("\n", " ")[:60] + "…")
      if v and len(str(v)) > 60 else (str(v).replace("\n", " ") if v else "")),
 ]
 
+# Map tiêu đề cột Excel (đã hạ chữ thường) → khóa dữ liệu. Giữ CẢ nhãn tiếng Anh
+# (bản mới) lẫn nhãn tiếng Việt (file cũ) để vẫn nhập được file xuất trước đây.
 _EXCEL_HEADER_MAP = {
     "batch":            "batch",
+    "full name":        "full_name",
+    "date of birth":    "date_of_birth",
+    "email":            "email",
+    "phone":            "phone",
+    "fit score":        "fit_score",
+    "fit summary":      "fit_summary",
+    "strengths":        "strengths",
+    "weaknesses":       "weaknesses",
+    "file name":        "cv_file_path",
+    "cv path":          "cv_file_path",
+    # --- nhãn tiếng Việt cũ (tương thích ngược) ---
     "họ tên":           "full_name",
     "ngày sinh":        "date_of_birth",
-    "email":            "email",
     "số điện thoại":    "phone",
     "điểm phù hợp":     "fit_score",
     "đánh giá phù hợp": "fit_summary",
     "ưu điểm":          "strengths",
     "nhược điểm":       "weaknesses",
-    "tên file":         "cv_file_path",   # file cũ: chỉ có tên → cần hỏi thư mục CV
-    "đường dẫn cv":     "cv_file_path",   # file mới: đã có sẵn đường dẫn đầy đủ
+    "tên file":         "cv_file_path",
+    "đường dẫn cv":     "cv_file_path",
 }
 
 
@@ -273,7 +285,7 @@ def _copy_chip(parent, value):
 
     def _do_copy(_e):
         QApplication.clipboard().setText(value)
-        QToolTip.showText(QCursor.pos(), "Đã sao chép", chip)
+        QToolTip.showText(QCursor.pos(), "Copied", chip)
 
     chip.mousePressEvent = _do_copy
     return chip
@@ -283,98 +295,98 @@ def _copy_chip(parent, value):
 def _master_specs():
     return {
         "department": {
-            "title": "bộ phận", "pk": "department_id",
+            "title": "department", "pk": "department_id",
             "list_fn": repo.list_departments,
             "get": repo.get_department, "insert": repo.insert_department,
             "update": repo.update_department, "delete": repo.delete_department,
             "columns": [
                 ("department_id", "ID", 50),
-                ("department_name", "Tên bộ phận", 200),
-                ("short_name", "Mã viết tắt", 100),
-                ("manager_name", "Quản lý", 150),
-                ("description", "Mô tả", 220),
+                ("department_name", "Department name", 200),
+                ("short_name", "Short code", 100),
+                ("manager_name", "Manager", 150),
+                ("description", "Description", 220),
             ],
             "form": [
-                {"key": "department_name", "label": "Tên bộ phận (*)",
+                {"key": "department_name", "label": "Department name (*)",
                  "kind": "text", "required": True},
-                {"key": "short_name", "label": "Mã viết tắt (vd FIN, IT, R&D)",
+                {"key": "short_name", "label": "Short code (e.g. FIN, IT, R&D)",
                  "kind": "text"},
-                {"key": "manager_name", "label": "Người quản lý", "kind": "text"},
-                {"key": "description", "label": "Mô tả", "kind": "textarea", "height": 3},
+                {"key": "manager_name", "label": "Manager", "kind": "text"},
+                {"key": "description", "label": "Description", "kind": "textarea", "height": 3},
             ],
         },
         "position": {
-            "title": "vị trí", "pk": "position_id",
+            "title": "position", "pk": "position_id",
             "modal_size": "md",   # form vị trí có mẫu mail dài → dùng cỡ md
             "list_fn": repo.list_positions,
             "get": repo.get_position, "insert": repo.insert_position,
             "update": repo.update_position, "delete": repo.delete_position,
             "columns": [
                 ("position_id", "ID", 50),
-                ("position_code", "Mã", 90),
-                ("position_title", "Vị trí", 190),
-                ("department_name", "Bộ phận", 140),
-                ("level", "Cấp", 80),
-                ("headcount", "SL", 50),
-                ("status", "Trạng thái", 105),
-                ("jd_file_path", "File JD", 160, "w",
+                ("position_code", "Code", 90),
+                ("position_title", "Position", 190),
+                ("department_name", "Department", 140),
+                ("level", "Level", 80),
+                ("headcount", "Qty", 50),
+                ("status", "Status", 105),
+                ("jd_file_path", "JD file", 160, "w",
                  lambda v: os.path.basename(str(v)) if v else "—"),
-                ("mail_subject", "Mẫu mail", 180, "w",
+                ("mail_subject", "Mail template", 180, "w",
                  lambda v: (str(v).replace("\n", " ")[:50] + "…")
                  if v and len(str(v)) > 50 else (str(v) if v else "—")),
             ],
             "form": [
-                {"key": "department_id", "label": "Bộ phận", "kind": "dropdown",
+                {"key": "department_id", "label": "Department", "kind": "dropdown",
                  "options": _dept_options},
-                {"key": "position_code", "label": "Mã vị trí", "kind": "text"},
-                {"key": "position_title", "label": "Tên vị trí (*)",
+                {"key": "position_code", "label": "Position code", "kind": "text"},
+                {"key": "position_title", "label": "Position title (*)",
                  "kind": "text", "required": True},
-                {"key": "level", "label": "Cấp bậc", "kind": "text"},
-                {"key": "headcount", "label": "Số lượng cần tuyển", "kind": "int"},
-                {"key": "status", "label": "Trạng thái", "kind": "choice",
+                {"key": "level", "label": "Level", "kind": "text"},
+                {"key": "headcount", "label": "Headcount", "kind": "int"},
+                {"key": "status", "label": "Status", "kind": "choice",
                  "choices": cv_schema.POSITION_STATUS_CHOICES, "allow_empty": True},
                 # Mỗi vị trí chỉ có 1 JD → nhập ngay tại form vị trí (không còn
                 # trang master "Mô tả công việc (JD)" riêng).
-                {"kind": "section", "label": "Mô tả công việc (JD)"},
-                {"key": "jd_title", "label": "Tiêu đề JD (để trống = dùng tên vị trí)",
+                {"kind": "section", "label": "Job description (JD)"},
+                {"key": "jd_title", "label": "JD title (blank = use the position title)",
                  "kind": "text"},
-                {"key": "jd_file_path", "label": "File JD (đường dẫn trên máy)",
+                {"key": "jd_file_path", "label": "JD file (local path)",
                  "kind": "file",
                  "filetypes": [("PDF/Word/Text", "*.pdf *.doc *.docx *.txt"),
-                               ("Tất cả", "*.*")]},
-                {"kind": "section", "label": "Mẫu mail mời phỏng vấn"},
-                {"key": "mail_cc", "label": "CC (nhiều email cách nhau bởi ;)",
+                               ("All files", "*.*")]},
+                {"kind": "section", "label": "Interview invite email template"},
+                {"key": "mail_cc", "label": "CC (separate emails with ;)",
                  "kind": "text"},
-                {"key": "mail_subject", "label": "Tiêu đề mail", "kind": "text"},
-                {"key": "mail_body", "label": "Nội dung mail (dùng {name} "
+                {"key": "mail_subject", "label": "Email subject", "kind": "text"},
+                {"key": "mail_body", "label": "Email body (use {name} "
                  "{possion} {date} {time_start} {time_end})", "kind": "richtext",
                  "height": 20, "grow": True},
             ],
         },
         "course": {
-            "title": "khóa học", "pk": "course_id",
+            "title": "course", "pk": "course_id",
             "modal_size": "md",   # form có ô nội dung dài → dùng cỡ md
             "list_fn": repo.list_courses,
             "get": repo.get_course, "insert": repo.insert_course,
             "update": repo.update_course, "delete": repo.delete_course,
             "columns": [
                 ("course_id", "ID", 50),
-                ("title", "Tên khóa học", 230),
-                ("course_type", "Loại", 100, "w", _course_type_label),
-                ("date", "Ngày", 110),
-                ("location", "Địa điểm", 160),
-                ("content", "Nội dung", 240, "w",
+                ("title", "Course title", 230),
+                ("course_type", "Type", 100, "w", _course_type_label),
+                ("date", "Date", 110),
+                ("location", "Location", 160),
+                ("content", "Content", 240, "w",
                  lambda v: (str(v).replace("\n", " ")[:60] + "…")
                  if v and len(str(v)) > 60 else (str(v) if v else "—")),
             ],
             "form": [
-                {"key": "title", "label": "Tên khóa học (*)",
+                {"key": "title", "label": "Course title (*)",
                  "kind": "text", "required": True},
-                {"key": "course_type", "label": "Loại khóa học", "kind": "dropdown",
+                {"key": "course_type", "label": "Course type", "kind": "dropdown",
                  "options": _course_type_options},
-                {"key": "date", "label": "Ngày tổ chức (yyyy-mm-dd)", "kind": "text"},
-                {"key": "location", "label": "Địa điểm", "kind": "text"},
-                {"key": "content", "label": "Nội dung", "kind": "textarea",
+                {"key": "date", "label": "Date held (yyyy-mm-dd)", "kind": "text"},
+                {"key": "location", "label": "Location", "kind": "text"},
+                {"key": "content", "label": "Content", "kind": "textarea",
                  "height": 6, "grow": True},
             ],
         },
@@ -409,24 +421,24 @@ class _MasterPageTool(BaseTool):
 
 
 class DepartmentTool(_MasterPageTool):
-    name = "Bộ phận"
-    description = "Danh mục phòng ban / bộ phận."
+    name = "Departments"
+    description = "Department directory."
     icon = "🏢"
     order = 10
     spec_key = "department"
 
 
 class PositionTool(_MasterPageTool):
-    name = "Vị trí tuyển dụng"
-    description = "Danh mục vị trí cần tuyển (kèm JD & mẫu mail của vị trí)."
+    name = "Positions"
+    description = "Open positions (with each position's JD & email template)."
     icon = "💼"
     order = 20
     spec_key = "position"
 
 
 class CourseTool(_MasterPageTool):
-    name = "Khóa học"
-    description = "Danh mục khóa học / đào tạo."
+    name = "Courses"
+    description = "Training / course directory."
     icon = "🎓"
     order = 40
     spec_key = "course"
@@ -442,14 +454,14 @@ class _CandidateDetailDialog(ModalDialog):
 
     def __init__(self, parent, rows):
         super().__init__(parent, "lg")
-        card, lay = self.build_shell(f"Chi tiết ứng viên · {len(rows)} người")
+        card, lay = self.build_shell(f"Candidate details · {len(rows)}")
 
         body = QWidget()
         col = QVBoxLayout(body)
         col.setContentsMargins(0, 0, 8, 0)
         col.setSpacing(12)
         if not rows:
-            empty = QLabel("Danh sách hiện tại đang trống.")
+            empty = QLabel("The current list is empty.")
             empty.setObjectName("DialogMsg")
             col.addWidget(empty)
         for row in rows:
@@ -461,7 +473,7 @@ class _CandidateDetailDialog(ModalDialog):
 
         foot = QHBoxLayout()
         foot.addStretch(1)
-        foot.addWidget(widgets.button(card, "Đóng", variant="neutral", icon="x",
+        foot.addWidget(widgets.button(card, "Close", variant="neutral", icon="x",
                                       command=self.reject))
         lay.addLayout(foot)
 
@@ -477,12 +489,12 @@ class _CandidateDetailDialog(ModalDialog):
         head = QHBoxLayout()
         head.setSpacing(8)
         cid = _txt(row, "candidate_id")
-        name = QLabel(f"#{cid}  {_txt(row, 'full_name') or '(chưa có tên)'}", box)
+        name = QLabel(f"#{cid}  {_txt(row, 'full_name') or '(no name)'}", box)
         name.setObjectName("DetailName")
         head.addWidget(name, 1)
         score = _txt(row, "fit_score")
         if score:
-            head.addWidget(_chip(box, f"Điểm {score}", _score_color(score)))
+            head.addWidget(_chip(box, f"Score {score}", _score_color(score)))
         status = _txt(row, "status")
         if status:
             head.addWidget(_chip(box, status, theme.PALETTE["--info"]))
@@ -491,8 +503,8 @@ class _CandidateDetailDialog(ModalDialog):
         # Hàng thông tin phụ (bôi-chọn được để copy tay nếu cần)
         meta = " · ".join(p for p in (
             _txt(row, "position_title"), _txt(row, "department_name"),
-            (f"NS: {_txt(row, 'date_of_birth')}" if _txt(row, "date_of_birth") else ""),
-            (f"Nộp: {_txt(row, 'applied_at')}" if _txt(row, "applied_at") else ""),
+            (f"DOB: {_txt(row, 'date_of_birth')}" if _txt(row, "date_of_birth") else ""),
+            (f"Applied: {_txt(row, 'applied_at')}" if _txt(row, "applied_at") else ""),
         ) if p)
         if meta:
             lbl = QLabel(meta, box)
@@ -517,7 +529,7 @@ class _CandidateDetailDialog(ModalDialog):
 
         note = _txt(row, "note")
         if note:
-            v.addLayout(self._para(box, "Ghi chú", note))
+            v.addLayout(self._para(box, "Note", note))
         return box
 
     # ----------------------------------------------------- hộp nhận xét của AI
@@ -533,7 +545,7 @@ class _CandidateDetailDialog(ModalDialog):
         ico = QLabel(box)
         ico.setPixmap(widgets.svg_pixmap("sparkles", theme.PALETTE["--accent"], 16))
         header.addWidget(ico, 0, Qt.AlignVCenter)
-        h = QLabel("Nhận xét của AI", box)
+        h = QLabel("AI assessment", box)
         h.setObjectName("AIHeader")
         header.addWidget(h, 1)
         v.addLayout(header)
@@ -543,18 +555,18 @@ class _CandidateDetailDialog(ModalDialog):
         weaknesses = _txt(row, "weaknesses")
 
         if not any((summary, strengths, weaknesses)):
-            empty = QLabel("Chưa có nhận xét từ AI cho ứng viên này.", box)
+            empty = QLabel("No AI assessment for this candidate yet.", box)
             empty.setObjectName("AIEmpty")
             v.addWidget(empty)
             return box
 
         if summary:
-            v.addLayout(self._para(box, "Nhận xét phù hợp", summary))
+            v.addLayout(self._para(box, "Fit summary", summary))
         if strengths or weaknesses:
             two = QHBoxLayout()
             two.setSpacing(12)
-            two.addLayout(self._para(box, "Ưu điểm", strengths or "—"), 1)
-            two.addLayout(self._para(box, "Nhược điểm", weaknesses or "—"), 1)
+            two.addLayout(self._para(box, "Strengths", strengths or "—"), 1)
+            two.addLayout(self._para(box, "Weaknesses", weaknesses or "—"), 1)
             v.addLayout(two)
         return box
 
@@ -576,10 +588,10 @@ class _CandidateDetailDialog(ModalDialog):
 
 # ═══════════════════════════════ TOOL CHÍNH ═════════════════════════════
 class CandidateDbTool(BaseTool):
-    name = "Quản lý CV ứng viên"
-    description = "Tìm kiếm ứng viên, quản lý bộ phận/vị trí, nhập hàng loạt (SQLite)."
+    name = "Candidate Manager"
+    description = "Search candidates, manage departments/positions, bulk import (SQLite)."
     icon = "🙋"
-    category = "Tuyển dụng"
+    category = "Recruitment"
     order = 10
     fills_height = True
 
@@ -588,7 +600,7 @@ class CandidateDbTool(BaseTool):
         card, lay = _card(parent)
         self._root = card
 
-        widgets.section_label(card, "Tìm kiếm ứng viên")
+        widgets.section_label(card, "Search candidates")
         self._build_search_bar(lay)
 
         self._build_toolbar(lay)
@@ -614,7 +626,7 @@ class CandidateDbTool(BaseTool):
         # Ô tìm kiếm toàn văn: quét MỌI field text. Tìm ngay khi rời ô (tab /
         # click ra ngoài) hoặc nhấn Enter — editingFinished bao cả hai.
         self.ent_kw = QLineEdit()
-        self.ent_kw.setPlaceholderText("Tìm kiếm…")
+        self.ent_kw.setPlaceholderText("Search…")
         self.ent_kw.setClearButtonEnabled(True)
         self.ent_kw.addAction(widgets.svg_icon("search", theme.TEXT_MUTED, 16),
                               QLineEdit.LeadingPosition)
@@ -624,15 +636,15 @@ class CandidateDbTool(BaseTool):
         # Hàng ô lọc dạng select 'nhãn nổi' — chọn 1 option là tìm luôn.
         filters = QHBoxLayout()
         filters.setSpacing(10)
-        self.sel_pos = widgets.FilterSelect("Vị trí")
-        self.sel_dept = widgets.FilterSelect("Bộ phận")
-        self.sel_status = widgets.FilterSelect("Trạng thái")
+        self.sel_pos = widgets.FilterSelect("Position")
+        self.sel_dept = widgets.FilterSelect("Department")
+        self.sel_status = widgets.FilterSelect("Status")
         self.sel_batch = widgets.FilterSelect("Batch")
         self.sel_status.set_options(cv_schema.STATUS_CHOICES)
         for w in (self.sel_pos, self.sel_dept, self.sel_status, self.sel_batch):
             w.changed.connect(self._reload)
             filters.addWidget(w, 1)
-        filters.addWidget(widgets.button(None, "Đặt lại", variant="neutral",
+        filters.addWidget(widgets.button(None, "Reset", variant="neutral",
                                          icon="eraser", command=self._clear_filters), 0)
         lay.addLayout(filters)
 
@@ -640,18 +652,18 @@ class CandidateDbTool(BaseTool):
         bar = QHBoxLayout()
         bar.setSpacing(6)
         B = widgets.button
-        bar.addWidget(B(None, "Thêm mới", variant="success", icon="plus", command=self._add))
-        bar.addWidget(B(None, "Xem chi tiết", variant="info", icon="sparkles",
+        bar.addWidget(B(None, "Add", variant="success", icon="plus", command=self._add))
+        bar.addWidget(B(None, "View details", variant="info", icon="sparkles",
                         command=self._show_details))
-        bar.addWidget(B(None, "Gửi mail", variant="info", icon="mail",
+        bar.addWidget(B(None, "Send email", variant="info", icon="mail",
                         command=self._send_mail))
-        bar.addWidget(B(None, "Nhập từ Excel", variant="primary", icon="download",
+        bar.addWidget(B(None, "Import from Excel", variant="primary", icon="download",
                         command=self._batch_import))
-        self._btn_export = B(None, "Xuất Excel", variant="warning", icon="save",
+        self._btn_export = B(None, "Export to Excel", variant="warning", icon="save",
                              command=self._export_excel)
         bar.addWidget(self._btn_export)
         bar.addStretch(1)
-        bar.addWidget(B(None, "Tải lại", variant="neutral", icon="refresh", command=self._reload))
+        bar.addWidget(B(None, "Reload", variant="neutral", icon="refresh", command=self._reload))
         lay.addLayout(bar)
 
     # -------------------------------------------------------------- dữ liệu
@@ -672,7 +684,7 @@ class CandidateDbTool(BaseTool):
         self._rows = rows
         self.table.set_rows(rows)
         self.count_lbl.setText(
-            f"Hiển thị {len(rows)} ứng viên · Tổng trong DB: {repo.count_candidates()}")
+            f"Showing {len(rows)} candidates · Total in DB: {repo.count_candidates()}")
 
     def _clear_filters(self):
         self.ent_kw.clear()
@@ -683,14 +695,14 @@ class CandidateDbTool(BaseTool):
     def _selected_id(self):
         cid = self.table.selected_id()
         if cid is None:
-            dialogs.info(self._root, "Chưa chọn", "Vui lòng chọn một ứng viên trong bảng.")
+            dialogs.info(self._root, "Nothing selected", "Please select a candidate in the table.")
         return cid
 
     def _show_details(self):
         rows = self.table.checked_rows()
         if not rows:
-            dialogs.info(self._root, "Chưa chọn",
-                         "Hãy tick chọn ít nhất một ứng viên trong bảng để xem chi tiết.")
+            dialogs.info(self._root, "Nothing selected",
+                         "Tick at least one candidate in the table to view details.")
             return
         _CandidateDetailDialog(self._root, rows).exec()
 
@@ -699,29 +711,29 @@ class CandidateDbTool(BaseTool):
     # TRÍ ứng tuyển, đã thay {name}{possion}{date}{time}) → gửi qua Outlook.
     def _send_mail(self):
         if not outlook.available():
-            dialogs.warning(self._root, "Cần Outlook",
-                            "Tính năng gửi mail cần Outlook trên Windows (pywin32).")
+            dialogs.warning(self._root, "Outlook required",
+                            "Sending email needs Outlook on Windows (pywin32).")
             return
         rows = self.table.checked_rows()
         if len(rows) != 1:
             dialogs.warning(
-                self._root, "Chọn đúng 1 ứng viên",
-                "Vui lòng tick chọn ĐÚNG MỘT ứng viên trong bảng để gửi mail.")
+                self._root, "Select exactly one candidate",
+                "Please tick EXACTLY ONE candidate in the table to send an email.")
             return
         row = rows[0]
         email = _txt(row, "email")
         if not email:
-            dialogs.warning(self._root, "Thiếu email",
-                            "Ứng viên này chưa có email — không thể gửi mail.")
+            dialogs.warning(self._root, "Missing email",
+                            "This candidate has no email — can't send.")
             return
 
         pos_id = row["position_id"] if "position_id" in row.keys() else None
         pos = repo.get_position(pos_id) if pos_id else None
         if pos is None:
             dialogs.warning(
-                self._root, "Chưa có vị trí",
-                "Ứng viên chưa gắn vị trí tuyển dụng nên không có mẫu mail. "
-                "Hãy gán vị trí (và soạn mẫu mail ở master Vị trí tuyển dụng).")
+                self._root, "No position",
+                "This candidate has no position, so there's no email template. "
+                "Assign a position (and write its template under Positions).")
             return
 
         picked = self._pick_datetime()
@@ -755,9 +767,9 @@ class CandidateDbTool(BaseTool):
         do QSS bảng toàn cục & popup trong modal frameless. Trả về (start, end)
         dạng QDateTime, hoặc None nếu hủy.
         """
-        dlg, card, lay = build_dialog_shell(self._root, "Chọn ngày giờ phỏng vấn",
+        dlg, card, lay = build_dialog_shell(self._root, "Pick interview date & time",
                                             size="sm")
-        lbl = QLabel("Ngày phỏng vấn:")
+        lbl = QLabel("Interview date:")
         lbl.setObjectName("FieldLabel")
         lay.addWidget(lbl)
 
@@ -789,8 +801,8 @@ class CandidateDbTool(BaseTool):
             times.addLayout(col, 1)
             return te
 
-        start_te = _time_col("Giờ bắt đầu", QTime(9, 0))
-        end_te = _time_col("Giờ kết thúc", QTime(9, 30))
+        start_te = _time_col("Start time", QTime(9, 0))
+        end_te = _time_col("End time", QTime(9, 30))
         lay.addLayout(times)
 
         result = {"val": None}
@@ -800,16 +812,16 @@ class CandidateDbTool(BaseTool):
             start = QDateTime(d, start_te.time())
             end = QDateTime(d, end_te.time())
             if end <= start:
-                dialogs.warning(dlg, "Giờ không hợp lệ",
-                                "Giờ kết thúc phải sau giờ bắt đầu.")
+                dialogs.warning(dlg, "Invalid time",
+                                "End time must be after start time.")
                 return
             result["val"] = (start, end)
             dlg.accept()
 
         foot = QHBoxLayout()
-        foot.addWidget(widgets.button(card, "Tiếp tục", variant="primary",
+        foot.addWidget(widgets.button(card, "Continue", variant="primary",
                                       icon="check", command=_confirm))
-        foot.addWidget(widgets.button(card, "Hủy", variant="neutral", icon="x",
+        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
                                       command=dlg.reject))
         foot.addStretch(1)
         lay.addLayout(foot)
@@ -822,19 +834,19 @@ class CandidateDbTool(BaseTool):
         `ctx` = {full_name, position_title, start, end} để tạo cuộc hẹn (appointment)
         trên lịch cá nhân ngay sau khi gửi mail thành công.
         """
-        dlg, card, lay = build_dialog_shell(self._root, "Soạn & gửi mail", size="md")
+        dlg, card, lay = build_dialog_shell(self._root, "Compose & send email", size="md")
 
         def field(label):
             lb = QLabel(label); lb.setObjectName("FieldLabel")
             lay.addWidget(lb)
 
-        field("Đến")
+        field("To")
         to_w = QLineEdit(to); lay.addWidget(to_w)
         field("CC")
         cc_w = QLineEdit(cc); lay.addWidget(cc_w)
-        field("Tiêu đề")
+        field("Subject")
         subj_w = QLineEdit(subject); lay.addWidget(subj_w)
-        field("Nội dung")
+        field("Body")
         body_w = RichText(card, height=12)
         body_w.set_html(body_html)
         lay.addWidget(body_w)
@@ -844,31 +856,31 @@ class CandidateDbTool(BaseTool):
         def do_send():
             to_value = to_w.text().strip()
             if not to_value:
-                dialogs.warning(dlg, "Thiếu người nhận",
-                                "Vui lòng nhập email người nhận.")
+                dialogs.warning(dlg, "Missing recipient",
+                                "Please enter a recipient email.")
                 return
             try:
                 outlook.send_mail(to_value, subj_w.text().strip(),
                                   body_w.get_text(), cc=cc_w.text().strip(),
                                   html=body_w.get_html())
             except Exception as exc:
-                dialogs.error(dlg, "Lỗi gửi mail", f"Không gửi được:\n{exc}")
+                dialogs.error(dlg, "Send failed", f"Couldn't send:\n{exc}")
                 return
             # Gửi xong → đặt lịch phỏng vấn (appointment cá nhân). Lỗi tạo lịch
             # KHÔNG hủy việc đã gửi mail — chỉ báo để người dùng tự thêm tay.
             appt_err = self._create_appointment(ctx, body_w.get_text())
             dlg.accept()
             if appt_err is None:
-                dialogs.success(self._root, "Hoàn tất",
-                                "Đã gửi mail và đặt lịch phỏng vấn ✅")
+                dialogs.success(self._root, "Done",
+                                "Email sent and interview scheduled ✅")
             else:
                 dialogs.warning(
-                    self._root, "Đã gửi mail",
-                    f"Mail đã gửi, nhưng KHÔNG tạo được lịch:\n{appt_err}")
+                    self._root, "Email sent",
+                    f"Email sent, but the calendar event failed:\n{appt_err}")
 
-        foot.addWidget(widgets.button(card, "Gửi mail", variant="primary", icon="mail",
+        foot.addWidget(widgets.button(card, "Send", variant="primary", icon="mail",
                                       command=do_send))
-        foot.addWidget(widgets.button(card, "Hủy", variant="neutral", icon="x",
+        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
                                       command=dlg.reject))
         foot.addStretch(1)
         lay.addLayout(foot)
@@ -883,7 +895,7 @@ class CandidateDbTool(BaseTool):
         duration = max(15, start.secsTo(end) // 60)   # phút; tối thiểu 15
         who = " ".join(p for p in (ctx.get("full_name"),
                                    ctx.get("position_title")) if p)
-        subject = f"Phỏng vấn {who}".strip()
+        subject = f"Interview {who}".strip()
         try:
             outlook.create_appointment(
                 subject, start.toPython(), duration_minutes=duration,
@@ -898,16 +910,16 @@ class CandidateDbTool(BaseTool):
     # đúng mẫu → ghi nối tiếp. (Tương lai gỡ tool "Quét CV", tính năng nằm ở đây.)
     def _export_excel(self):
         if not _OPENPYXL_OK:
-            dialogs.error(self._root, "Thiếu thư viện",
-                          "Cần openpyxl để xuất Excel:\n  pip install openpyxl")
+            dialogs.error(self._root, "Missing library",
+                          "openpyxl is required to export Excel:\n  pip install openpyxl")
             return
         rows = self.table.checked_rows()
         if not rows:
-            dialogs.info(self._root, "Chưa chọn",
-                         "Hãy tick chọn ít nhất một ứng viên trong bảng để xuất.")
+            dialogs.info(self._root, "Nothing selected",
+                         "Tick at least one candidate in the table to export.")
             return
         path, _ = QFileDialog.getSaveFileName(
-            self._root, "Xuất ứng viên đã chọn ra Excel", "Candidates.xlsx",
+            self._root, "Export selected candidates to Excel", "Candidates.xlsx",
             "Excel (*.xlsx)", "", QFileDialog.Option.DontConfirmOverwrite)
         if not path:
             return
@@ -919,26 +931,26 @@ class CandidateDbTool(BaseTool):
         try:
             if os.path.isfile(path):
                 wb, ws = _open_existing_workbook(path)
-                mode = "nối tiếp"
+                mode = "appended"
             else:
                 wb, ws = _open_template_workbook()
-                mode = "mới"
+                mode = "new"
             _write_candidates(ws, export_rows)
             wb.save(path)
         except PermissionError:
-            dialogs.error(self._root, "Không ghi được file",
-                          f"File Excel đang mở? Hãy đóng rồi thử lại:\n{path}")
+            dialogs.error(self._root, "Can't write file",
+                          f"Is the Excel file open? Close it and retry:\n{path}")
             return
         except Exception as exc:
-            dialogs.error(self._root, "Lỗi xuất Excel", str(exc))
+            dialogs.error(self._root, "Excel export error", str(exc))
             return
         finally:
             self._set_export_loading(False)
 
         if dialogs.confirm(
-                self._root, "Hoàn tất",
-                f"Đã xuất {len(export_rows)} ứng viên ({mode}) vào:\n{path}\n\nMở file ngay?",
-                ok_label="Mở file", cancel_label="Đóng"):
+                self._root, "Done",
+                f"Exported {len(export_rows)} candidates ({mode}) to:\n{path}\n\nOpen now?",
+                ok_label="Open", cancel_label="Close"):
             self._launch(path)
 
     def _set_export_loading(self, loading):
@@ -951,9 +963,9 @@ class CandidateDbTool(BaseTool):
         if loading:
             self._export_label = btn.text()
             btn.setEnabled(False)
-            btn.setText("Đang xuất…")
+            btn.setText("Exporting…")
         else:
-            btn.setText(getattr(self, "_export_label", "Xuất Excel"))
+            btn.setText(getattr(self, "_export_label", "Export to Excel"))
             btn.setEnabled(True)
         QApplication.processEvents()
 
@@ -990,30 +1002,30 @@ class CandidateDbTool(BaseTool):
     # ------------------------------------------------------------- form specs
     def _candidate_form_specs(self):
         return [
-            {"kind": "section", "label": "Thông tin cá nhân"},
-            {"key": "full_name", "label": "Họ và tên (*)", "kind": "text", "required": True},
+            {"kind": "section", "label": "Personal info"},
+            {"key": "full_name", "label": "Full name (*)", "kind": "text", "required": True},
             {"key": "email", "label": "Email", "kind": "text"},
-            {"key": "phone", "label": "Số điện thoại", "kind": "text"},
-            {"key": "date_of_birth", "label": "Ngày sinh (dd/mm/yyyy)", "kind": "text"},
-            {"key": "address", "label": "Địa chỉ", "kind": "text"},
-            {"kind": "section", "label": "Ứng tuyển"},
-            {"key": "position_id", "label": "Vị trí ứng tuyển", "kind": "dropdown",
+            {"key": "phone", "label": "Phone", "kind": "text"},
+            {"key": "date_of_birth", "label": "Date of birth (dd/mm/yyyy)", "kind": "text"},
+            {"key": "address", "label": "Address", "kind": "text"},
+            {"kind": "section", "label": "Application"},
+            {"key": "position_id", "label": "Position applied for", "kind": "dropdown",
              "options": _position_options},
-            {"key": "years_experience", "label": "Số năm kinh nghiệm", "kind": "int"},
-            {"key": "education", "label": "Học vấn", "kind": "text"},
-            {"key": "applied_at", "label": "Ngày nộp (yyyy-mm-dd)", "kind": "text"},
-            {"key": "status", "label": "Trạng thái", "kind": "choice",
+            {"key": "years_experience", "label": "Years of experience", "kind": "int"},
+            {"key": "education", "label": "Education", "kind": "text"},
+            {"key": "applied_at", "label": "Applied date (yyyy-mm-dd)", "kind": "text"},
+            {"key": "status", "label": "Status", "kind": "choice",
              "choices": cv_schema.STATUS_CHOICES},
-            {"key": "source", "label": "Nguồn CV", "kind": "text"},
-            {"key": "batch", "label": "Batch (đợt quét — chỉ số)", "kind": "int"},
-            {"key": "cv_file_path", "label": "File CV (đường dẫn trên máy)", "kind": "file",
-             "filetypes": [("PDF/Word", "*.pdf *.doc *.docx"), ("Tất cả", "*.*")]},
-            {"kind": "section", "label": "Đánh giá (từ quét CV)"},
-            {"key": "fit_score", "label": "Điểm phù hợp (0-100)", "kind": "decimal"},
-            {"key": "fit_summary", "label": "Nhận xét phù hợp", "kind": "textarea", "height": 3},
-            {"key": "strengths", "label": "Ưu điểm", "kind": "textarea", "height": 3},
-            {"key": "weaknesses", "label": "Nhược điểm", "kind": "textarea", "height": 3},
-            {"key": "note", "label": "Ghi chú", "kind": "textarea", "height": 3},
+            {"key": "source", "label": "CV source", "kind": "text"},
+            {"key": "batch", "label": "Batch (scan round — number)", "kind": "int"},
+            {"key": "cv_file_path", "label": "CV file (local path)", "kind": "file",
+             "filetypes": [("PDF/Word", "*.pdf *.doc *.docx"), ("All files", "*.*")]},
+            {"kind": "section", "label": "Assessment (from CV scan)"},
+            {"key": "fit_score", "label": "Fit score (0-100)", "kind": "decimal"},
+            {"key": "fit_summary", "label": "Fit summary", "kind": "textarea", "height": 3},
+            {"key": "strengths", "label": "Strengths", "kind": "textarea", "height": 3},
+            {"key": "weaknesses", "label": "Weaknesses", "kind": "textarea", "height": 3},
+            {"key": "note", "label": "Note", "kind": "textarea", "height": 3},
         ]
 
     def _add(self):
@@ -1024,7 +1036,7 @@ class CandidateDbTool(BaseTool):
             repo.insert_candidate(data)
             self._reload()
 
-        FormDialog(self._root, "Thêm ứng viên mới",
+        FormDialog(self._root, "Add candidate",
                    self._candidate_form_specs(), None, on_save=_save).run()
 
     def _edit(self, cid=None):
@@ -1041,7 +1053,7 @@ class CandidateDbTool(BaseTool):
             repo.update_candidate(cid, data)
             self._reload()
 
-        FormDialog(self._root, "Sửa ứng viên",
+        FormDialog(self._root, "Edit candidate",
                    self._candidate_form_specs(), current,
                    on_save=_save, on_delete=lambda: self._delete(cid)).run()
 
@@ -1050,19 +1062,19 @@ class CandidateDbTool(BaseTool):
             f"  • #{d['candidate_id']} {d['full_name'] or ''}"
             f"  ({d['email'] or '—'} / {d['phone'] or '—'})"
             for d in dups[:8])
-        more = "" if len(dups) <= 8 else f"\n  … và {len(dups) - 8} người khác"
+        more = "" if len(dups) <= 8 else f"\n  … and {len(dups) - 8} more"
         return dialogs.confirm(
-            self._root, "Có thể trùng ứng viên",
-            f"Đã có {len(dups)} ứng viên trùng email hoặc số điện thoại:\n\n"
-            f"{lines}{more}\n\nVẫn lưu ứng viên này?",
-            ok_label="Vẫn lưu", cancel_label="Hủy")
+            self._root, "Possible duplicate",
+            f"{len(dups)} candidates already share this email or phone:\n\n"
+            f"{lines}{more}\n\nSave this candidate anyway?",
+            ok_label="Save anyway", cancel_label="Cancel")
 
     def _delete(self, cid):
         """Xóa ứng viên; trả về False nếu người dùng hủy xác nhận (giữ form mở)."""
         row = repo.get_candidate(cid)
         name = row["full_name"] if row else f"#{cid}"
-        if not dialogs.confirm(self._root, "Xác nhận xóa",
-                               f'Xóa ứng viên "{name}" khỏi DB?', ok_label="Xóa"):
+        if not dialogs.confirm(self._root, "Confirm delete",
+                               f'Delete candidate "{name}" from the DB?', ok_label="Delete"):
             return False
         repo.delete_candidate(cid)
         self._reload()
@@ -1082,16 +1094,16 @@ class CandidateDbTool(BaseTool):
             self._launch(path)
             return
         if path:
-            msg = (f"Không tìm thấy file CV ở đường dẫn đã lưu:\n{path}\n\n"
-                   "Có thể file đã bị di chuyển hoặc đổi tên. Chọn lại vị trí file bây giờ?")
+            msg = (f"The CV file wasn't found at the saved path:\n{path}\n\n"
+                   "It may have been moved or renamed. Locate the file now?")
         else:
-            msg = "Ứng viên này chưa gắn file CV. Chọn file bây giờ?"
-        if not dialogs.confirm(self._root, "Không tìm thấy file", msg,
-                               ok_label="Chọn file"):
+            msg = "This candidate has no CV file attached. Choose one now?"
+        if not dialogs.confirm(self._root, "File not found", msg,
+                               ok_label="Choose file"):
             return
         new_path, _ = QFileDialog.getOpenFileName(
-            self._root, "Chọn lại file CV", "",
-            "PDF/Word (*.pdf *.doc *.docx);;Tất cả (*.*)")
+            self._root, "Locate the CV file", "",
+            "PDF/Word (*.pdf *.doc *.docx);;All files (*.*)")
         if not new_path:
             return
         repo.set_cv_file_path(cid, new_path)
@@ -1105,30 +1117,30 @@ class CandidateDbTool(BaseTool):
             import subprocess
             subprocess.Popen(["xdg-open", path])
         except Exception as exc:
-            dialogs.error(self._root, "Lỗi mở file", f"Không mở được file:\n{exc}")
+            dialogs.error(self._root, "Open error", f"Couldn't open the file:\n{exc}")
 
     # ----------------------------------------------------- nhập hàng loạt Excel
     def _batch_import(self):
         if not _OPENPYXL_OK:
-            dialogs.error(self._root, "Thiếu thư viện",
-                          "Cần openpyxl để đọc Excel:\n  pip install openpyxl")
+            dialogs.error(self._root, "Missing library",
+                          "openpyxl is required to read Excel:\n  pip install openpyxl")
             return
         path, _ = QFileDialog.getOpenFileName(
-            self._root, "Chọn file Excel kết quả quét CV", "",
-            "Excel (*.xlsx);;Tất cả (*.*)")
+            self._root, "Choose the CV-scan result Excel file", "",
+            "Excel (*.xlsx);;All files (*.*)")
         if not path:
             return
         try:
             rows = self._read_excel(path)
         except Exception as exc:
-            dialogs.error(self._root, "Lỗi đọc file", f"Không đọc được Excel:\n{exc}")
+            dialogs.error(self._root, "Read error", f"Couldn't read Excel:\n{exc}")
             return
         if not rows:
-            dialogs.info(self._root, "Trống", "Không tìm thấy dòng dữ liệu hợp lệ.")
+            dialogs.info(self._root, "Empty", "No valid data rows found.")
             return
-        if not dialogs.confirm(self._root, "Xác nhận nhập",
-                               f"Đọc được {len(rows)} ứng viên từ file.\n\nNhập vào DB?",
-                               ok_label="Nhập"):
+        if not dialogs.confirm(self._root, "Confirm import",
+                               f"Found {len(rows)} candidates in the file.\n\nImport into the DB?",
+                               ok_label="Import"):
             return
 
         # Chỉ hỏi thư mục CV khi còn đường dẫn TƯƠNG ĐỐI cần ghép (file Excel cũ
@@ -1137,7 +1149,7 @@ class CandidateDbTool(BaseTool):
         folder = ""
         if any(self._needs_cv_folder(r) for r in rows):
             folder = QFileDialog.getExistingDirectory(
-                self._root, "Thư mục chứa các file CV (bỏ qua nếu không có)") or ""
+                self._root, "Folder with the CV files (skip if none)") or ""
 
         added = 0
         dups = []
@@ -1167,11 +1179,11 @@ class CandidateDbTool(BaseTool):
                 added_dup += 1
 
         self._reload()
-        msg = f"Đã nhập {added} ứng viên (không trùng)."
+        msg = f"Imported {added} candidates (no duplicates)."
         if dups:
-            msg += (f"\nĐã nhập thêm {added_dup} bản trùng."
-                    if added_dup else f"\nBỏ qua {len(dups)} bản trùng.")
-        dialogs.success(self._root, "Hoàn tất", msg)
+            msg += (f"\nAlso imported {added_dup} duplicates."
+                    if added_dup else f"\nSkipped {len(dups)} duplicates.")
+        dialogs.success(self._root, "Done", msg)
 
     @staticmethod
     def _needs_cv_folder(rec):
@@ -1192,16 +1204,16 @@ class CandidateDbTool(BaseTool):
 
     def _confirm_import_dups(self, dups) -> bool:
         dlg = ModalDialog(self._root, "md")
-        card, lay = dlg.build_shell("Ứng viên trùng")
+        card, lay = dlg.build_shell("Duplicate candidates")
 
-        desc = QLabel(f"Có {len(dups)} ứng viên trùng email hoặc SĐT (với người đã có "
-                      "trong DB hoặc trùng nhau trong file):")
+        desc = QLabel(f"{len(dups)} candidates share an email or phone (with existing "
+                      "records or within the file):")
         desc.setObjectName("DialogMsg")
         desc.setWordWrap(True)
         lay.addWidget(desc)
 
-        table = DataTable([("full_name", "Họ tên", 220), ("email", "Email", 240),
-                           ("phone", "SĐT", 120)])
+        table = DataTable([("full_name", "Full name", 220), ("email", "Email", 240),
+                           ("phone", "Phone", 120)])
         table.set_rows(dups)
         table.setMinimumHeight(min(360, dlg.modal_h))
         lay.addWidget(table, 1)
@@ -1209,9 +1221,9 @@ class CandidateDbTool(BaseTool):
         result = {"ok": False}
         foot = QHBoxLayout()
         foot.addWidget(widgets.button(
-            card, "Vẫn nhập các bản trùng", variant="success", icon="check",
+            card, "Import duplicates anyway", variant="success", icon="check",
             command=lambda: (result.update(ok=True), dlg.accept())))
-        foot.addWidget(widgets.button(card, "Bỏ qua", variant="neutral", icon="ban",
+        foot.addWidget(widgets.button(card, "Skip", variant="neutral", icon="ban",
                                       command=dlg.reject))
         foot.addStretch(1)
         lay.addLayout(foot)

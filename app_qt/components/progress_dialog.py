@@ -92,7 +92,7 @@ class ProgressDialog(QFrame):
         t = QLabel(title)
         t.setObjectName("DialogTitle")
         lay.addWidget(t)
-        self._status = QLabel(subtitle or "Chuẩn bị…")
+        self._status = QLabel(subtitle or "Preparing…")
         self._status.setObjectName("DialogMsg")
         self._status.setWordWrap(True)
         lay.addWidget(self._status)
@@ -111,7 +111,7 @@ class ProgressDialog(QFrame):
 
         foot = QHBoxLayout()
         foot.addStretch(1)
-        self._btn = widgets.button(card, "Hủy", variant="neutral", icon="x",
+        self._btn = widgets.button(card, "Cancel", variant="neutral", icon="x",
                                    command=self._on_button)
         foot.addWidget(self._btn)
         lay.addLayout(foot)
@@ -161,7 +161,7 @@ class ProgressDialog(QFrame):
     def _on_button(self):
         if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
-            self._status.setText("Đang hủy…")
+            self._status.setText("Cancelling…")
         else:
             self.close()
 
@@ -172,11 +172,11 @@ class ProgressDialog(QFrame):
 
     def _failed(self, msg):
         self._done()
-        self._append_log(f"⚠ Lỗi: {msg}")
-        self._status.setText("Đã dừng do lỗi.")
+        self._append_log(f"⚠ Error: {msg}")
+        self._status.setText("Stopped due to an error.")
 
     def _done(self):
-        self._btn.setText("Đóng")
+        self._btn.setText("Close")
 
     def set_final_status(self, text):
         self._status.setText(text)
