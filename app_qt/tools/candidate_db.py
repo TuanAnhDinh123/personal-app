@@ -348,7 +348,7 @@ def _master_specs():
                 {"key": "mail_subject", "label": "Tiêu đề mail", "kind": "text"},
                 {"key": "mail_body", "label": "Nội dung mail (dùng {name} "
                  "{possion} {date} {time_start} {time_end})", "kind": "richtext",
-                 "height": 10, "grow": True},
+                 "height": 20, "grow": True},
             ],
         },
         "course": {

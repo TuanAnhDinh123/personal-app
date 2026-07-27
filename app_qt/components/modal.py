@@ -10,13 +10,13 @@ này (truyền `size="sm"|"md"|"lg"`), không đặt số rộng/cao rời rạc
     lg = rộng hơn sm 1.5×,  cao hơn 2×.
 
 `ModalDialog` là lớp nền chung: frameless, nền trong suốt, kéo di chuyển được, và
-CANH GIỮA VÙNG NỘI DUNG (phần bên phải sidebar) — không phải giữa cả cửa sổ, nên
-không còn cảm giác lệch về phía sidebar.
+CANH GIỮA MÀN HÌNH VẬT LÝ chứa cửa sổ — kẹp kích thước theo chiều cao màn hình
+thật (không phải theo viewport/kích thước cửa sổ app), nên modal không bị co
+lại khi cửa sổ app nhỏ hoặc bị lệch theo sidebar.
 """
-from PySide6.QtCore import QRect, Qt, QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QFrame, QHBoxLayout, QLabel, QStackedWidget,
-    QVBoxLayout,
+    QApplication, QDialog, QFrame, QHBoxLayout, QLabel, QVBoxLayout,
 )
 
 from app_qt import widgets
@@ -60,6 +60,9 @@ class ModalDialog(QDialog):
         self._card_fixed_width = True
         # Vùng co giãn (scroll area / bảng) sẽ cao = modal_h, tự co khi viewport thấp.
         self._grow = None
+        # "chrome" (phần cao ngoài vùng co giãn) đo 1 lần rồi cache — xem lý do
+        # trong _clamp_to.
+        self._chrome = None
 
     def set_grow_region(self, widget):
         """Đăng ký vùng co giãn chính của modal (thường là scroll area / bảng).
@@ -128,6 +131,7 @@ class ModalDialog(QDialog):
         if area is None:
             return
         max_w = max(240, area.width() - 2 * SHELL_MARGIN)
+        w = self.modal_w
         if self._card is not None:
             w = min(self.modal_w, max_w)
             # setFixed → giữ đúng bề rộng thiết kế; kẹp xuống khi màn hình hẹp.
@@ -136,14 +140,31 @@ class ModalDialog(QDialog):
             else:
                 self._card.setMaximumWidth(w)
         # Chiều cao: vùng co giãn cao đúng = modal_h, nhưng kẹp lại theo màn hình.
-        # chrome = phần cao ngoài vùng co giãn (header/footer/label/lề) — đo trực
-        # tiếp nên không cần đoán; vùng co giãn là item stretch duy nhất.
+        # chrome = phần cao ngoài vùng co giãn (header/footer/label/lề) — đo 1 LẦN
+        # DUY NHẤT (lúc chưa co giãn gì) rồi cache lại. Không được đo lại mỗi lần
+        # bằng self.height() - self._grow.height(): setFixedHeight() làm
+        # self._grow co lại NGAY, còn self.height() (cửa sổ ngoài) chỉ đuổi kịp ở
+        # vòng lặp sự kiện sau → đo lại kiểu đó sẽ cho chrome tụt về ~0 mỗi lần
+        # gọi tiếp theo, khiến vùng co giãn cứ phồng to dần mỗi lần _fit() chạy.
+        new_h = None
         if self._grow is not None:
-            chrome = max(0, self.height() - self._grow.height())
-            avail_h = area.height() - 2 * SHELL_MARGIN - chrome
-            self._grow.setFixedHeight(max(160, min(self.modal_h, avail_h)))
+            if self._chrome is None:
+                self._chrome = max(0, self.height() - self._grow.height())
+            avail_h = area.height() - 2 * SHELL_MARGIN - self._chrome
+            new_h = max(160, min(self.modal_h, avail_h))
+            self._grow.setFixedHeight(new_h)
         # Trần cho cả dialog (kể cả lề bóng) → không bao giờ vượt màn hình.
         self.setMaximumSize(area.width(), area.height())
+        # Co lại kích thước THẬT ngay bằng resize() trực tiếp với số đã tính —
+        # không dùng sizeHint()/chờ Qt tự co: setFixedHeight() ở trên đã co
+        # self._grow ngay, nhưng self (cửa sổ ngoài) chỉ tự co theo layout ở
+        # vòng lặp sự kiện SAU lời gọi này. Nếu không resize() ngay bằng đúng số
+        # đã tính, _center_in() bên dưới sẽ canh giữa theo kích thước cũ (còn to)
+        # — rồi khi Qt co cửa sổ thật sự lại (muộn hơn), nó chỉ co từ mép dưới,
+        # không canh giữa lại, khiến modal tràn xuống dưới & lệch khỏi giữa màn hình.
+        total_w = w + 2 * SHELL_MARGIN
+        total_h = (self._chrome + new_h) if new_h is not None else self.height()
+        self.resize(total_w, total_h)
 
     def _center_in(self, area):
         if area is None:
@@ -165,31 +186,14 @@ class ModalDialog(QDialog):
         self._drag = None
 
 
-def content_rect(ref):
-    """Global rect của VÙNG NỘI DUNG (QStackedWidget#Content) trong cửa sổ chính.
-
-    `ref` là một widget bất kỳ thuộc cửa sổ chính (thường là parent của modal).
-    Trả None nếu không tìm thấy.
-    """
-    win = ref.window() if ref is not None else None
-    if win is None:
-        return None
-    content = win.findChild(QStackedWidget, "Content")
-    if content is None or not content.isVisible():
-        return None
-    tl = content.mapToGlobal(content.rect().topLeft())
-    return QRect(tl, content.size())
-
-
 def viewport_rect(ref):
     """"Viewport" để canh giữa + kẹp kích thước modal.
 
-    Ưu tiên VÙNG NỘI DUNG (100vw/100vh = trọn vùng nội dung, không tính sidebar);
-    nếu không tìm thấy thì lùi về vùng khả dụng của màn hình chứa cửa sổ.
+    Luôn là vùng khả dụng của MÀN HÌNH VẬT LÝ chứa cửa sổ (100vw/100vh = trọn
+    màn hình thật) — modal kẹp theo chiều cao màn hình thật và canh giữa MÀN
+    HÌNH, không phải giữa vùng nội dung app (nên không co lại khi cửa sổ nhỏ
+    hoặc lệch theo sidebar).
     """
-    rect = content_rect(ref)
-    if rect is not None:
-        return rect
     win = ref.window() if ref is not None else None
     screen = (win.screen() if win is not None else None) or QApplication.primaryScreen()
     return screen.availableGeometry() if screen is not None else None

@@ -120,12 +120,17 @@ class ProgressDialog(QFrame):
         self._card = card
 
     def _recenter(self):
-        # Kẹp không vượt viewport rồi canh giữa VÙNG NỘI DUNG (trừ sidebar).
+        # Kẹp không vượt màn hình vật lý rồi canh giữa MÀN HÌNH.
         area = viewport_rect(self._ref)
         if area is None:
             return
-        self._card.setFixedWidth(min(self._mw, max(240, area.width() - 2 * SHELL_MARGIN)))
+        w = min(self._mw, max(240, area.width() - 2 * SHELL_MARGIN))
+        self._card.setFixedWidth(w)
         self.setMaximumSize(area.width(), area.height())
+        # resize() trực tiếp bằng số đã tính thay vì dựa vào sizeHint()/chờ Qt tự
+        # co (xem lý do trong ModalDialog._clamp_to) — bề rộng đổi ngay lập tức,
+        # còn chiều cao giữ nguyên (dialog này không có vùng co giãn theo chiều cao).
+        self.resize(w + 2 * SHELL_MARGIN, self.height())
         g = self.frameGeometry()
         g.moveCenter(area.center())
         self.move(g.topLeft())
