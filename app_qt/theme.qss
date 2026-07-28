@@ -386,6 +386,15 @@ QHeaderView::section {
     border-bottom: 1px solid {{--border}};
     font-weight: 600;
 }
+/* Nền header vuông góc đè lên phần bo góc trên của QTableView (border-radius
+   12px) → góc trên-trái/phải bị cắt vuông. Bo lại đúng 2 góc ngoài của section
+   đầu/cuối (11px = 12px - 1px viền bảng) để khớp với khung ngoài. */
+QHeaderView::section:horizontal:first {
+    border-top-left-radius: 11px;
+}
+QHeaderView::section:horizontal:last {
+    border-top-right-radius: 11px;
+}
 /* Kẻ dọc mờ giữa các cột tiêu đề KHÔNG dùng border-right ở đây: border luôn cao
    bằng cả section. Nét ngắn (thu 2 đầu) do _TableHeader trong
    app_qt/components/table.py tự vẽ — xem HEADER_DIVIDER_* để chỉnh. */

@@ -17,7 +17,7 @@ from PySide6.QtCore import QDate, QDateTime, QTime, Qt
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
     QApplication, QCalendarWidget, QFileDialog, QFrame, QHBoxLayout,
-    QLabel, QLineEdit, QTimeEdit, QToolTip, QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QToolTip, QVBoxLayout, QWidget,
 )
 
 from app.core import cv_repository as repo
@@ -171,10 +171,6 @@ def _picker_qss():
     QCalendarWidget QSpinBox {{ background: {P['--input-bg']}; color: {P['--text']};
         border: 1px solid {P['--border-strong']}; border-radius: 8px;
         padding: 2px 6px; }}
-    QTimeEdit {{ background: {P['--input-bg']}; color: {P['--text']};
-        border: 1px solid {P['--border-strong']}; border-radius: 10px;
-        padding: 8px 10px; }}
-    QTimeEdit:focus {{ border: 1px solid {P['--accent']}; }}
     """
 
 
@@ -838,17 +834,27 @@ class CandidateDbTool(BaseTool):
         times = QHBoxLayout()
         times.setSpacing(12)
 
+        def _time_slots():
+            slots = []
+            t = QTime(8, 0)
+            end = QTime(20, 0)
+            while t <= end:
+                slots.append(QTime(t))
+                t = t.addSecs(30 * 60)
+            return slots
+
         def _time_col(label, default):
             col = QVBoxLayout(); col.setSpacing(4)
             cap = QLabel(label); cap.setObjectName("FieldLabel")
             col.addWidget(cap)
-            te = QTimeEdit(card)
-            te.setDisplayFormat("HH:mm")
-            te.setStyleSheet(_picker_qss())
-            te.setTime(default)
-            col.addWidget(te)
+            combo = widgets.ComboBox(card)
+            for t in _time_slots():
+                combo.addItem(t.toString("HH:mm"), t)
+            idx = combo.findText(default.toString("HH:mm"))
+            combo.setCurrentIndex(idx if idx >= 0 else 0)
+            col.addWidget(combo)
             times.addLayout(col, 1)
-            return te
+            return combo
 
         start_te = _time_col("Start time", QTime(9, 0))
         end_te = _time_col("End time", QTime(9, 30))
@@ -858,8 +864,8 @@ class CandidateDbTool(BaseTool):
 
         def _confirm():
             d = cal.selectedDate()
-            start = QDateTime(d, start_te.time())
-            end = QDateTime(d, end_te.time())
+            start = QDateTime(d, start_te.currentData())
+            end = QDateTime(d, end_te.currentData())
             if end <= start:
                 dialogs.warning(dlg, "Invalid time",
                                 "End time must be after start time.")

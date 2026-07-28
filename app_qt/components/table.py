@@ -4,7 +4,9 @@ Dùng lại cho mọi tool cần hiển thị bảng (ứng viên, master data, 
 Mỗi dòng là sqlite3.Row hoặc dict; cột khai báo bằng list (key, title, width, align).
 """
 from PySide6.QtCore import QAbstractTableModel, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter, QPen
+from PySide6.QtGui import (
+    QColor, QFont, QKeySequence, QPainter, QPainterPath, QPen, QRegion,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QHeaderView, QMenu, QStyle,
     QStyledItemDelegate, QTableView,
@@ -28,6 +30,13 @@ CHECK_BOX_INSET = 8     # lề trái của ô tick trong cột (để không dí
 # ── Nét kẻ dọc mờ giữa các cột ở hàng tiêu đề — chỉnh tùy ý ──
 HEADER_DIVIDER_INSET = 9        # thu ngắn mỗi đầu (px): nét không cao bằng header
 HEADER_DIVIDER_COLOR = "--border-strong"   # khóa màu trong theme.PALETTE
+
+# Bo góc của DataTable — PHẢI khớp border-radius: 12px của QTableView trong
+# theme.qss. QAbstractScrollArea không tự bo góc viewport theo border-radius
+# (viewport là widget con hình chữ nhật) → viền cong bị đè trắng ở góc, nhất là
+# khi bảng KHÔNG có header che (góc dưới). Dùng setMask() để cắt cả bảng
+# (header + viewport) theo đúng hình chữ nhật bo góc này.
+TABLE_CORNER_RADIUS = 12
 
 
 def _draw_checkbox(painter, rect, checked, partial=False):
@@ -342,6 +351,14 @@ class DataTable(QTableView):
 
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._context_menu)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        # Cắt cả bảng (kể cả viewport/header con) theo hình chữ nhật bo góc —
+        # xem ghi chú ở TABLE_CORNER_RADIUS.
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), TABLE_CORNER_RADIUS, TABLE_CORNER_RADIUS)
+        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
 
     def set_rows(self, rows):
         self._model.set_rows(rows)
