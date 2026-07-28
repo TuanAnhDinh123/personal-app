@@ -158,7 +158,7 @@ def _level_options():
 
 class EmployeeDbTool(BaseTool):
     name = "Employees"
-    description = "Search, add/edit/delete employee records (SQLite)."
+    description = "Search, manage work status, export reports."
     icon = "👥"
     category = "Human Resources"
     order = 10

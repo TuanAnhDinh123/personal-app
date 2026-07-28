@@ -92,7 +92,7 @@ class _PositionCombo(widgets.ComboBox):
 
 class AiScanCvTool(BaseTool):
     name = "AI CV Scan"
-    description = "Use Gemini to read PDFs, score fit against a JD, and export to Excel."
+    description = "Use Gemini to read PDFs, score fit against a JD, and import results to Database."
     icon = "🤖"
     category = "Recruitment"
     order = 20
@@ -119,7 +119,7 @@ class AiScanCvTool(BaseTool):
         h.addWidget(chip, 0, Qt.AlignRight)
         parent.layout().addWidget(head)
 
-        self.var_folder = widgets.file_row(parent, "CV folder (PDF)", mode="folder")
+        self.var_folder = widgets.file_row(parent, "CV folder (PDF/DOCX)", mode="folder")
         self.var_folder.set(cfg["folder"])
         self.var_output = widgets.file_row(parent, "Save result Excel to", mode="save")
         self.var_output.set(cfg["output"])
@@ -139,7 +139,7 @@ class AiScanCvTool(BaseTool):
 
         widgets.section_label(parent, "Extra instructions for the AI (optional)")
         self.extra_box = widgets.text_area(
-            parent, "e.g. prefer Japanese speakers, at least 2 years' experience…",
+            parent, "e.g. prefer English speakers, at least 2 years' experience…",
             value=cfg["extra_prompt"], height=5)
 
         widgets.hint(parent, "Each CV that scans successfully is appended to the Excel and "

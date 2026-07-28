@@ -676,7 +676,7 @@ class _CandidateDetailDialog(ModalDialog):
 # ═══════════════════════════════ TOOL CHÍNH ═════════════════════════════
 class CandidateDbTool(BaseTool):
     name = "Candidate Manager"
-    description = "Search candidates, manage departments/positions, bulk import (SQLite)."
+    description = "Search candidates, manage offer status, send offer emails."
     icon = "🙋"
     category = "Recruitment"
     order = 10
