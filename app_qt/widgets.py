@@ -172,7 +172,7 @@ def _field_block(parent, label_text):
     """Khối 1 trường: nhãn nhỏ ở trên + vùng chứa input bên dưới. Trả về block."""
     block = QWidget(parent)
     v = QVBoxLayout(block)
-    v.setContentsMargins(0, 6, 0, 6)
+    v.setContentsMargins(0, 3, 0, 6)
     v.setSpacing(5)
     lbl = QLabel(label_text, block)
     lbl.setObjectName("FieldLabel")
@@ -261,10 +261,20 @@ class ChoiceValue:
 
 # ---------------------------------------------------------------- nhãn / ghi chú
 def section_label(parent, text):
-    lbl = QLabel(text, parent)
+    # QLabel trơn không có layout con nên setContentsMargins() trên chính nó
+    # bị Qt bỏ qua khi đặt vào layout của cha (margins chỉ ăn khi widget có
+    # layout con riêng dùng nó). Phải bọc 1 lớp QWidget+QVBoxLayout thì margin
+    # mới thật sự tạo khoảng cách.
+    box = QWidget(parent)
+    lay = QVBoxLayout(box)
+    # Cách khối TRÊN nhiều hơn khối CỦA NÓ (bên dưới) một chút, để tiêu đề
+    # đọc rõ là thuộc về khối ngay dưới thay vì lơ lửng giữa hai khối.
+    lay.setContentsMargins(0, 12, 0, 0)
+    lay.setSpacing(0)
+    lbl = QLabel(text, box)
     lbl.setObjectName("SectionLabel")
-    lbl.setContentsMargins(0, 10, 0, 4)
-    _col(parent).addWidget(lbl)
+    lay.addWidget(lbl)
+    _col(parent).addWidget(box)
     return lbl
 
 

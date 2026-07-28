@@ -37,7 +37,7 @@ from app_qt.components.table import DataTable
 from app_qt.richtext import RichText
 
 try:
-    import openpyxl
+    import openpyxl  # noqa: F401
     _OPENPYXL_OK = True
 except ImportError:
     _OPENPYXL_OK = False
@@ -83,42 +83,6 @@ _CAND_COLUMNS = [
      lambda v: (str(v).replace("\n", " ")[:60] + "…")
      if v and len(str(v)) > 60 else (str(v).replace("\n", " ") if v else "")),
 ]
-
-# Map tiêu đề cột Excel (đã hạ chữ thường) → khóa dữ liệu. Giữ CẢ nhãn tiếng Anh
-# (bản mới) lẫn nhãn tiếng Việt (file cũ) để vẫn nhập được file xuất trước đây.
-_EXCEL_HEADER_MAP = {
-    "batch":            "batch",
-    "full name":        "full_name",
-    "date of birth":    "date_of_birth",
-    "email":            "email",
-    "phone":            "phone",
-    "fit score":        "fit_score",
-    "fit summary":      "fit_summary",
-    "strengths":        "strengths",
-    "weaknesses":       "weaknesses",
-    "file name":        "cv_file_path",
-    "cv path":          "cv_file_path",
-    # --- nhãn tiếng Việt cũ (tương thích ngược) ---
-    "họ tên":           "full_name",
-    "ngày sinh":        "date_of_birth",
-    "số điện thoại":    "phone",
-    "điểm phù hợp":     "fit_score",
-    "đánh giá phù hợp": "fit_summary",
-    "ưu điểm":          "strengths",
-    "nhược điểm":       "weaknesses",
-    "tên file":         "cv_file_path",
-    "đường dẫn cv":     "cv_file_path",
-}
-
-
-def _num(text, kind):
-    s = str(text).strip()
-    if not s:
-        return None
-    try:
-        return int(float(s)) if kind == "int" else float(s)
-    except ValueError:
-        return None
 
 
 def _strip_accents(s):
@@ -744,8 +708,6 @@ class CandidateDbTool(BaseTool):
                         command=self._show_details))
         bar.addWidget(B(None, "Send email", variant="info", icon="mail",
                         command=self._send_mail))
-        bar.addWidget(B(None, "Import from Excel", variant="primary", icon="download",
-                        command=self._batch_import))
         self._btn_export = B(None, "Export to Excel", variant="warning", icon="save",
                              command=self._export_excel)
         bar.addWidget(self._btn_export)
@@ -1205,149 +1167,3 @@ class CandidateDbTool(BaseTool):
             subprocess.Popen(["xdg-open", path])
         except Exception as exc:
             dialogs.error(self._root, "Open error", f"Couldn't open the file:\n{exc}")
-
-    # ----------------------------------------------------- nhập hàng loạt Excel
-    def _batch_import(self):
-        if not _OPENPYXL_OK:
-            dialogs.error(self._root, "Missing library",
-                          "openpyxl is required to read Excel:\n  pip install openpyxl")
-            return
-        path, _ = QFileDialog.getOpenFileName(
-            self._root, "Choose the CV-scan result Excel file", "",
-            "Excel (*.xlsx);;All files (*.*)")
-        if not path:
-            return
-        try:
-            rows = self._read_excel(path)
-        except Exception as exc:
-            dialogs.error(self._root, "Read error", f"Couldn't read Excel:\n{exc}")
-            return
-        if not rows:
-            dialogs.info(self._root, "Empty", "No valid data rows found.")
-            return
-        if not dialogs.confirm(self._root, "Confirm import",
-                               f"Found {len(rows)} candidates in the file.\n\nImport into the DB?",
-                               ok_label="Import"):
-            return
-
-        # Chỉ hỏi thư mục CV khi còn đường dẫn TƯƠNG ĐỐI cần ghép (file Excel cũ
-        # chỉ có tên file). File mới từ tool quét AI đã ghi sẵn đường dẫn tuyệt
-        # đối nên bỏ qua bước này.
-        folder = ""
-        if any(self._needs_cv_folder(r) for r in rows):
-            folder = QFileDialog.getExistingDirectory(
-                self._root, "Folder with the CV files (skip if none)") or ""
-
-        added = 0
-        dups = []
-        seen = set()
-        for rec in rows:
-            self._apply_cv_folder(rec, folder)
-            email = (rec.get("email") or "").strip().lower()
-            phone = (rec.get("phone") or "").strip()
-            keys = set()
-            if email:
-                keys.add(("e", email))
-            if phone:
-                keys.add(("p", phone))
-            is_dup = bool(keys & seen) or bool(
-                repo.find_duplicates(rec.get("email"), rec.get("phone")))
-            if is_dup:
-                dups.append(rec)
-            else:
-                repo.insert_candidate(rec)
-                added += 1
-                seen |= keys
-
-        added_dup = 0
-        if dups and self._confirm_import_dups(dups):
-            for rec in dups:
-                repo.insert_candidate(rec)
-                added_dup += 1
-
-        self._reload()
-        msg = f"Imported {added} candidates (no duplicates)."
-        if dups:
-            msg += (f"\nAlso imported {added_dup} duplicates."
-                    if added_dup else f"\nSkipped {len(dups)} duplicates.")
-        dialogs.success(self._root, "Done", msg)
-
-    @staticmethod
-    def _needs_cv_folder(rec):
-        """True nếu cột CV là đường dẫn TƯƠNG ĐỐI cần ghép với thư mục gốc.
-
-        Đường dẫn tuyệt đối (file mới từ tool quét AI đã ghi sẵn) thì không cần
-        hỏi lại thư mục.
-        """
-        path = (rec.get("cv_file_path") or "").strip()
-        return bool(path) and not os.path.isabs(path)
-
-    @staticmethod
-    def _apply_cv_folder(rec, folder):
-        fname = (rec.get("cv_file_path") or "").strip()
-        if fname and folder and not os.path.isabs(fname):
-            full = os.path.join(folder, fname)
-            rec["cv_file_path"] = full if os.path.isfile(full) else fname
-
-    def _confirm_import_dups(self, dups) -> bool:
-        dlg = ModalDialog(self._root, "md")
-        card, lay = dlg.build_shell("Duplicate candidates")
-
-        desc = QLabel(f"{len(dups)} candidates share an email or phone (with existing "
-                      "records or within the file):")
-        desc.setObjectName("DialogMsg")
-        desc.setWordWrap(True)
-        lay.addWidget(desc)
-
-        table = DataTable([("full_name", "Full name", 220), ("email", "Email", 240),
-                           ("phone", "Phone", 120)])
-        table.set_rows(dups)
-        table.setMinimumHeight(min(360, dlg.modal_h))
-        lay.addWidget(table, 1)
-
-        result = {"ok": False}
-        foot = QHBoxLayout()
-        foot.addWidget(widgets.button(
-            card, "Import duplicates anyway", variant="success", icon="check",
-            command=lambda: (result.update(ok=True), dlg.accept())))
-        foot.addWidget(widgets.button(card, "Skip", variant="neutral", icon="ban",
-                                      command=dlg.reject))
-        foot.addStretch(1)
-        lay.addLayout(foot)
-
-        dlg.exec()
-        return result["ok"]
-
-    @staticmethod
-    def _read_excel(path):
-        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        ws = wb.active
-        header = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
-        if not header:
-            wb.close()
-            return []
-        col_key = {}
-        for idx, title in enumerate(header):
-            if title is None:
-                continue
-            key = _EXCEL_HEADER_MAP.get(str(title).strip().lower())
-            if key:
-                col_key[idx] = key
-        rows = []
-        for values in ws.iter_rows(min_row=2, values_only=True):
-            rec = {}
-            for idx, key in col_key.items():
-                if idx < len(values):
-                    v = values[idx]
-                    v = "" if v is None else v
-                    # 'Tên file' và 'Đường dẫn CV' cùng map vào cv_file_path;
-                    # đừng để một cột rỗng đè lên giá trị đã đọc được từ cột kia.
-                    if v == "" and str(rec.get(key, "")).strip():
-                        continue
-                    rec[key] = v
-            rec["fit_score"] = _num(rec.get("fit_score", ""), "decimal")
-            rec["batch"] = _num(rec.get("batch", ""), "int")
-            if (rec.get("full_name") or "").strip():
-                rows.append(rec)
-        wb.close()
-        return rows

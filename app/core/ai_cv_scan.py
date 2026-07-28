@@ -52,18 +52,20 @@ _API_URL = (
     "{model}:generateContent"
 )
 
-# Schema JSON mà Gemini phải tuân theo khi trả kết quả cho mỗi CV.
+# Schema JSON mà Gemini phải tuân theo khi trả kết quả cho mỗi CV. Mọi mô tả
+# đều viết tiếng Anh vì đây là phần "prompt" gửi thẳng lên API — thống nhất
+# ngôn ngữ với phần yêu cầu ở _build_prompt (respond entirely in English).
 _RESPONSE_SCHEMA = {
     "type": "OBJECT",
     "properties": {
-        "name":       {"type": "STRING", "description": "Họ và tên ứng viên"},
-        "dob":        {"type": "STRING", "description": "Ngày/tháng/năm sinh (dd/mm/yyyy nếu có)"},
+        "name":       {"type": "STRING", "description": "Candidate's full name"},
+        "dob":        {"type": "STRING", "description": "Date of birth (dd/mm/yyyy if available)"},
         "email":      {"type": "STRING"},
-        "phone":      {"type": "STRING", "description": "Số điện thoại"},
-        "fit_score":  {"type": "INTEGER", "description": "Mức độ phù hợp với JD, 0-100"},
-        "fit_summary": {"type": "STRING", "description": "Nhận xét ngắn vì sao phù hợp / chưa phù hợp"},
-        "strengths":  {"type": "STRING", "description": "Ưu điểm nổi bật (gạch đầu dòng ngắn)"},
-        "weaknesses": {"type": "STRING", "description": "Nhược điểm / điểm còn thiếu so với JD"},
+        "phone":      {"type": "STRING", "description": "Phone number"},
+        "fit_score":  {"type": "INTEGER", "description": "How well the candidate fits the JD, 0-100"},
+        "fit_summary": {"type": "STRING", "description": "Short remark on why they fit / don't fit"},
+        "strengths":  {"type": "STRING", "description": "Key strengths (short bullet points)"},
+        "weaknesses": {"type": "STRING", "description": "Weaknesses / gaps compared to the JD"},
     },
     "required": [
         "name", "dob", "email", "phone",
