@@ -1,7 +1,7 @@
 """Màn hình "Cài đặt" (PySide6). Dùng lại app.core.settings (backend không đổi)."""
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
 
-from app.core import settings
+from app.core import outlook, settings
 from app_qt import dialogs, theme, widgets
 
 
@@ -49,6 +49,20 @@ def build():
         inner, "Template Excel file (course roster)", mode="file")
     fields["course_template_path"].set(data["course_template_path"])
 
+    # ---- Nhóm Mail chúc mừng sinh nhật ----
+    inner = _group_card(outer_lay)
+    widgets.section_label(inner, "Birthday email")
+    fields["birthday_images_folder"] = widgets.file_row(
+        inner, "Birthday cards folder (Canva Bulk Create, filename = employee code)",
+        mode="folder")
+    fields["birthday_images_folder"].set(data["birthday_images_folder"])
+    fields["birthday_from_account"] = widgets.model_select_row(
+        inner, "Send birthday emails from account", outlook.list_accounts)
+    fields["birthday_from_account"].set(data["birthday_from_account"])
+    widgets.hint(inner, "Pick the Outlook account to send birthday emails from, "
+                        "if it should differ from the account used elsewhere in the app. "
+                        "Leave empty to use Outlook's default account.")
+
     # ---- Nút lưu ----
     # Thẻ tự chừa CARD_PAD cho bóng → nút (không phải thẻ) thêm lề trái CARD_PAD
     # để thẳng hàng mép thẻ nhìn thấy.
@@ -60,6 +74,8 @@ def build():
             "api_key": fields["api_key"].get().strip(),
             "ai_model": fields["ai_model"].get().strip() or settings.DEFAULTS["ai_model"],
             "course_template_path": fields["course_template_path"].get().strip(),
+            "birthday_images_folder": fields["birthday_images_folder"].get().strip(),
+            "birthday_from_account": fields["birthday_from_account"].get().strip(),
         }
         settings.save(values)
         dialogs.success(outer, "Saved", "Settings saved ✅")

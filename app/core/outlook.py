@@ -216,12 +216,41 @@ def create_appointment(subject, start, duration_minutes=30, body="",
         pythoncom.CoUninitialize()
 
 
-def send_mail(to, subject, body, cc="", html=""):
-    """Tạo và GỬI một mail qua Outlook (dùng tài khoản mặc định).
+def list_accounts():
+    """Địa chỉ SMTP của các tài khoản đang đăng nhập trong Outlook.
+
+    Dùng cho ô chọn "gửi bằng tài khoản nào" ở màn hình Cài đặt — khi Outlook
+    đăng nhập nhiều tài khoản, tính năng gửi mail cần chỉ rõ tài khoản thay vì
+    luôn dùng tài khoản mặc định.
+    """
+    import pythoncom
+    import win32com.client
+
+    pythoncom.CoInitialize()
+    try:
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        ns = outlook.GetNamespace("MAPI")
+        result = []
+        for acct in ns.Accounts:
+            smtp = str(getattr(acct, "SmtpAddress", "") or "")
+            if smtp and smtp not in result:
+                result.append(smtp)
+        return result
+    finally:
+        pythoncom.CoUninitialize()
+
+
+def send_mail(to, subject, body, cc="", html="", account_smtp=None, attachments=None):
+    """Tạo và GỬI một mail qua Outlook (mặc định dùng tài khoản mặc định).
 
     Nếu truyền `html`, mail sẽ gửi dạng HTML (có định dạng) qua HTMLBody;
     `body` khi đó dùng làm bản thuần (fallback). Không có `html` thì gửi
     thuần như cũ.
+
+    `account_smtp`: gửi bằng tài khoản Outlook có địa chỉ SMTP này thay vì tài
+    khoản mặc định (dùng khi Outlook đăng nhập nhiều tài khoản). Không khớp
+    được tài khoản nào thì rơi về mặc định.
+    `attachments`: danh sách đường dẫn file đính kèm.
     """
     import pythoncom
     import win32com.client
@@ -238,6 +267,14 @@ def send_mail(to, subject, body, cc="", html=""):
             mail.HTMLBody = html
         else:
             mail.Body = body
+        for path in (attachments or []):
+            mail.Attachments.Add(str(path))
+        if account_smtp:
+            ns = outlook.GetNamespace("MAPI")
+            for acct in ns.Accounts:
+                if str(getattr(acct, "SmtpAddress", "") or "").lower() == account_smtp.lower():
+                    mail.SendUsingAccount = acct
+                    break
         mail.Send()
     finally:
         pythoncom.CoUninitialize()

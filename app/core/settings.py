@@ -23,6 +23,8 @@ DEFAULTS = {
     "api_key":  "",                 # API key Gemini, dùng chung cho các tính năng AI
     "ai_model": "gemini-3.6-flash",  # model mặc định khi gọi AI
     "course_template_path": "",     # file Excel mẫu để xuất roster khóa học
+    "birthday_images_folder": "",   # thư mục ảnh thiệp sinh nhật (Canva Bulk Create, tên file = mã NV)
+    "birthday_from_account": "",    # địa chỉ Outlook dùng để gửi mail chúc mừng sinh nhật (khác tài khoản mặc định)
 }
 
 # Section cũ (tool "Quét CV bằng AI" từng lưu API key/model ở đây). Dùng để tự
