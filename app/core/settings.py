@@ -25,6 +25,7 @@ DEFAULTS = {
     "course_template_path": "",     # file Excel mẫu để xuất roster khóa học
     "birthday_images_folder": "",   # thư mục ảnh thiệp sinh nhật (Canva Bulk Create, tên file = mã NV)
     "birthday_from_account": "",    # địa chỉ Outlook dùng để gửi mail chúc mừng sinh nhật (khác tài khoản mặc định)
+    "birthday_send_time": "08:00",  # giờ hẹn gửi mail sinh nhật (mail nằm Outbox tới đúng ngày sinh nhật, giờ này)
 }
 
 # Section cũ (tool "Quét CV bằng AI" từng lưu API key/model ở đây). Dùng để tự
@@ -51,6 +52,17 @@ def load():
 def save(values):
     """Ghi đè toàn bộ cấu hình chung rồi lưu xuống đĩa."""
     config.save(SECTION, values)
+
+
+def update(**changes):
+    """Sửa vài thiết lập chung, GIỮ NGUYÊN các khóa còn lại.
+
+    Khác `save()` (ghi đè cả section) — dùng khi một tool tự lưu lựa chọn của
+    nó (vd giờ hẹn gửi mail sinh nhật) mà không được đụng tới cấu hình khác.
+    """
+    values = load()
+    values.update(changes)
+    save(values)
 
 
 def get(key, default=""):

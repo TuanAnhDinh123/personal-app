@@ -3,9 +3,15 @@
 Bấm "Send": tự quét bảng nhân viên tìm người có NGÀY SINH TRONG THÁNG HIỆN
 TẠI, đối chiếu mã NV với thư mục ảnh đã cấu hình ở Cài đặt (tên file = mã NV)
 → hiện modal xác nhận (ai THIẾU ảnh bị đánh dấu, sẽ KHÔNG được gửi) → xác nhận
-thì gửi qua Outlook (có thể dùng tài khoản riêng, khác tài khoản mặc định —
-cũng cấu hình ở Cài đặt) → báo lại số mail gửi thành công + tên những người
+thì đẩy mail qua Outlook (có thể dùng tài khoản riêng, khác tài khoản mặc định
+— cũng cấu hình ở Cài đặt) → báo lại số mail đã xếp hàng + tên những người
 chưa được gửi.
+
+Mail KHÔNG đi ngay: mỗi mail được HẸN GIỜ (DeferredDeliveryTime của Outlook)
+đúng ngày sinh nhật của người đó, vào giờ chọn ở ô "Delivery time" — nên chạy
+một lần đầu tháng là cả tháng tự gửi. Trong lúc chờ, mail nằm ở Outbox: tài
+khoản Exchange thì server giữ hộ, tài khoản POP/IMAP thì Outlook phải đang mở
+lúc tới hạn. Ai đã qua sinh nhật trong tháng thì gửi ngay (không hẹn được nữa).
 """
 import csv
 import datetime
@@ -24,6 +30,8 @@ from app_qt.base_tool import BaseTool
 from app_qt.components.modal import ModalDialog
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
+
+_DEFAULT_SEND_TIME = "08:00"
 
 _DEFAULT_SUBJECT = "Happy Birthday, {name}!"
 _DEFAULT_BODY = (
@@ -50,6 +58,43 @@ def _day_month(dob):
 def _birth_month(dob):
     dm = _day_month(dob)
     return dm[1] if dm else None
+
+
+def _time_slots():
+    """Các mốc giờ cho ô "Delivery time" — mỗi 30 phút trong giờ hành chính."""
+    return [f"{h:02d}:{m:02d}" for h in range(6, 21) for m in (0, 30)]
+
+
+def _parse_time(text):
+    """'HH:MM' -> datetime.time; đọc không được thì về mặc định 08:00."""
+    try:
+        h, m = (text or "").strip().split(":")
+        return datetime.time(int(h), int(m))
+    except (ValueError, AttributeError):
+        return datetime.time(8, 0)
+
+
+def _birthday_datetime(dob, at_time, year):
+    """Thời điểm hẹn gửi = ngày/tháng sinh của `year`, vào giờ `at_time`.
+
+    Ngày sinh 29/2 rơi vào năm không nhuận (hoặc dữ liệu ngày lệch như 31/4)
+    thì lùi dần tối đa 3 ngày cho ra ngày hợp lệ, thay vì bỏ qua người đó.
+    """
+    dm = _day_month(dob)
+    if not dm:
+        return None
+    day, month = dm
+    for offset in range(4):
+        try:
+            d = datetime.date(year, month, day - offset)
+        except ValueError:
+            continue
+        return datetime.datetime.combine(d, at_time)
+    return None
+
+
+def _fmt_when(dt):
+    return dt.strftime("%d %b · %H:%M") if dt else "—"
 
 
 def _strip_vn_accents(text):
@@ -100,6 +145,15 @@ class BirthdayEmailTool(BaseTool):
         self.subject_field.set(_DEFAULT_SUBJECT)
         self.body_field = widgets.text_area(card, "Body", value=_DEFAULT_BODY, height=8)
 
+        widgets.section_label(card, "Delivery")
+        self.time_field = widgets.dropdown(card, "Delivery time", _time_slots())
+        self.time_field.set(settings.get("birthday_send_time") or _DEFAULT_SEND_TIME)
+        widgets.hint(
+            card, "Emails are not sent right away: each one waits in Outlook's "
+                  "Outbox and goes out on the employee's own birthday at this "
+                  "time. Keep Outlook running and signed in so queued emails "
+                  "can leave the Outbox.")
+
         send_bar = QHBoxLayout()
         send_bar.setContentsMargins(0, 8, 0, 0)
         send_bar.addWidget(widgets.button(card, "Send", variant="primary",
@@ -121,13 +175,17 @@ class BirthdayEmailTool(BaseTool):
                             "Sending email needs Outlook on Windows (pywin32).")
             return
 
-        month = datetime.date.today().month
+        now = datetime.datetime.now()
         matches = [e for e in repo.list_employees()
-                  if _birth_month(e["date_of_birth"]) == month]
+                  if _birth_month(e["date_of_birth"]) == now.month]
         if not matches:
             dialogs.info(self._root, "No birthdays",
                         "No employee has a birthday this month.")
             return
+
+        # Nhớ giờ vừa chọn để lần sau mở tool khỏi phải chỉnh lại.
+        send_time = _parse_time(self.time_field.get())
+        settings.update(birthday_send_time=send_time.strftime("%H:%M"))
 
         folder = settings.get("birthday_images_folder")
         images = _scan_images(folder)
@@ -136,6 +194,7 @@ class BirthdayEmailTool(BaseTool):
         for emp in matches:
             code_norm = (emp["code"] or "").strip().upper()
             image_name = images.get(code_norm)
+            send_at = _birthday_datetime(emp["date_of_birth"], send_time, now.year)
             rows.append({
                 "code": emp["code"],
                 "name": emp["name"] or emp["full_name"] or emp["code"],
@@ -143,6 +202,10 @@ class BirthdayEmailTool(BaseTool):
                 "email": (emp["email"] or "").strip(),
                 "date_of_birth": emp["date_of_birth"],
                 "image_path": os.path.join(folder, image_name) if image_name else None,
+                "send_at": send_at,
+                # Sinh nhật đã qua (hoặc đúng hôm nay nhưng lỡ giờ) thì không
+                # hẹn được nữa -> gửi ngay.
+                "scheduled": bool(send_at and send_at > now),
             })
 
         dlg = _BirthdayConfirmDialog(self._root, rows, folder)
@@ -160,7 +223,7 @@ class BirthdayEmailTool(BaseTool):
         subject_tpl = self.subject_field.get().strip() or _DEFAULT_SUBJECT
         body_tpl = self.body_field.get().strip() or _DEFAULT_BODY
 
-        sent, not_sent = [], []
+        queued, sent_now, not_sent = [], [], []
         for row in rows:
             display_name = row["full_name"]
             if not row["image_path"]:
@@ -172,17 +235,32 @@ class BirthdayEmailTool(BaseTool):
             try:
                 outlook.send_mail(
                     row["email"], _fill(subject_tpl, row["name"]), _fill(body_tpl, row["name"]),
-                    account_smtp=account or None, attachments=[row["image_path"]])
-                sent.append(display_name)
+                    account_smtp=account or None, attachments=[row["image_path"]],
+                    deferred_until=row["send_at"] if row["scheduled"] else None)
+                if row["scheduled"]:
+                    queued.append(f"{display_name} — {_fmt_when(row['send_at'])}")
+                else:
+                    sent_now.append(display_name)
             except Exception as exc:
                 not_sent.append(f"{display_name} — send failed: {exc}")
 
-        msg = f"Sent: {len(sent)}/{len(rows)}"
+        parts = [f"Handed to Outlook: {len(queued) + len(sent_now)}/{len(rows)}"]
+        if queued:
+            parts.append(f"Waiting in the Outbox until each birthday ({len(queued)}):\n"
+                         + "\n".join(queued))
+        if sent_now:
+            parts.append("Sent immediately — birthday already passed this month "
+                         f"({len(sent_now)}):\n" + "\n".join(sent_now))
         if not_sent:
-            msg += "\n\nNot sent:\n" + "\n".join(not_sent)
+            parts.append("Not sent:\n" + "\n".join(not_sent))
+        msg = "\n\n".join(parts)
+
+        if not_sent:
             dialogs.warning(self._root, "Done with skipped/failed", msg)
         else:
-            dialogs.success(self._root, "Done", f"Sent {len(sent)} birthday email(s) ✅")
+            dialogs.success(self._root, "Done",
+                            msg + "\n\nKeep Outlook running so queued emails "
+                                  "can leave the Outbox on the day.")
 
     # -------------------------------------------------------- xuất CSV cho Canva
     def _export_missing_csv(self):
@@ -283,11 +361,21 @@ class _BirthdayConfirmDialog(ModalDialog):
         lay.addWidget(sa, 1)
         self.set_grow_region(sa)
 
+        widgets.hint(
+            card, "Emails go to Outlook's Outbox and are delivered on each "
+                  "employee's own birthday at the delivery time — Outlook must "
+                  "stay running and signed in until then.")
+
         missing = sum(1 for r in rows if not r["image_path"])
         if missing:
             widgets.hint(
                 card, f"⚠ {missing} employee(s) have no matching card and will "
                      "NOT be emailed.")
+        instant = sum(1 for r in rows if r["image_path"] and not r["scheduled"])
+        if instant:
+            widgets.hint(
+                card, f"⚠ {instant} birthday(s) already passed this month — those "
+                     "emails cannot be scheduled and will be sent right away.")
 
         foot = QHBoxLayout()
         foot.addWidget(widgets.button(card, "Send", variant="primary", icon="mail",
@@ -329,8 +417,11 @@ class _BirthdayConfirmDialog(ModalDialog):
         dob = QLabel(row["date_of_birth"] or "—", box)
         dob.setObjectName("Hint")
         h.addWidget(dob)
-        if has_card:
-            h.addWidget(_chip(box, "Ready", theme.PALETTE["--success"]))
-        else:
+        if not has_card:
             h.addWidget(_chip(box, "No card", theme.PALETTE["--danger"]))
+        elif row["scheduled"]:
+            h.addWidget(_chip(box, _fmt_when(row["send_at"]),
+                              theme.PALETTE["--success"]))
+        else:
+            h.addWidget(_chip(box, "Sends now", theme.PALETTE["--warning"]))
         return box

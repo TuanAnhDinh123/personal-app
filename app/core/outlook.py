@@ -240,7 +240,8 @@ def list_accounts():
         pythoncom.CoUninitialize()
 
 
-def send_mail(to, subject, body, cc="", html="", account_smtp=None, attachments=None):
+def send_mail(to, subject, body, cc="", html="", account_smtp=None, attachments=None,
+              deferred_until=None):
     """Tạo và GỬI một mail qua Outlook (mặc định dùng tài khoản mặc định).
 
     Nếu truyền `html`, mail sẽ gửi dạng HTML (có định dạng) qua HTMLBody;
@@ -251,6 +252,11 @@ def send_mail(to, subject, body, cc="", html="", account_smtp=None, attachments=
     khoản mặc định (dùng khi Outlook đăng nhập nhiều tài khoản). Không khớp
     được tài khoản nào thì rơi về mặc định.
     `attachments`: danh sách đường dẫn file đính kèm.
+    `deferred_until`: datetime — HẸN GIỜ gửi. Mail không đi ngay mà nằm ở
+    Outbox tới đúng thời điểm này mới được chuyển đi (thuộc tính
+    DeferredDeliveryTime của Outlook). Tài khoản Exchange thì server giữ mail;
+    tài khoản POP/IMAP thì Outlook phải đang mở lúc tới hạn. Thời điểm ở quá
+    khứ coi như không hẹn (Outlook gửi ngay).
     """
     import pythoncom
     import win32com.client
@@ -269,6 +275,8 @@ def send_mail(to, subject, body, cc="", html="", account_smtp=None, attachments=
             mail.Body = body
         for path in (attachments or []):
             mail.Attachments.Add(str(path))
+        if deferred_until and deferred_until > datetime.datetime.now():
+            mail.DeferredDeliveryTime = deferred_until
         if account_smtp:
             ns = outlook.GetNamespace("MAPI")
             for acct in ns.Accounts:

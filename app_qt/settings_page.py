@@ -70,14 +70,15 @@ def build():
     actions.setContentsMargins(widgets.CARD_PAD, 4, 0, 0)
 
     def save():
-        values = {
-            "api_key": fields["api_key"].get().strip(),
-            "ai_model": fields["ai_model"].get().strip() or settings.DEFAULTS["ai_model"],
-            "course_template_path": fields["course_template_path"].get().strip(),
-            "birthday_images_folder": fields["birthday_images_folder"].get().strip(),
-            "birthday_from_account": fields["birthday_from_account"].get().strip(),
-        }
-        settings.save(values)
+        # update() thay vì save(): giữ lại các thiết lập chung KHÔNG có ô nhập ở
+        # màn hình này (vd giờ hẹn gửi mail sinh nhật do chính tool tự lưu).
+        settings.update(
+            api_key=fields["api_key"].get().strip(),
+            ai_model=fields["ai_model"].get().strip() or settings.DEFAULTS["ai_model"],
+            course_template_path=fields["course_template_path"].get().strip(),
+            birthday_images_folder=fields["birthday_images_folder"].get().strip(),
+            birthday_from_account=fields["birthday_from_account"].get().strip(),
+        )
         dialogs.success(outer, "Saved", "Settings saved ✅")
 
     btn = widgets.button(outer, "Save settings", variant="primary", icon="save", command=save)
