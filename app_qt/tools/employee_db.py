@@ -156,6 +156,61 @@ def _level_options():
     return names + extras
 
 
+class _DuplicateCodesDialog(ModalDialog):
+    """Modal cảnh báo mã NV bị trùng khi import Excel (đã có sẵn trong DB).
+
+    `dups` = list sqlite3.Row bảng `employees` (employee_id, code, full_name)
+    bị trùng. Hiện trong DataTable để có thể copy (chọn ô → Ctrl+C, hoặc chuột
+    phải → Copy — DataTable đã hỗ trợ sẵn). Trả về True (tiếp tục import, bỏ
+    qua các dòng trùng) / False (hủy import) qua .run().
+    """
+
+    def __init__(self, parent, dups):
+        super().__init__(parent, "sm")
+        self._result = False
+        card, lay = self.build_shell(f"Duplicate employee codes · {len(dups)}")
+
+        desc = QLabel("These employee codes already exist in the database. "
+                     "They will be skipped if you continue:")
+        desc.setObjectName("DialogMsg")
+        desc.setWordWrap(True)
+        lay.addWidget(desc)
+
+        rows = [{"code": d["code"] or "", "full_name": d["full_name"] or ""}
+                for d in dups]
+        table = DataTable([
+            ("code", "Emp code", 140),
+            ("full_name", "Existing employee", 240),
+        ])
+        table.set_rows(rows)
+        table.setMinimumHeight(min(260, self.modal_h))
+        lay.addWidget(table, 1)
+        self.set_grow_region(table)
+
+        hint = QLabel("Select a cell and press Ctrl+C (or right-click → Copy) "
+                     "to copy the code.")
+        hint.setObjectName("Hint")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+
+        foot = QHBoxLayout()
+        foot.addWidget(widgets.button(card, "Import the rest, skip duplicates",
+                                      variant="success", icon="check",
+                                      command=lambda: self._choose(True)))
+        foot.addWidget(widgets.button(card, "Cancel import", variant="neutral",
+                                      icon="x", command=lambda: self._choose(False)))
+        foot.addStretch(1)
+        lay.addLayout(foot)
+
+    def _choose(self, value):
+        self._result = value
+        self.accept()
+
+    def run(self):
+        self.exec()
+        return self._result
+
+
 class EmployeeDbTool(BaseTool):
     name = "Employees"
     description = "Search, manage work status, export reports."
@@ -406,14 +461,26 @@ class EmployeeDbTool(BaseTool):
                 ok_label="Import"):
             return
 
+        # Mã NV (`code`) đã có sẵn trong DB → hỏi lại trước khi ghi trùng.
+        dup_rows = repo.find_employees_by_codes([r.get("code") for r in rows])
+        skip_codes = set()
+        if dup_rows:
+            if not _DuplicateCodesDialog(self._root, dup_rows).run():
+                return
+            skip_codes = {_norm(d["code"]) for d in dup_rows if d["code"]}
+
         # Tra department_id theo TÊN bộ phận (khớp không phân biệt hoa/thường).
         dept_by_name = {_norm(d["department_name"]): d["department_id"]
                         for d in repo.list_departments()
                         if d["department_name"]}
 
         added = 0
+        skipped = 0
         missing_depts = set()   # tên bộ phận trong file nhưng không có trong DB
         for rec in rows:
+            if skip_codes and _norm(rec.get("code", "")) in skip_codes:
+                skipped += 1
+                continue
             dept_text = rec.pop(_DEPT_TEXT, "")
             if dept_text:
                 dept_id = dept_by_name.get(_norm(dept_text))
@@ -426,6 +493,8 @@ class EmployeeDbTool(BaseTool):
 
         self._reload()
         msg = f"Imported {added} employees."
+        if skipped:
+            msg += f"\n\nSkipped {skipped} duplicate employee code(s)."
         if missing_depts:
             names = ", ".join(sorted(missing_depts)[:10])
             more = " …" if len(missing_depts) > 10 else ""

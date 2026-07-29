@@ -654,6 +654,22 @@ def delete_employee(employee_id) -> None:
     _delete("employees", employee_id)
 
 
+def find_employees_by_codes(codes):
+    """Tìm nhân viên ĐÃ CÓ trong DB theo mã NV (`code`) — dùng để phát hiện
+    trùng khi import Excel. Khớp không phân biệt hoa/thường + bỏ khoảng trắng
+    thừa. Trả về [] nếu `codes` rỗng.
+    """
+    norm_codes = {c.strip().upper() for c in (codes or []) if c and c.strip()}
+    if not norm_codes:
+        return []
+    ph = ", ".join("?" for _ in norm_codes)
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT employee_id, code, full_name FROM employees "
+            f"WHERE UPPER(TRIM(code)) IN ({ph})",
+            list(norm_codes)).fetchall()
+
+
 # ───────────────────────── KHÓA HỌC / ĐÀO TẠO ───────────────────────────
 
 def list_courses():
