@@ -23,10 +23,44 @@ CANDIDATE_FIELDS = [
     "source", "batch", "fit_score", "fit_summary", "strengths", "weaknesses",
     "cv_file_path", "note",
 ]
+# `employees` bám sát "Master HC file.xlsx" → rất nhiều cột. Giữ thứ tự NHÓM
+# giống cv_schema.py cho dễ đối chiếu. Trạng thái làm việc không nằm trong danh
+# sách này vì được suy ra từ `termination_date`.
 EMPLOYEE_FIELDS = [
-    "code", "global_code", "full_name", "surname", "name", "middle_name",
-    "date_of_birth", "gender", "education", "phone", "email", "level_id",
-    "department_id", "address", "status",
+    # định danh + họ tên
+    "code", "global_code",
+    "full_name", "surname", "name", "middle_name",
+    # thông tin cá nhân
+    "date_of_birth", "gender", "place_of_birth", "native_place", "nationality",
+    "religion", "marriage_status", "marital_status", "spouse_name", "spouse_dob",
+    "children_count", "children_names", "children_birthdays",
+    # liên hệ
+    "phone", "email", "company_email", "address", "city", "country",
+    "permanent_address", "temporary_address",
+    "emergency_contact_name", "emergency_contact_relationship",
+    # học vấn
+    "education", "education_field", "major", "graduation_year", "school_name",
+    "qualification", "qualification_code",
+    # giấy tờ · ngân hàng · thuế · bảo hiểm
+    "id_no", "id_issued_date", "id_issued_place",
+    "passport_no", "passport_issued_date",
+    "bank_account_no", "bank_address", "tax_code", "dependants",
+    "insurance_book_no",
+    # tổ chức & công việc
+    "department_id", "cost_center_id", "employee_type_id", "level_id",
+    "manager_name", "job_title", "current_position", "time_in_position",
+    "facility_country", "facility_town", "local_function", "by_group",
+    "labor_type", "production_line", "operator_skill", "driving_forklift",
+    "working_hours_per_week", "smart_working_eligible", "er_jrf",
+    # hợp đồng & thời gian làm việc
+    "date_of_employment", "seniority_date", "contract_permanency",
+    "work_time_type", "working_time_pct", "direct_indirect", "contract_type",
+    "contract_start_date", "contract_end_date", "changing_date",
+    "termination_date", "leaving_reason",
+    # số liệu file Excel tự tính
+    "years_of_service", "length_of_service", "birth_year", "age", "age_range",
+    # ghi chú
+    "changing_notes", "changing_dates", "updated_changing_date", "note",
 ]
 COURSE_FIELDS = ["title", "content", "date", "location", "course_type"]
 COURSE_EMPLOYEE_FIELDS = ["course_id", "employee_id", "status", "note"]
@@ -555,26 +589,44 @@ def set_cv_file_path(candidate_id, path) -> None:
 # ───────────────────────────── NHÂN VIÊN ────────────────────────────────
 
 # Các cột TEXT được ô tìm kiếm toàn văn quét qua (bỏ các field đã có ô lọc riêng
-# dạng select: department_id, gender, level).
+# dạng select: department_id, gender, level). Chỉ gồm các cột hay dùng để TRA
+# CỨU người — không quét hết ~90 cột (chậm & dễ khớp nhiễu).
 EMPLOYEE_SEARCH_FIELDS = [
     "e.code", "e.global_code", "e.full_name", "e.surname", "e.name",
-    "e.middle_name", "e.education", "e.phone", "e.email", "e.address",
+    "e.middle_name", "e.education", "e.phone", "e.email", "e.company_email",
+    "e.address", "e.city", "e.job_title", "e.id_no",
 ]
 
+# Trạng thái làm việc là cột SUY RA, không lưu trong DB: `termination_date` có
+# giá trị (khác NULL/rỗng) = đã nghỉ việc. Mọi truy vấn danh sách nhân viên trả
+# thêm cột `work_status` ("Working"/"Resigned") cho giao diện hiển thị.
+EMPLOYEE_WORK_STATUS_SQL = (
+    "CASE WHEN COALESCE(TRIM(e.termination_date), '') = '' "
+    "THEN 'Working' ELSE 'Resigned' END")
+
 # GLOBAL SCOPE: mọi nghiệp vụ đọc danh sách nhân viên (list/search/count) MẶC
-# ĐỊNH bỏ qua người đã nghỉ việc (status = 'Resigned') — trừ khi gọi với
+# ĐỊNH bỏ qua người đã nghỉ việc (termination_date có giá trị) — trừ khi gọi với
 # include_resigned=True (vd màn hình Employees khi tick "Include resigned").
-# NULL/"" (chưa xác định) vẫn được coi là đang làm.
-_EXCLUDE_RESIGNED_SQL = "(e.status IS NULL OR e.status <> 'Resigned')"
+_EXCLUDE_RESIGNED_SQL = "COALESCE(TRIM(e.termination_date), '') = ''"
+
+# Phần SELECT + JOIN dùng chung cho list/search nhân viên: kèm tên của 4 bảng
+# danh mục (bộ phận · cấp bậc · cost center · loại nhân viên) để bảng hiển thị
+# TEXT thay vì id, và cột suy ra `work_status`.
+_EMPLOYEE_SELECT = [
+    "SELECT e.*, d.department_name, l.level_name,",
+    "       cc.code AS cost_center_code, cc.group_function AS cost_center_group,",
+    "       et.code AS employee_type_code, et.collar,",
+    f"      {EMPLOYEE_WORK_STATUS_SQL} AS work_status",
+    "FROM employees e",
+    "LEFT JOIN departments d     ON d.department_id = e.department_id",
+    "LEFT JOIN levels l          ON l.level_id = e.level_id",
+    "LEFT JOIN cost_centers cc   ON cc.cost_center_id = e.cost_center_id",
+    "LEFT JOIN employee_types et ON et.employee_type_id = e.employee_type_id",
+]
 
 
 def list_employees(include_resigned=False):
-    sql = [
-        "SELECT e.*, d.department_name, l.level_name",
-        "FROM employees e",
-        "LEFT JOIN departments d ON d.department_id = e.department_id",
-        "LEFT JOIN levels l ON l.level_id = e.level_id",
-    ]
+    sql = list(_EMPLOYEE_SELECT)
     if not include_resigned:
         sql.append(f"WHERE {_EXCLUDE_RESIGNED_SQL}")
     sql.append("ORDER BY e.full_name")
@@ -596,15 +648,10 @@ def search_employees(keyword: str = "", department_id=None, gender: str = "",
     thường + bỏ khoảng trắng thừa).
 
     `include_resigned`: mặc định False → áp GLOBAL SCOPE, bỏ người đã nghỉ việc
-    (xem `_EXCLUDE_RESIGNED_SQL`). True → bỏ áp scope, lấy luôn cả người đã nghỉ.
+    (`termination_date` có giá trị — xem `_EXCLUDE_RESIGNED_SQL`). True → bỏ áp
+    scope, lấy luôn cả người đã nghỉ.
     """
-    sql = [
-        "SELECT e.*, d.department_name, l.level_name",
-        "FROM employees e",
-        "LEFT JOIN departments d ON d.department_id = e.department_id",
-        "LEFT JOIN levels l ON l.level_id = e.level_id",
-        "WHERE 1=1",
-    ]
+    sql = _EMPLOYEE_SELECT + ["WHERE 1=1"]
     params: list = []
     if not include_resigned:
         sql.append(f"AND {_EXCLUDE_RESIGNED_SQL}")

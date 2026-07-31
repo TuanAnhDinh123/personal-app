@@ -200,6 +200,32 @@ mẫu mail mời PV) → `candidates` (ứng viên, có `cv_file_path`);
 ngoài ra `employees` (nhân viên) và `courses` ↔ `course_employees` (đào tạo).
 Đường dẫn file lưu thẳng vào cột — không có bảng file riêng.
 
+**Bảng `employees` bám sát `Master HC file.xlsx`** (sheet *Master file*) — gần
+như mỗi cột trong file có một cột tương ứng trong DB; chú thích
+`-- <Tiêu đề Excel>` ghi ngay cạnh từng cột trong `app/core/cv_schema.py`.
+
+- **Import khớp theo TÊN cột, KHÔNG theo thứ tự cột** (`_EXCEL_HEADER_MAP` ở
+  [app_qt/tools/employee_db.py](app_qt/tools/employee_db.py)): tiêu đề được
+  chuẩn hóa (chữ thường · gộp khoảng trắng · bỏ ký hiệu font Wingdings · NFC)
+  nên đổi chỗ cột hay thêm cột lạ đều không làm vỡ import. Cột **trùng tên**
+  ("Issued date", "Changing date") khai báo bằng *tuple* → lần xuất hiện thứ n
+  lấy field thứ n.
+- **Trạng thái làm việc suy ra từ `termination_date`** (không có cột `status`):
+  có ngày (khác rỗng) = đã nghỉ việc. Truy vấn danh sách trả thêm cột
+  `work_status` ("Working"/"Resigned") để hiển thị; mặc định ẩn người đã nghỉ
+  (tick *Include resigned employees* để xem cả).
+- **4 cột text được tra sang bảng danh mục**: "Function (Common)" → `departments`
+  (short_name) · "New Cost center" → `cost_centers` (code) · "IBC/DBC/WC" →
+  `employee_types` (code) · "Job level" → `levels` (level_name). Không khớp thì
+  để trống liên kết và báo lại danh sách cuối lần import.
+- Các cột **file Excel tự tính** (Age, Age range, Year of service, Length of
+  service, Year of birthday) được lưu như **ảnh chụp lúc import** — app không
+  tính lại. Các cột "Legal Entity (Company)", "Position status", "Business Unit
+  (Department)", "BC/WC", "STT", "Birthday"… không lưu vì đã có nguồn khác hoặc
+  chỉ là cột phụ trợ trong file (xem chú thích trong schema).
+- Bảng ~90 cột → giao diện chỉ hiện vài cột mặc định, bật/tắt thêm ở dropdown
+  **Columns** (lựa chọn được ghi nhớ).
+
 **Bảng danh mục (master data)** — nạp sẵn dữ liệu từ file `Code.xlsx`:
 `departments` (tên + mã viết tắt), `employee_types` (WC/WCA/IBC/IBCA/DBC/DBCA +
 nhóm Blue/White Collar), `cost_centers` (mã VN1001… + Group Function
