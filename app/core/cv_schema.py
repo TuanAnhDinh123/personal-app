@@ -57,7 +57,8 @@ SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS departments (
     department_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     department_name VARCHAR,
-    short_name      VARCHAR,                 -- mã viết tắt (vd FIN, IT, R&D) — dùng khi xuất Excel
+    short_name      VARCHAR,                 -- mã viết tắt (vd FIN, IT, R&D) — khớp cột
+                                              -- "Function (Common)" khi import nhân viên
     manager_name    VARCHAR,
     description     TEXT,
     created_at      DATETIME DEFAULT (datetime('now', 'localtime')),
@@ -160,11 +161,12 @@ CREATE TABLE IF NOT EXISTS employees (
     date_of_birth DATE,
     gender        VARCHAR,               -- giới tính
     education     VARCHAR,               -- trình độ học vấn
-    phone         VARCHAR,
+    phone         VARCHAR,               -- có thể nhiều số, ngăn cách nhau bởi "; "
     email         VARCHAR,
-    level         VARCHAR,               -- cấp bậc
+    level_id      INT,                   -- tham chiếu mềm → levels.level_id (cấp bậc)
     department_id INT,                   -- tham chiếu mềm → departments.department_id
     address       VARCHAR,
+    status        VARCHAR,               -- đang làm / đã nghỉ việc (xem EMPLOYEE_STATUS_CHOICES)
     created_at    DATETIME DEFAULT (datetime('now', 'localtime')),
     updated_at    DATETIME DEFAULT (datetime('now', 'localtime'))
 );
@@ -200,10 +202,12 @@ CREATE INDEX IF NOT EXISTS idx_candidates_email  ON candidates(email);
 CREATE INDEX IF NOT EXISTS idx_candidates_phone  ON candidates(phone);
 CREATE INDEX IF NOT EXISTS idx_candidates_pos    ON candidates(position_id);
 CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(status);
+CREATE INDEX IF NOT EXISTS idx_candidates_batch  ON candidates(batch);
 CREATE INDEX IF NOT EXISTS idx_positions_dept    ON positions(department_id);
 CREATE INDEX IF NOT EXISTS idx_employees_name    ON employees(full_name);
 CREATE INDEX IF NOT EXISTS idx_employees_code     ON employees(code);
 CREATE INDEX IF NOT EXISTS idx_employees_dept     ON employees(department_id);
+CREATE INDEX IF NOT EXISTS idx_employees_level    ON employees(level_id);
 CREATE INDEX IF NOT EXISTS idx_ce_course           ON course_employees(course_id);
 CREATE INDEX IF NOT EXISTS idx_ce_employee         ON course_employees(employee_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ce_unique    ON course_employees(course_id, employee_id);
@@ -215,47 +219,15 @@ CREATE INDEX IF NOT EXISTS idx_levels_name         ON levels(level_name);
 # =============================================================================
 #  MIGRATIONS — thêm cột cho bảng ĐÃ tồn tại (chạy an toàn nhiều lần).
 #  Ví dụ:  "ALTER TABLE candidates ADD COLUMN linkedin VARCHAR",
+#
+#  Lịch sử migration trước ngày 31/07/2026 đã được gộp thẳng vào SCHEMA_SQL ở
+#  trên (DB được xóa & tạo lại từ đầu cho đợt cập nhật lớn bảng employees —
+#  đổi `level` (text) → `level_id` (tham chiếu bảng `levels`), thêm `short_name`
+#  vào `departments`, v.v.). Từ đây chỉ thêm ALTER cho những thay đổi MỚI.
 # =============================================================================
 MIGRATIONS: list[str] = [
-    # Bỏ bảng document_files → lưu đường dẫn file thẳng vào candidates & positions.
-    "ALTER TABLE candidates ADD COLUMN cv_file_path VARCHAR",
-    # Dấu thời gian tạo / cập nhật cho MỌI bảng. Lưu ý: SQLite không cho dùng
-    # default động (datetime('now')) trong ALTER TABLE → cột thêm cho bảng CŨ sẽ
-    # NULL; bản ghi TẠO MỚI sau đó được điền qua init_db()._backfill_timestamps
-    # và logic ghi (INSERT dùng DEFAULT của schema, UPDATE tự set updated_at).
-    "ALTER TABLE departments ADD COLUMN created_at DATETIME",
-    "ALTER TABLE departments ADD COLUMN updated_at DATETIME",
-    "ALTER TABLE positions ADD COLUMN created_at DATETIME",
-    "ALTER TABLE positions ADD COLUMN updated_at DATETIME",
-    "ALTER TABLE candidates ADD COLUMN created_at DATETIME",
-    "ALTER TABLE candidates ADD COLUMN updated_at DATETIME",
-    # Cột 'batch' (đợt/lô quét CV) — chỉ lưu SỐ; thêm cho DB đã tồn tại.
-    # LƯU Ý: index cho 'batch' PHẢI tạo Ở ĐÂY (sau ALTER), KHÔNG đặt trong
-    # SCHEMA_SQL — vì executescript(SCHEMA_SQL) chạy TRƯỚC migration, DB cũ chưa
-    # có cột batch sẽ khiến CREATE INDEX ném "no such column: batch" và hỏng cả
-    # init_db (trang không mở được).
-    "ALTER TABLE candidates ADD COLUMN batch INT",
-    "CREATE INDEX IF NOT EXISTS idx_candidates_batch ON candidates(batch)",
-    # Mẫu mail mời phỏng vấn gắn theo từng VỊ TRÍ (thêm cho DB đã tồn tại).
-    "ALTER TABLE positions ADD COLUMN mail_cc VARCHAR",
-    "ALTER TABLE positions ADD COLUMN mail_subject VARCHAR",
-    "ALTER TABLE positions ADD COLUMN mail_body TEXT",
-    # MỖI VỊ TRÍ = 1 JD → đường dẫn file JD nằm luôn trong bảng positions (thêm
-    # cột cho DB đã tồn tại). Bảng job_descriptions cũ bị XÓA HẲN, dữ liệu trong
-    # đó KHÔNG chuyển sang (nhập lại ở form vị trí) — xem
-    # cv_repository._drop_job_descriptions().
-    "ALTER TABLE positions ADD COLUMN jd_file_path VARCHAR",
-    # Bỏ các cột không dùng nữa (SQLite ≥ 3.35 hỗ trợ DROP COLUMN; DB mới đã
-    # không có sẵn các cột này nên câu lệnh sẽ bị bỏ qua an toàn).
-    "ALTER TABLE departments DROP COLUMN department_code",
-    # Bỏ tiêu đề JD riêng — luôn dùng tên vị trí (positions.position_title).
-    "ALTER TABLE positions DROP COLUMN jd_title",
-    # Đổi tên cột course_employees.result → status (DB cũ). Bảng tạo mới đã có sẵn
-    # cột 'status' nên câu lệnh này ném OperationalError ("no such column: result")
-    # và được init_db() bỏ qua an toàn.
-    "ALTER TABLE course_employees RENAME COLUMN result TO status",
-    # Mã viết tắt bộ phận (vd FIN, IT, R&D) — thêm cho DB đã tồn tại.
-    "ALTER TABLE departments ADD COLUMN short_name VARCHAR",
+    # Trạng thái đang làm / đã nghỉ việc (thêm sau lần dọn migration ở trên).
+    "ALTER TABLE employees ADD COLUMN status VARCHAR",
 ]
 
 # =============================================================================
@@ -392,11 +364,11 @@ SEED_DATA: dict[str, dict] = {
 STATUS_CHOICES = ["New", "Contacted", "Interview", "Passed", "Rejected", "On hold"]
 POSITION_STATUS_CHOICES = ["Open", "Paused", "Closed"]
 
-# Nhân viên: giới tính & cấp bậc (level) — dùng cho ô lọc + form nhập.
+# Nhân viên: giới tính & trạng thái làm việc — dùng cho ô lọc + form nhập.
+# Cấp bậc (level) nhân viên giờ tham chiếu thẳng bảng danh mục `levels`
+# (level_id) — không còn danh sách cứng riêng cho employees nữa.
 GENDER_CHOICES = ["Male", "Female", "Other"]
-EMPLOYEE_LEVEL_CHOICES = [
-    "Intern", "Fresher", "Junior", "Middle", "Senior", "Lead", "Manager",
-]
+EMPLOYEE_STATUS_CHOICES = ["Working", "Resigned"]
 
 # Danh mục nhân viên: nhóm lao động & nhóm chức năng của cost center.
 COLLAR_CHOICES = ["Blue Collar", "White Collar"]

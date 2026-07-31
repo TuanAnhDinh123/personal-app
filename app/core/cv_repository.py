@@ -25,8 +25,8 @@ CANDIDATE_FIELDS = [
 ]
 EMPLOYEE_FIELDS = [
     "code", "global_code", "full_name", "surname", "name", "middle_name",
-    "date_of_birth", "gender", "education", "phone", "email", "level",
-    "department_id", "address",
+    "date_of_birth", "gender", "education", "phone", "email", "level_id",
+    "department_id", "address", "status",
 ]
 COURSE_FIELDS = ["title", "content", "date", "location", "course_type"]
 COURSE_EMPLOYEE_FIELDS = ["course_id", "employee_id", "status", "note"]
@@ -413,9 +413,8 @@ def list_levels():
 
 
 def list_level_names() -> list[str]:
-    """Tên cấp bậc để đổ vào ô chọn; DB rỗng → dùng tạm danh sách mặc định."""
-    names = [r["level_name"] for r in list_levels() if r["level_name"]]
-    return names or list(cv_schema.EMPLOYEE_LEVEL_CHOICES)
+    """Tên cấp bậc để đổ vào ô chọn."""
+    return [r["level_name"] for r in list_levels() if r["level_name"]]
 
 
 def get_level(level_id):
@@ -566,42 +565,31 @@ EMPLOYEE_SEARCH_FIELDS = [
 def list_employees():
     with get_connection() as conn:
         return conn.execute(
-            "SELECT e.*, d.department_name "
+            "SELECT e.*, d.department_name, l.level_name "
             "FROM employees e "
             "LEFT JOIN departments d ON d.department_id = e.department_id "
+            "LEFT JOIN levels l ON l.level_id = e.level_id "
             "ORDER BY e.full_name").fetchall()
 
 
-def list_employee_levels() -> list[str]:
-    """Các giá trị `level` khác nhau ĐANG CÓ trong bảng employees (bỏ rỗng).
-
-    Dữ liệu nhập từ Excel có thể chứa giá trị NGOÀI danh mục `levels` (vd mã số
-    '1', '2', '-'), nên ô lọc cần biết để vẫn tìm được những nhân viên đó.
-    """
-    with get_connection() as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT TRIM(level) AS lv FROM employees "
-            "WHERE level IS NOT NULL AND TRIM(level) <> '' "
-            "ORDER BY lv").fetchall()
-    return [r["lv"] for r in rows]
-
-
 def search_employees(keyword: str = "", department_id=None, gender: str = "",
-                     level: str = "", codes=None):
+                     level_id=None, status: str = "", codes=None):
     """Tìm nhân viên: từ khóa quét MỌI cột text; lọc theo bộ phận / giới tính /
-    level (các ô select).
+    level / trạng thái làm việc (các ô select).
 
     Từ khóa tách theo khoảng trắng → mỗi token phải khớp ÍT NHẤT một cột text
-    (LIKE); các token ghép AND. Trả kèm `department_name` để hiển thị bảng.
+    (LIKE); các token ghép AND. Trả kèm `department_name`/`level_name` để hiển
+    thị bảng.
 
     `codes`: danh sách mã NV (thường dán nguyên cột từ Excel). Nếu có, lọc CHÍNH
     XÁC những nhân viên có `code` nằm trong danh sách (khớp không phân biệt hoa
     thường + bỏ khoảng trắng thừa).
     """
     sql = [
-        "SELECT e.*, d.department_name",
+        "SELECT e.*, d.department_name, l.level_name",
         "FROM employees e",
         "LEFT JOIN departments d ON d.department_id = e.department_id",
+        "LEFT JOIN levels l ON l.level_id = e.level_id",
         "WHERE 1=1",
     ]
     params: list = []
@@ -622,12 +610,12 @@ def search_employees(keyword: str = "", department_id=None, gender: str = "",
     if gender:
         sql.append("AND e.gender = ?")
         params.append(gender)
-    if level:
-        # So khớp bỏ hoa/thường + khoảng trắng thừa: dữ liệu cũ có cả
-        # 'Team Leader' lẫn 'Team leader' → chọn 1 mục trong danh mục `levels`
-        # phải ra HẾT các nhân viên đó.
-        sql.append("AND UPPER(TRIM(e.level)) = UPPER(TRIM(?))")
-        params.append(level)
+    if level_id:
+        sql.append("AND e.level_id = ?")
+        params.append(level_id)
+    if status:
+        sql.append("AND e.status = ?")
+        params.append(status)
     sql.append("ORDER BY e.employee_id DESC")
     with get_connection() as conn:
         return conn.execute(" ".join(sql), params).fetchall()

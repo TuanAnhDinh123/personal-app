@@ -5,6 +5,7 @@ phận / giới tính / level) + bảng liệt kê đầy đủ cột (có check
 Tầng dữ liệu dùng lại app.core.cv_repository (bảng `employees`).
 """
 import datetime
+import re
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -27,17 +28,23 @@ try:
 except ImportError:
     _OPENPYXL_OK = False
 
-# Sentinel: cột "bộ phận" trong Excel là TEXT → cần tra ra department_id.
-_DEPT_TEXT = "__department_name__"
+# Sentinel: cột trong Excel là TEXT, cần tra ra id ở bảng master trước khi ghi.
+_DEPT_TEXT = "__department_short_name__"   # tra theo departments.short_name
+_LEVEL_TEXT = "__level_name__"             # tra theo levels.level_name
 
 # Map tiêu đề cột trong file Excel → field trong DB (theo ảnh mapping người dùng
 # gửi). Khóa đã CHUẨN HÓA (viết thường + bỏ khoảng trắng thừa). Có kèm vài
 # biến thể/alias cho chắc, khớp cả khi tiêu đề hơi khác.
+#
+# "Function (Common)" tra ra department_id qua departments.short_name (KHÔNG
+# dùng "Business Unit (Department)" nữa — cột đó chỉ còn text hiển thị, khi
+# xem sẽ mapping qua bảng master departments).
 _EXCEL_HEADER_MAP = {
     "ec":                             "code",
     "emp code":                       "code",
     "employee code":                  "code",
     "code":                           "code",
+    "globalempcode":                  "global_code",
     "globalemp code":                 "global_code",
     "global emp code":                "global_code",
     "global code":                    "global_code",
@@ -57,13 +64,28 @@ _EXCEL_HEADER_MAP = {
     "phone":                          "phone",
     "personal email address":         "email",
     "email":                          "email",
-    "job level":                      "level",
-    "level":                          "level",
-    "business unit (department)":     _DEPT_TEXT,
-    "business unit":                  _DEPT_TEXT,
-    "department":                     _DEPT_TEXT,
+    "job level":                      _LEVEL_TEXT,
+    "function (common)":              _DEPT_TEXT,
+    "function":                       _DEPT_TEXT,
     "street (address)":               "address",
     "address":                        "address",
+    "position status":                "status",
+    "status":                         "status",
+}
+
+# Tiêu đề cột CỐ TÌNH bỏ qua khi import (không báo "unrecognized column" vì đã
+# biết rõ lý do bỏ): thông tin trùng lặp, không dùng, hoặc chỉ hiển thị qua
+# mapping bảng master thay vì lưu thẳng text.
+_EXCEL_IGNORED_HEADERS = {
+    "legal entity (company)",
+    "stt",
+    "job title with level (no use)",
+    "business unit (department)",
+    "business unit",
+    "department",
+    "job title (description)",
+    "birthday",
+    "(old) phone number",
 }
 
 
@@ -80,6 +102,59 @@ def _cell_str(value):
         return value.strftime("%d/%m/%Y")
     return str(value).strip()
 
+
+_PHONE_SPLIT_RE = re.compile(r"[,;/\n]+")
+
+
+def _normalize_phones(text):
+    """Chuẩn hóa 1 ô số điện thoại → chuỗi nhiều số ngăn cách bởi "; ".
+
+    Cột `phone` có thể chứa nhiều số (1 nhân viên nhiều SĐT) — file Excel
+    thường gộp chung 1 ô, ngăn cách bởi dấu phẩy/chấm phẩy/gạch chéo/xuống
+    dòng. Ghép lại đồng nhất về "; " để hiển thị & tìm kiếm (LIKE) nhất quán.
+    """
+    parts = [p.strip() for p in _PHONE_SPLIT_RE.split(text) if p.strip()]
+    return "; ".join(parts)
+
+
+# Dò dòng header THẬT trong N dòng đầu file — file gốc thường có vài dòng
+# tiêu đề/logo/ghi chú phía trên (đôi khi bị ẨN) trước khi tới dòng tên cột.
+_HEADER_SCAN_ROWS = 20
+_HEADER_MIN_MATCHES = 3    # số cột khớp tối thiểu để coi 1 dòng là header thật
+_KNOWN_HEADERS = set(_EXCEL_HEADER_MAP) | _EXCEL_IGNORED_HEADERS
+
+
+def _find_header_row(ws):
+    """Trả về SỐ THỨ TỰ dòng chứa tên cột thật (1-based).
+
+    Quét `_HEADER_SCAN_ROWS` dòng đầu, chọn dòng có nhiều ô khớp tên cột đã
+    biết (`_EXCEL_HEADER_MAP`/`_EXCEL_IGNORED_HEADERS`) nhất. Không dòng nào đạt
+    tối thiểu `_HEADER_MIN_MATCHES` → coi dòng 1 là header (hành vi cũ, để
+    không vỡ với file đơn giản không có phần tiêu đề thừa phía trên).
+    """
+    best_row, best_score = 1, -1
+    for row_idx, row in enumerate(
+            ws.iter_rows(min_row=1, max_row=_HEADER_SCAN_ROWS, values_only=True), start=1):
+        score = sum(1 for v in row if v and _norm(v) in _KNOWN_HEADERS)
+        if score > best_score:
+            best_row, best_score = row_idx, score
+    return best_row if best_score >= _HEADER_MIN_MATCHES else 1
+
+
+def _normalize_status(text):
+    """Chuẩn hóa cột 'Position status' trong Excel → 1 trong
+    cv_schema.EMPLOYEE_STATUS_CHOICES ("Working"/"Resigned").
+
+    Giá trị không nhận diện được (không chứa từ khóa quen) → trả "" (bỏ trống)
+    thay vì gán liều, tránh ghi sai trạng thái đang làm/đã nghỉ của nhân viên.
+    """
+    t = _norm(text)
+    if "active" in t:
+        return "Working"
+    if any(kw in t for kw in ("terminat", "resign", "leave", "inactive")):
+        return "Resigned"
+    return ""
+
 # ─────────────────────────────────────────────────────────────────────────
 #  BỀ RỘNG (px) CÁC CỘT BẢNG NHÂN VIÊN — chỉnh tùy ý ở đây.
 # ─────────────────────────────────────────────────────────────────────────
@@ -94,11 +169,12 @@ EMP_COL_WIDTHS = {
     "date_of_birth":   95,
     "gender":          70,
     "education":       130,
-    "phone":           120,
+    "phone":           160,
     "email":           210,
-    "level":           90,
+    "level_name":      90,
     "department_name": 140,
     "address":         200,
+    "status":          90,
 }
 
 _W = EMP_COL_WIDTHS
@@ -117,16 +193,17 @@ _EMP_COLUMNS = [
     ("education",       "Education",   _W["education"],       "w"),
     ("phone",           "Phone",       _W["phone"],           "w"),
     ("email",           "Email",       _W["email"],           "w"),
-    ("level",           "Level",       _W["level"],           "center"),
+    ("level_name",      "Level",       _W["level_name"],      "center"),
     ("department_name", "Department",  _W["department_name"], "w"),
     ("address",         "Address",     _W["address"],         "w"),
+    ("status",          "Status",      _W["status"],          "center"),
 ]
 
 # Bảng còn được bổ sung nhiều cột nữa → UI KHÔNG hiện hết. Đây là các cột hiện
 # MẶC ĐỊNH; người dùng bật/tắt thêm ở dropdown "Columns" (lựa chọn được lưu lại).
 _EMP_DEFAULT_COLUMNS = [
     "employee_id", "code", "global_code", "full_name",
-    "date_of_birth", "phone", "email", "department_name",
+    "date_of_birth", "phone", "email", "department_name", "status",
 ]
 
 # Section cấu hình để nhớ tập cột người dùng đã chọn (%APPDATA%/…/config.json).
@@ -140,20 +217,10 @@ def _dept_options():
 
 
 def _level_options():
-    """Danh sách cho ô lọc Level: lấy theo bảng danh mục `levels` (Master Data →
-    Levels), giữ đúng thứ tự sort_order.
-
-    Kèm thêm ở CUỐI các giá trị level đang có trong dữ liệu nhân viên nhưng
-    KHÔNG nằm trong danh mục (vd '1', '2', 'Specialist' nhập từ Excel) — nếu bỏ
-    đi thì những nhân viên đó không lọc được bằng ô này. So trùng bỏ hoa/thường
-    nên 'Team leader' không lặp lại khi danh mục đã có 'Team Leader'.
-    """
-    names = [r["level_name"].strip() for r in repo.list_levels()
-             if r["level_name"] and r["level_name"].strip()]
-    known = {n.lower() for n in names}
-    extras = sorted({v for v in repo.list_employee_levels()
-                     if v.lower() not in known}, key=str.lower)
-    return names + extras
+    """Danh sách cho ô lọc/form Level: lấy theo bảng danh mục `levels` (Master
+    Data → Levels), giữ đúng thứ tự sort_order. {tên hiển thị: level_id}."""
+    return {r["level_name"] or f"#{r['level_id']}": r["level_id"]
+            for r in repo.list_levels()}
 
 
 class _DuplicateCodesDialog(ModalDialog):
@@ -277,14 +344,16 @@ class EmployeeDbTool(BaseTool):
         # (ô select cao 54px, ô text ~36px → tự canh giữa cho khớp).
         filters.addWidget(self.ent_kw, 1, Qt.AlignVCenter)
 
-        # Ba ô select để bề rộng CỐ ĐỊNH & bằng nhau (nếu không, combo tự giãn
+        # Các ô select để bề rộng CỐ ĐỊNH & bằng nhau (nếu không, combo tự giãn
         # theo nội dung dài nhất — vd tên bộ phận — nuốt hết chỗ của ô text).
         self.sel_dept = widgets.FilterSelect("Department")
         self.sel_gender = widgets.FilterSelect("Gender")
         self.sel_level = widgets.FilterSelect("Level")
+        self.sel_status = widgets.FilterSelect("Status")
         self.sel_gender.set_options(cv_schema.GENDER_CHOICES)
-        self.sel_level.set_options(_level_options())   # nạp lại ở _reload()
-        for w in (self.sel_dept, self.sel_gender, self.sel_level):
+        self.sel_status.set_options(cv_schema.EMPLOYEE_STATUS_CHOICES)
+        # self.sel_dept / self.sel_level nạp options ở _reload() (đọc từ DB).
+        for w in (self.sel_dept, self.sel_gender, self.sel_level, self.sel_status):
             w.setFixedWidth(180)
             w.changed.connect(self._reload)
             filters.addWidget(w, 0)
@@ -328,11 +397,14 @@ class EmployeeDbTool(BaseTool):
         dept_id = dept_opts.get(self.sel_dept.value())
         # Nạp lại danh mục Level mỗi lần tìm → thêm/sửa cấp bậc ở trang Master
         # Data → Levels là thấy ngay, không cần mở lại tool.
-        self.sel_level.set_options(_level_options())
+        level_opts = _level_options()
+        self.sel_level.set_options(level_opts.keys())
+        level_id = level_opts.get(self.sel_level.value())
 
         rows = repo.search_employees(
             self.ent_kw.text(), department_id=dept_id,
-            gender=self.sel_gender.value(), level=self.sel_level.value(),
+            gender=self.sel_gender.value(), level_id=level_id,
+            status=self.sel_status.value(),
             codes=self.ent_codes.text().split())
         self.table.set_rows(rows)
         self.count_lbl.setText(
@@ -341,7 +413,7 @@ class EmployeeDbTool(BaseTool):
     def _clear_filters(self):
         self.ent_kw.clear()
         self.ent_codes.clear()
-        for w in (self.sel_dept, self.sel_gender, self.sel_level):
+        for w in (self.sel_dept, self.sel_gender, self.sel_level, self.sel_status):
             w.clear()
         self._reload()
 
@@ -469,25 +541,38 @@ class EmployeeDbTool(BaseTool):
                 return
             skip_codes = {_norm(d["code"]) for d in dup_rows if d["code"]}
 
-        # Tra department_id theo TÊN bộ phận (khớp không phân biệt hoa/thường).
-        dept_by_name = {_norm(d["department_name"]): d["department_id"]
-                        for d in repo.list_departments()
-                        if d["department_name"]}
+        # Tra department_id theo MÃ VIẾT TẮT (short_name) — cột "Function
+        # (Common)" trong file, khớp không phân biệt hoa/thường.
+        dept_by_short = {_norm(d["short_name"]): d["department_id"]
+                         for d in repo.list_departments()
+                         if d["short_name"]}
+        # Tra level_id theo tên cấp bậc trong danh mục `levels`.
+        level_by_name = {_norm(l["level_name"]): l["level_id"]
+                         for l in repo.list_levels()
+                         if l["level_name"]}
 
         added = 0
         skipped = 0
-        missing_depts = set()   # tên bộ phận trong file nhưng không có trong DB
+        missing_depts = set()    # mã bộ phận trong file nhưng không có trong DB
+        missing_levels = set()   # tên cấp bậc trong file nhưng không có trong danh mục
         for rec in rows:
             if skip_codes and _norm(rec.get("code", "")) in skip_codes:
                 skipped += 1
                 continue
             dept_text = rec.pop(_DEPT_TEXT, "")
             if dept_text:
-                dept_id = dept_by_name.get(_norm(dept_text))
+                dept_id = dept_by_short.get(_norm(dept_text))
                 if dept_id is not None:
                     rec["department_id"] = dept_id
                 else:
                     missing_depts.add(dept_text)
+            level_text = rec.pop(_LEVEL_TEXT, "")
+            if level_text:
+                level_id = level_by_name.get(_norm(level_text))
+                if level_id is not None:
+                    rec["level_id"] = level_id
+                else:
+                    missing_levels.add(level_text)
             repo.insert_employee(rec)
             added += 1
 
@@ -498,22 +583,35 @@ class EmployeeDbTool(BaseTool):
         if missing_depts:
             names = ", ".join(sorted(missing_depts)[:10])
             more = " …" if len(missing_depts) > 10 else ""
-            msg += ("\n\nDepartments not found (link left empty): "
-                    f"{names}{more}\nCreate them on the 'Departments' page and "
-                    "re-import if you need the link.")
+            msg += ("\n\nDepartments not found by short name (link left empty): "
+                    f"{names}{more}\nCreate/fix them on the 'Departments' page "
+                    "and re-import if you need the link.")
+        if missing_levels:
+            names = ", ".join(sorted(missing_levels)[:10])
+            more = " …" if len(missing_levels) > 10 else ""
+            msg += ("\n\nJob levels not found in the 'Levels' master data "
+                    f"(link left empty): {names}{more}\nAdd them on the "
+                    "'Levels' page and re-import if you need the link.")
         dialogs.success(self._root, "Done", msg)
 
     @staticmethod
     def _read_excel(path):
         """Đọc file Excel → (list rec, list tiêu đề cột không nhận diện được).
 
-        Mỗi rec là dict {field DB → giá trị}, riêng cột bộ phận giữ TEXT dưới
-        khóa sentinel `_DEPT_TEXT` (sẽ tra ra id ở bước sau). Nếu thiếu full_name
-        thì ghép từ surname + middle_name + name (thứ tự tên tiếng Việt).
+        Mỗi rec là dict {field DB → giá trị}, riêng cột bộ phận / cấp bậc giữ
+        TEXT dưới khóa sentinel `_DEPT_TEXT` / `_LEVEL_TEXT` (sẽ tra ra id ở
+        bước sau, xem `_batch_import`). Nếu thiếu full_name thì ghép từ
+        surname + middle_name + name (thứ tự tên tiếng Việt).
+
+        Dòng header KHÔNG chắc luôn ở dòng 1 — file gốc thường có vài dòng tiêu
+        đề/logo/ghi chú phía trên (có thể bị ẨN) trước khi tới dòng tên cột thật
+        → dò tìm dòng đó bằng `_find_header_row` thay vì đinh cứng dòng 1.
         """
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
         ws = wb.active
-        header = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+        header_row = _find_header_row(ws)
+        header = next(
+            ws.iter_rows(min_row=header_row, max_row=header_row, values_only=True), None)
         if not header:
             wb.close()
             return [], []
@@ -523,14 +621,15 @@ class EmployeeDbTool(BaseTool):
         for idx, title in enumerate(header):
             if title is None or not str(title).strip():
                 continue
-            key = _EXCEL_HEADER_MAP.get(_norm(title))
+            norm_title = _norm(title)
+            key = _EXCEL_HEADER_MAP.get(norm_title)
             if key:
                 col_key[idx] = key
-            else:
+            elif norm_title not in _EXCEL_IGNORED_HEADERS:
                 unknown.append(str(title).strip())
 
         rows = []
-        for values in ws.iter_rows(min_row=2, values_only=True):
+        for values in ws.iter_rows(min_row=header_row + 1, values_only=True):
             rec = {}
             for idx, key in col_key.items():
                 if idx < len(values):
@@ -538,6 +637,12 @@ class EmployeeDbTool(BaseTool):
                     if v == "":
                         continue
                     rec[key] = v
+            if rec.get("phone"):
+                rec["phone"] = _normalize_phones(rec["phone"])
+            if rec.get("status"):
+                rec["status"] = _normalize_status(rec["status"])
+                if not rec["status"]:
+                    del rec["status"]
             if not rec.get("full_name"):
                 parts = [rec.get("surname"), rec.get("middle_name"), rec.get("name")]
                 composed = " ".join(p for p in parts if p)
@@ -564,14 +669,16 @@ class EmployeeDbTool(BaseTool):
             {"key": "gender", "label": "Gender", "kind": "choice",
              "choices": cv_schema.GENDER_CHOICES, "allow_empty": True},
             {"key": "education", "label": "Education", "kind": "text"},
-            {"key": "phone", "label": "Phone", "kind": "text"},
+            {"key": "phone", "label": 'Phone (separate multiple with "; ")', "kind": "text"},
             {"key": "email", "label": "Email", "kind": "text"},
             {"key": "address", "label": "Address", "kind": "text"},
             {"kind": "section", "label": "Job"},
-            {"key": "level", "label": "Level", "kind": "choice",
-             "choices": cv_schema.EMPLOYEE_LEVEL_CHOICES, "allow_empty": True},
+            {"key": "level_id", "label": "Level", "kind": "dropdown",
+             "options": _level_options},
             {"key": "department_id", "label": "Department", "kind": "dropdown",
              "options": _dept_options},
+            {"key": "status", "label": "Status", "kind": "choice",
+             "choices": cv_schema.EMPLOYEE_STATUS_CHOICES, "allow_empty": True},
         ]
 
     def _add(self):
