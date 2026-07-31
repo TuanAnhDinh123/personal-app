@@ -295,7 +295,7 @@ class MainWindow(QMainWindow):
 
         outer.addWidget(widgets.scroll_area(nav_holder), 1)
 
-        ver = QLabel("v0.2.0 · PySide6"); ver.setObjectName("SidebarVersion")
+        ver = QLabel("v0.2.0"); ver.setObjectName("SidebarVersion")
         ver.setAlignment(Qt.AlignCenter)
         outer.addWidget(ver)
         return sb
