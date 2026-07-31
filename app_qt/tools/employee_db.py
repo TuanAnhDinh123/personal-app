@@ -9,7 +9,7 @@ import re
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFileDialog, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout,
+    QCheckBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout,
 )
 
 from app.core import config
@@ -349,14 +349,13 @@ class EmployeeDbTool(BaseTool):
         self.sel_dept = widgets.FilterSelect("Department")
         self.sel_gender = widgets.FilterSelect("Gender")
         self.sel_level = widgets.FilterSelect("Level")
-        self.sel_status = widgets.FilterSelect("Status")
         self.sel_gender.set_options(cv_schema.GENDER_CHOICES)
-        self.sel_status.set_options(cv_schema.EMPLOYEE_STATUS_CHOICES)
         # self.sel_dept / self.sel_level nạp options ở _reload() (đọc từ DB).
-        for w in (self.sel_dept, self.sel_gender, self.sel_level, self.sel_status):
+        for w in (self.sel_dept, self.sel_gender, self.sel_level):
             w.setFixedWidth(180)
             w.changed.connect(self._reload)
             filters.addWidget(w, 0)
+
         filters.addWidget(widgets.button(None, "Reset", variant="neutral",
                                          icon="eraser", command=self._clear_filters), 0)
         lay.addLayout(filters)
@@ -371,6 +370,13 @@ class EmployeeDbTool(BaseTool):
         bar.addWidget(B(None, "Import from Excel", variant="primary", icon="download",
                         command=self._batch_import))
         bar.addStretch(1)
+
+        # GLOBAL SCOPE (xem cv_repository._EXCLUDE_RESIGNED_SQL): mặc định ẨN
+        # người đã nghỉ việc. Tick vào đây mới gỡ scope, xem luôn cả họ.
+        self.chk_include_resigned = QCheckBox("Include resigned employees")
+        self.chk_include_resigned.toggled.connect(self._reload)
+        bar.addWidget(self.chk_include_resigned, 0, Qt.AlignVCenter)
+
         bar.addWidget(self._build_column_picker())
         bar.addWidget(B(None, "Reload", variant="neutral", icon="refresh", command=self._reload))
         lay.addLayout(bar)
@@ -401,20 +407,23 @@ class EmployeeDbTool(BaseTool):
         self.sel_level.set_options(level_opts.keys())
         level_id = level_opts.get(self.sel_level.value())
 
+        include_resigned = self.chk_include_resigned.isChecked()
         rows = repo.search_employees(
             self.ent_kw.text(), department_id=dept_id,
             gender=self.sel_gender.value(), level_id=level_id,
-            status=self.sel_status.value(),
-            codes=self.ent_codes.text().split())
+            codes=self.ent_codes.text().split(),
+            include_resigned=include_resigned)
         self.table.set_rows(rows)
         self.count_lbl.setText(
-            f"Showing {len(rows)} employees · Total in DB: {repo.count_employees()}")
+            f"Showing {len(rows)} employees · Total in DB: "
+            f"{repo.count_employees(include_resigned=include_resigned)}")
 
     def _clear_filters(self):
         self.ent_kw.clear()
         self.ent_codes.clear()
-        for w in (self.sel_dept, self.sel_gender, self.sel_level, self.sel_status):
+        for w in (self.sel_dept, self.sel_gender, self.sel_level):
             w.clear()
+        self.chk_include_resigned.setChecked(False)
         self._reload()
 
     def _selected_id(self):

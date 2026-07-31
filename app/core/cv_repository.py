@@ -561,21 +561,31 @@ EMPLOYEE_SEARCH_FIELDS = [
     "e.middle_name", "e.education", "e.phone", "e.email", "e.address",
 ]
 
+# GLOBAL SCOPE: mọi nghiệp vụ đọc danh sách nhân viên (list/search/count) MẶC
+# ĐỊNH bỏ qua người đã nghỉ việc (status = 'Resigned') — trừ khi gọi với
+# include_resigned=True (vd màn hình Employees khi tick "Include resigned").
+# NULL/"" (chưa xác định) vẫn được coi là đang làm.
+_EXCLUDE_RESIGNED_SQL = "(e.status IS NULL OR e.status <> 'Resigned')"
 
-def list_employees():
+
+def list_employees(include_resigned=False):
+    sql = [
+        "SELECT e.*, d.department_name, l.level_name",
+        "FROM employees e",
+        "LEFT JOIN departments d ON d.department_id = e.department_id",
+        "LEFT JOIN levels l ON l.level_id = e.level_id",
+    ]
+    if not include_resigned:
+        sql.append(f"WHERE {_EXCLUDE_RESIGNED_SQL}")
+    sql.append("ORDER BY e.full_name")
     with get_connection() as conn:
-        return conn.execute(
-            "SELECT e.*, d.department_name, l.level_name "
-            "FROM employees e "
-            "LEFT JOIN departments d ON d.department_id = e.department_id "
-            "LEFT JOIN levels l ON l.level_id = e.level_id "
-            "ORDER BY e.full_name").fetchall()
+        return conn.execute(" ".join(sql)).fetchall()
 
 
 def search_employees(keyword: str = "", department_id=None, gender: str = "",
-                     level_id=None, status: str = "", codes=None):
+                     level_id=None, codes=None, include_resigned=False):
     """Tìm nhân viên: từ khóa quét MỌI cột text; lọc theo bộ phận / giới tính /
-    level / trạng thái làm việc (các ô select).
+    level (các ô select).
 
     Từ khóa tách theo khoảng trắng → mỗi token phải khớp ÍT NHẤT một cột text
     (LIKE); các token ghép AND. Trả kèm `department_name`/`level_name` để hiển
@@ -584,6 +594,9 @@ def search_employees(keyword: str = "", department_id=None, gender: str = "",
     `codes`: danh sách mã NV (thường dán nguyên cột từ Excel). Nếu có, lọc CHÍNH
     XÁC những nhân viên có `code` nằm trong danh sách (khớp không phân biệt hoa
     thường + bỏ khoảng trắng thừa).
+
+    `include_resigned`: mặc định False → áp GLOBAL SCOPE, bỏ người đã nghỉ việc
+    (xem `_EXCLUDE_RESIGNED_SQL`). True → bỏ áp scope, lấy luôn cả người đã nghỉ.
     """
     sql = [
         "SELECT e.*, d.department_name, l.level_name",
@@ -593,6 +606,8 @@ def search_employees(keyword: str = "", department_id=None, gender: str = "",
         "WHERE 1=1",
     ]
     params: list = []
+    if not include_resigned:
+        sql.append(f"AND {_EXCLUDE_RESIGNED_SQL}")
     kw = (keyword or "").strip()
     if kw:
         ors = " OR ".join(f"{col} LIKE ?" for col in EMPLOYEE_SEARCH_FIELDS)
@@ -613,17 +628,17 @@ def search_employees(keyword: str = "", department_id=None, gender: str = "",
     if level_id:
         sql.append("AND e.level_id = ?")
         params.append(level_id)
-    if status:
-        sql.append("AND e.status = ?")
-        params.append(status)
     sql.append("ORDER BY e.employee_id DESC")
     with get_connection() as conn:
         return conn.execute(" ".join(sql), params).fetchall()
 
 
-def count_employees() -> int:
+def count_employees(include_resigned=False) -> int:
+    sql = "SELECT COUNT(*) FROM employees e"
+    if not include_resigned:
+        sql += f" WHERE {_EXCLUDE_RESIGNED_SQL}"
     with get_connection() as conn:
-        return conn.execute("SELECT COUNT(*) FROM employees").fetchone()[0]
+        return conn.execute(sql).fetchone()[0]
 
 
 def get_employee(employee_id):
