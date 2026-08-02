@@ -216,6 +216,22 @@ def create_appointment(subject, start, duration_minutes=30, body="",
         pythoncom.CoUninitialize()
 
 
+def _account_smtp(acct):
+    """SMTP thật của một Account — tài khoản Exchange đôi khi trả `SmtpAddress`
+    rỗng qua MAPI cổ điển, phải tra qua ExchangeUser.PrimarySmtpAddress (giống
+    cách `_resolve_smtp` tra cho recipient)."""
+    smtp = str(getattr(acct, "SmtpAddress", "") or "")
+    if smtp:
+        return smtp
+    try:
+        exch = acct.CurrentUser.AddressEntry.GetExchangeUser()
+        if exch is not None and exch.PrimarySmtpAddress:
+            return str(exch.PrimarySmtpAddress)
+    except Exception:
+        pass
+    return smtp
+
+
 def list_accounts():
     """Địa chỉ SMTP của các tài khoản đang đăng nhập trong Outlook.
 
@@ -232,7 +248,7 @@ def list_accounts():
         ns = outlook.GetNamespace("MAPI")
         result = []
         for acct in ns.Accounts:
-            smtp = str(getattr(acct, "SmtpAddress", "") or "")
+            smtp = _account_smtp(acct)
             if smtp and smtp not in result:
                 result.append(smtp)
         return result
@@ -248,9 +264,13 @@ def send_mail(to, subject, body, cc="", html="", account_smtp=None, attachments=
     `body` khi đó dùng làm bản thuần (fallback). Không có `html` thì gửi
     thuần như cũ.
 
-    `account_smtp`: gửi bằng tài khoản Outlook có địa chỉ SMTP này thay vì tài
-    khoản mặc định (dùng khi Outlook đăng nhập nhiều tài khoản). Không khớp
-    được tài khoản nào thì rơi về mặc định.
+    `account_smtp`: gửi bằng địa chỉ SMTP này thay vì tài khoản mặc định. Khớp
+    được với một tài khoản THẬT (trong `list_accounts()`) thì dùng
+    SendUsingAccount; không khớp (vd hộp thư dùng chung/additional mailbox —
+    loại này không phải account thật nên không liệt ra được, phải gõ tay) thì
+    gửi kiểu "on behalf of" qua SentOnBehalfOfName — cần đã được cấp quyền
+    Send As / Send on Behalf cho hộp thư đó, nếu không Outlook báo lỗi khi
+    Send().
     `attachments`: danh sách đường dẫn file đính kèm.
     `deferred_until`: datetime — HẸN GIỜ gửi. Mail không đi ngay mà nằm ở
     Outbox tới đúng thời điểm này mới được chuyển đi (thuộc tính
@@ -279,10 +299,14 @@ def send_mail(to, subject, body, cc="", html="", account_smtp=None, attachments=
             mail.DeferredDeliveryTime = deferred_until
         if account_smtp:
             ns = outlook.GetNamespace("MAPI")
+            matched = False
             for acct in ns.Accounts:
-                if str(getattr(acct, "SmtpAddress", "") or "").lower() == account_smtp.lower():
+                if _account_smtp(acct).lower() == account_smtp.lower():
                     mail.SendUsingAccount = acct
+                    matched = True
                     break
+            if not matched:
+                mail.SentOnBehalfOfName = account_smtp
         mail.Send()
     finally:
         pythoncom.CoUninitialize()

@@ -223,8 +223,10 @@ như mỗi cột trong file có một cột tương ứng trong DB; chú thích
   tính lại. Các cột "Legal Entity (Company)", "Position status", "Business Unit
   (Department)", "BC/WC", "STT", "Birthday"… không lưu vì đã có nguồn khác hoặc
   chỉ là cột phụ trợ trong file (xem chú thích trong schema).
-- Bảng ~90 cột → giao diện chỉ hiện vài cột mặc định, bật/tắt thêm ở dropdown
-  **Columns** (lựa chọn được ghi nhớ).
+- Bảng ~90 cột → giao diện chỉ hiện vài cột mặc định, bật/tắt thêm ở modal
+  **Columns** — cột gom theo nhóm (Identity / Contact / Education…), lựa chọn
+  được ghi nhớ. Sửa nhóm & cột mặc định ở `_EMP_COLUMN_GROUPS` /
+  `_EMP_DEFAULT_COLUMNS` trong `app_qt/tools/employee_db.py`.
 
 **Bảng danh mục (master data)** — nạp sẵn dữ liệu từ file `Code.xlsx`:
 `departments` (tên + mã viết tắt), `employee_types` (WC/WCA/IBC/IBCA/DBC/DBCA +

@@ -61,7 +61,10 @@ def build():
     fields["birthday_from_account"].set(data["birthday_from_account"])
     widgets.hint(inner, "Pick the Outlook account to send birthday emails from, "
                         "if it should differ from the account used elsewhere in the app. "
-                        "Leave empty to use Outlook's default account.")
+                        "Leave empty to use Outlook's default account. To send from a "
+                        "shared/additional mailbox (it won't show up in this list), type "
+                        "its email address directly — you must already have Send As / "
+                        "Send on Behalf permission for it.")
 
     # ---- Nút lưu ----
     # Thẻ tự chừa CARD_PAD cho bóng → nút (không phải thẻ) thêm lề trái CARD_PAD

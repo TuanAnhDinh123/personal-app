@@ -16,10 +16,11 @@ lúc tới hạn. Ai đã qua sinh nhật trong tháng thì gửi ngay (không h
 import csv
 import datetime
 import os
+import re
 import unicodedata
 
 from PySide6.QtWidgets import (
-    QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
+    QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 
 from app.core import cv_repository as repo
@@ -34,12 +35,6 @@ _IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 _DEFAULT_SEND_TIME = "08:00"
 
 _DEFAULT_SUBJECT = "Happy Birthday, {name}!"
-_DEFAULT_BODY = (
-    "Dear {name},\n\n"
-    "Wishing you a very happy birthday! May your day be filled with joy, and "
-    "the year ahead bring you good health, happiness and success.\n\n"
-    "With warmest wishes,\nDLVN HR Team"
-)
 
 
 def _fill(text, name):
@@ -97,12 +92,29 @@ def _fmt_when(dt):
     return dt.strftime("%d %b · %H:%M") if dt else "—"
 
 
+def _title_case_name(name):
+    """'NGUYỄN VĂN A' -> 'Nguyễn Văn A' — viết hoa chữ đầu mỗi từ, phần còn
+    lại viết thường."""
+    return " ".join(w.capitalize() for w in (name or "").split())
+
+
 def _strip_vn_accents(text):
     """Bỏ dấu tiếng Việt (đ/Đ xử lý riêng vì NFD không tách được ký tự này)."""
     text = (text or "").replace("đ", "d").replace("Đ", "D")
     text = unicodedata.normalize("NFD", text)
     text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
     return unicodedata.normalize("NFC", text)
+
+
+_CANVA_FNAME_RE = re.compile(r"^\d+-(.+)$")
+
+
+def _card_code_from_stem(stem):
+    """Canva Bulk Create xuất file dạng '<stt>-<mã NV>' (vd '1-20170456',
+    '2-20184578') — trả về phần mã NV. File không theo mẫu này (đặt tên trực
+    tiếp bằng mã NV, kiểu cũ) thì trả nguyên tên."""
+    m = _CANVA_FNAME_RE.match(stem)
+    return m.group(1) if m else stem
 
 
 def _scan_images(folder):
@@ -113,7 +125,9 @@ def _scan_images(folder):
             stem, ext = os.path.splitext(fname)
             stem = stem.strip()
             if ext.lower() in _IMAGE_EXTS and stem:
-                images[stem.upper()] = fname
+                code = _card_code_from_stem(stem).strip()
+                if code:
+                    images[code.upper()] = fname
     return images
 
 
@@ -143,7 +157,7 @@ class BirthdayEmailTool(BaseTool):
         widgets.section_label(card, "Email content")
         self.subject_field = widgets.text_row(card, "Subject")
         self.subject_field.set(_DEFAULT_SUBJECT)
-        self.body_field = widgets.text_area(card, "Body", value=_DEFAULT_BODY, height=8)
+        widgets.hint(card, "No email body — the card image is the message.")
 
         widgets.section_label(card, "Delivery")
         self.time_field = widgets.dropdown(card, "Delivery time", _time_slots())
@@ -156,8 +170,8 @@ class BirthdayEmailTool(BaseTool):
 
         send_bar = QHBoxLayout()
         send_bar.setContentsMargins(0, 8, 0, 0)
-        send_bar.addWidget(widgets.button(card, "Send", variant="primary",
-                                          icon="mail", command=self._on_send))
+        send_bar.addWidget(widgets.button(card, "Review birthdays", variant="primary",
+                                          icon="search", command=self._on_send))
         send_bar.addWidget(widgets.button(
             card, "Export CSV (missing cards)", variant="neutral",
             icon="file-text", command=self._export_missing_csv))
@@ -198,8 +212,10 @@ class BirthdayEmailTool(BaseTool):
             rows.append({
                 "code": emp["code"],
                 "name": emp["name"] or emp["full_name"] or emp["code"],
-                "full_name": emp["full_name"] or emp["code"],
-                "email": (emp["email"] or "").strip(),
+                "full_name": _title_case_name(emp["full_name"] or emp["code"]),
+                # Ưu tiên company email, chỉ dùng personal email khi công ty
+                # chưa có (vd nhân viên mới chưa cấp mail công ty).
+                "email": (emp["company_email"] or emp["email"] or "").strip(),
                 "date_of_birth": emp["date_of_birth"],
                 "image_path": os.path.join(folder, image_name) if image_name else None,
                 "send_at": send_at,
@@ -209,7 +225,7 @@ class BirthdayEmailTool(BaseTool):
             })
 
         dlg = _BirthdayConfirmDialog(self._root, rows, folder)
-        if dlg.exec() != dlg.Accepted:
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         selected = dlg.selected_rows()
         if not selected:
@@ -221,7 +237,6 @@ class BirthdayEmailTool(BaseTool):
     def _send_all(self, rows):
         account = settings.get("birthday_from_account").strip()
         subject_tpl = self.subject_field.get().strip() or _DEFAULT_SUBJECT
-        body_tpl = self.body_field.get().strip() or _DEFAULT_BODY
 
         queued, sent_now, not_sent = [], [], []
         for row in rows:
@@ -234,7 +249,7 @@ class BirthdayEmailTool(BaseTool):
                 continue
             try:
                 outlook.send_mail(
-                    row["email"], _fill(subject_tpl, row["name"]), _fill(body_tpl, row["name"]),
+                    row["email"], _fill(subject_tpl, row["name"]), "",
                     account_smtp=account or None, attachments=[row["image_path"]],
                     deferred_until=row["send_at"] if row["scheduled"] else None)
                 if row["scheduled"]:
@@ -268,7 +283,9 @@ class BirthdayEmailTool(BaseTool):
         nạp vào Canva Bulk Create tạo 1 lần cho hết, khỏi phải làm lắt nhắt
         từng tháng. Cột `name` bỏ dấu tiếng Việt cho khớp mẫu thiệp. Cột
         date_of_birth ghi ngày/tháng SINH kèm NĂM HIỆN TẠI (không phải năm
-        sinh thật) vì đây là ngày hiển thị trên thiệp, không phải để lộ tuổi."""
+        sinh thật) vì đây là ngày hiển thị trên thiệp, không phải để lộ tuổi.
+        Cột name viết hoa chữ đầu (không phải IN HOA hết) và kèm dấu phẩy cuối
+        để dán thẳng vào khung chữ chào trên thiệp, vd 'Anh,'."""
         today = datetime.date.today()
         all_employees = [e for e in repo.list_employees()
                          if _day_month(e["date_of_birth"])]
@@ -289,7 +306,7 @@ class BirthdayEmailTool(BaseTool):
             raw_name = emp["name"] or emp["full_name"] or emp["code"] or ""
             missing.append({
                 "code": emp["code"] or "",
-                "name": _strip_vn_accents(raw_name),
+                "name": _title_case_name(_strip_vn_accents(raw_name)) + ",",
                 "date_of_birth": f"{dm[0]}/{dm[1]}/{today.year}",
             })
 
@@ -411,9 +428,15 @@ class _BirthdayConfirmDialog(ModalDialog):
         h.addWidget(cb)
         self._checks.append((row, cb))
 
+        name_col = QVBoxLayout()
+        name_col.setSpacing(2)
         name = QLabel(f"{row['full_name']}  ({row['code']})", box)
-        name.setObjectName("DetailName")
-        h.addWidget(name, 1)
+        name.setObjectName("DetailNamePlain")
+        name_col.addWidget(name)
+        email = QLabel(row["email"] or "No email on file", box)
+        email.setObjectName("DetailMeta")
+        name_col.addWidget(email)
+        h.addLayout(name_col, 1)
         dob = QLabel(row["date_of_birth"] or "—", box)
         dob.setObjectName("Hint")
         h.addWidget(dob)

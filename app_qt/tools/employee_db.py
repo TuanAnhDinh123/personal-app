@@ -390,16 +390,78 @@ _EMP_COLUMNS = [(key, title, _W.get(key, EMP_COL_WIDTH_DEFAULT), align)
                 for key, title, align in _EMP_COLUMN_SPECS]
 
 # Bảng có ~90 cột → UI KHÔNG hiện hết. Đây là các cột hiện MẶC ĐỊNH; người dùng
-# bật/tắt thêm ở dropdown "Columns" (lựa chọn được lưu lại).
+# bật/tắt thêm ở modal "Columns" (lựa chọn được lưu lại).
 _EMP_DEFAULT_COLUMNS = [
-    "employee_id", "code", "global_code", "full_name",
-    "date_of_birth", "phone", "email", "department_name",
-    "termination_date", "work_status",
+    "code", "global_code", "full_name", "date_of_birth", "gender",
+    "phone", "company_email", "manager_name", "department_name",
+    "cost_center_code", "job_title",
+]
+
+# Nhóm cột cho modal chọn cột: (tên nhóm, [khóa cột…]) — thứ tự nhóm & tên nhóm
+# soi theo các mục của bảng `employees` trong cv_schema.py (nhưng bằng tiếng Anh
+# vì đây là text người dùng NHÌN THẤY). Cột không nằm trong nhóm nào tự dồn vào
+# nhóm "Other" ở cuối (xem ColumnPicker._resolve_groups) nên thêm cột mới vào
+# _EMP_COLUMN_SPECS mà quên khai ở đây thì vẫn không bị mất cột.
+_EMP_COLUMN_GROUPS = [
+    ("Identity", [
+        "employee_id", "code", "global_code",
+    ]),
+    ("Personal info", [
+        "full_name", "surname", "middle_name", "name", "date_of_birth",
+        "gender", "place_of_birth", "native_place", "nationality", "religion",
+    ]),
+    ("Family", [
+        "marriage_status", "marital_status", "spouse_name", "spouse_dob",
+        "children_count", "children_names", "children_birthdays",
+    ]),
+    ("Contact", [
+        "phone", "email", "company_email", "address", "city", "country",
+        "permanent_address", "temporary_address", "emergency_contact_name",
+        "emergency_contact_relationship",
+    ]),
+    ("Education", [
+        "education", "education_field", "major", "graduation_year",
+        "school_name", "qualification", "qualification_code",
+    ]),
+    ("ID · bank · tax · insurance", [
+        "id_no", "id_issued_date", "id_issued_place", "passport_no",
+        "passport_issued_date", "bank_account_no", "bank_address", "tax_code",
+        "dependants", "insurance_book_no",
+    ]),
+    ("Organization", [
+        "department_name", "cost_center_code", "cost_center_group",
+        "employee_type_code", "collar", "level_name", "manager_name",
+        "job_title", "current_position", "time_in_position",
+        "facility_country", "facility_town", "local_function", "by_group",
+        "labor_type", "production_line", "operator_skill", "driving_forklift",
+        "working_hours_per_week", "smart_working_eligible", "er_jrf",
+    ]),
+    ("Contract & working time", [
+        "date_of_employment", "seniority_date", "contract_permanency",
+        "work_time_type", "working_time_pct", "direct_indirect",
+        "contract_type", "contract_start_date", "contract_end_date",
+        "changing_date",
+    ]),
+    ("Termination", [
+        "work_status", "termination_date", "leaving_reason",
+    ]),
+    ("Figures (computed in the Excel file)", [
+        "years_of_service", "length_of_service", "birth_year", "age",
+        "age_range",
+    ]),
+    ("Notes", [
+        "changing_notes", "changing_dates", "updated_changing_date", "note",
+    ]),
 ]
 
 # Section cấu hình để nhớ tập cột người dùng đã chọn (%APPDATA%/…/config.json).
 _CFG_SECTION = "employee_db"
 _CFG_COLUMNS = "visible_columns"
+# Đánh số phiên bản của _EMP_DEFAULT_COLUMNS: TĂNG số này khi đổi danh sách cột
+# mặc định → cấu hình đã lưu của người dùng bị bỏ qua MỘT LẦN để họ thấy ngay
+# tập cột mặc định mới (không phải tự bấm "Reset to default").
+_CFG_COLUMNS_VERSION = "columns_default_version"
+_EMP_COLUMNS_VERSION = 2
 
 
 def _dept_options():
@@ -609,18 +671,24 @@ class EmployeeDbTool(BaseTool):
         lay.addLayout(bar)
 
     def _build_column_picker(self):
-        """Dropdown tích chọn cột hiển thị; nhớ lựa chọn qua config.json."""
-        saved = config.load(_CFG_SECTION).get(_CFG_COLUMNS)
+        """Modal tích chọn cột hiển thị; nhớ lựa chọn qua config.json."""
+        cfg = config.load(_CFG_SECTION)
+        # Cấu hình lưu từ phiên bản cột mặc định CŨ → bỏ qua, dùng mặc định mới.
+        saved = (cfg.get(_CFG_COLUMNS)
+                 if cfg.get(_CFG_COLUMNS_VERSION) == _EMP_COLUMNS_VERSION else None)
 
         def _save(keys):
             cfg = config.load(_CFG_SECTION)
             cfg[_CFG_COLUMNS] = list(keys)
+            cfg[_CFG_COLUMNS_VERSION] = _EMP_COLUMNS_VERSION
             config.save(_CFG_SECTION, cfg)
 
         self.col_picker = ColumnPicker(self.table, _EMP_DEFAULT_COLUMNS,
-                                       on_change=_save)
+                                       groups=_EMP_COLUMN_GROUPS, on_change=_save)
         if saved:
             self.col_picker.set_keys(saved, notify=False)
+        else:
+            _save(self.col_picker.keys())   # ghi luôn phiên bản mới xuống config
         return self.col_picker
 
     # -------------------------------------------------------------- dữ liệu
