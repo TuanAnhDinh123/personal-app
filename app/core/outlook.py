@@ -19,6 +19,10 @@ _OL_MAIL_ITEM = 0
 # PR_SMTP_ADDRESS — dùng để lấy địa chỉ SMTP thật từ một địa chỉ Exchange (X.500)
 _PR_SMTP_ADDRESS = "http://schemas.microsoft.com/mapi/proptag/0x39FE001E"
 
+# PR_ATTACH_CONTENT_ID — gắn Content-ID cho file đính kèm để nhúng thẳng vào
+# HTMLBody qua "cid:" (ảnh hiện to trong mail, không phải file rời).
+_PR_ATTACH_CONTENT_ID = "http://schemas.microsoft.com/mapi/proptag/0x3712001E"
+
 
 def available():
     """True nếu đang ở Windows và import được pywin32."""
@@ -257,7 +261,7 @@ def list_accounts():
 
 
 def send_mail(to, subject, body, cc="", html="", account_smtp=None, attachments=None,
-              deferred_until=None):
+              deferred_until=None, inline_attachment=False):
     """Tạo và GỬI một mail qua Outlook (mặc định dùng tài khoản mặc định).
 
     Nếu truyền `html`, mail sẽ gửi dạng HTML (có định dạng) qua HTMLBody;
@@ -272,6 +276,9 @@ def send_mail(to, subject, body, cc="", html="", account_smtp=None, attachments=
     Send As / Send on Behalf cho hộp thư đó, nếu không Outlook báo lỗi khi
     Send().
     `attachments`: danh sách đường dẫn file đính kèm.
+    `inline_attachment`: True thì FILE ĐẦU TIÊN trong `attachments` được nhúng
+    thẳng vào nội dung mail qua "cid:" (hiện to ngay khi mở mail, như thiệp
+    thật, không phải icon file đính kèm rời) — `body`/`html` bị bỏ qua.
     `deferred_until`: datetime — HẸN GIỜ gửi. Mail không đi ngay mà nằm ở
     Outbox tới đúng thời điểm này mới được chuyển đi (thuộc tính
     DeferredDeliveryTime của Outlook). Tài khoản Exchange thì server giữ mail;
@@ -289,12 +296,15 @@ def send_mail(to, subject, body, cc="", html="", account_smtp=None, attachments=
         if cc:
             mail.CC = cc
         mail.Subject = subject
-        if html:
+        attached = [mail.Attachments.Add(str(path)) for path in (attachments or [])]
+        if inline_attachment and attached:
+            cid = "card0"
+            attached[0].PropertyAccessor.SetProperty(_PR_ATTACH_CONTENT_ID, cid)
+            mail.HTMLBody = f'<img src="cid:{cid}" style="max-width:100%;">'
+        elif html:
             mail.HTMLBody = html
         else:
             mail.Body = body
-        for path in (attachments or []):
-            mail.Attachments.Add(str(path))
         if deferred_until and deferred_until > datetime.datetime.now():
             mail.DeferredDeliveryTime = deferred_until
         if account_smtp:

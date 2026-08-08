@@ -251,6 +251,7 @@ class BirthdayEmailTool(BaseTool):
                 outlook.send_mail(
                     row["email"], _fill(subject_tpl, row["name"]), "",
                     account_smtp=account or None, attachments=[row["image_path"]],
+                    inline_attachment=True,
                     deferred_until=row["send_at"] if row["scheduled"] else None)
                 if row["scheduled"]:
                     queued.append(f"{display_name} — {_fmt_when(row['send_at'])}")
