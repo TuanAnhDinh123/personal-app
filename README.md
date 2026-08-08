@@ -59,7 +59,7 @@ personal-app/
 │   ├── icons.py             # Map emoji → tên icon line
 │   ├── richtext.py          # Ô soạn thảo rich text (QTextEdit)
 │   ├── assets/icons/        # Bộ icon line (SVG)
-│   ├── components/          # table · form_dialog · crud_panel · progress_dialog · task · dialog_base
+│   ├── components/          # table · form_dialog · crud_panel · progress_dialog · task · dialog_base · cv_rename
 │   └── tools/               # MỖI FILE = 1 TÁC VỤ (giao diện)
 └── app/core/                # LOGIC NGHIỆP VỤ (thuần Python, KHÔNG dính UI)
     ├── config.py · settings.py          # cấu hình
@@ -68,7 +68,7 @@ personal-app/
     ├── payroll_split.py                  # Tách bảng lương (Excel COM)
     ├── quarter_bonus.py                  # Thưởng quý (Excel COM)
     ├── ai_cv_scan.py                     # Quét CV bằng Gemini
-    ├── cv_scan.py                        # Quét CV (regex) + template Excel
+    ├── cv_scan.py                        # Chuẩn hóa tên file CV + template Excel
     ├── pdf_text.py                       # PDF → Text (+ OCR Tesseract)
     └── reminder_logic.py                 # Helper nhắc phản hồi phỏng vấn
 ```
@@ -122,13 +122,22 @@ khi gửi**. Chỉ quét 1 lần/ngày; vẫn có nút bấm tay để quét b�
 ## Tool: Quét CV bằng AI 🤖
 
 `app/tools/ai_scan_cv.py` — gửi **nguyên file PDF** cho mô hình **Google Gemini**
-để đọc hiểu và chấm điểm ứng viên theo JD (khác tool "Quét CV" chỉ dùng regex).
+để đọc hiểu và chấm điểm ứng viên theo JD.
 
-Giao diện gồm: ô chọn **thư mục chứa CV (PDF)**, ô chọn **đường dẫn lưu file
-Excel**, ô chọn **vị trí tuyển dụng** và ô **yêu cầu bổ sung cho AI**. (API key
-+ model đặt ở ⚙️ Cài đặt, dùng chung cho cả app.) Kết quả xuất ra Excel gồm: họ
-tên, ngày sinh, email, SĐT, **điểm phù hợp (0–100)** + nhận xét, **ưu điểm /
-nhược điểm**.
+Giao diện gồm: ô chọn **thư mục chứa CV (PDF)**, ô chọn **vị trí tuyển dụng** và
+ô **yêu cầu bổ sung cho AI**. (API key + model đặt ở ⚙️ Cài đặt, dùng chung cho
+cả app.) Mỗi CV quét xong được ghi thẳng vào bảng **Candidates** gồm: họ tên,
+ngày sinh, email, SĐT, **điểm phù hợp (0–100)** + nhận xét, **ưu điểm / nhược
+điểm**; ứng viên trùng email/SĐT thì hỏi *ghi đè* hay *xuất ra Excel*.
+
+**Nút “Normalize file names”** (cạnh nút quét) mở hộp **chuẩn hóa tên file CV**.
+Trong hộp: chọn **thư mục CV**, **prefix code**
++ **start code** và danh sách **từ nhiễu** cần bỏ khỏi tên ứng viên; bấm *Preview
+& rename* để xem bảng đối chiếu (sửa tay được cột tên) rồi đổi tên hàng loạt
+theo dạng `{prefix}{startcode}_{Tên ứng viên}.pdf`. Cấu hình lưu ở section
+`scan_cv`; giao diện ở
+[app_qt/components/cv_rename.py](app_qt/components/cv_rename.py), logic ở
+[app/core/cv_scan.py](app/core/cv_scan.py).
 
 > **JD lấy theo vị trí, không chọn file bằng tay**: chọn 1 **vị trí tuyển dụng**
 > thì tool đọc file JD đã gắn cho vị trí đó (`positions.jd_file_path`). Ô chọn

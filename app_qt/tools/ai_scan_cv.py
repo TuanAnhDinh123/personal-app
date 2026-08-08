@@ -23,8 +23,9 @@ from app.core.ai_cv_scan import (
     _call_gemini, _Cancelled, append_rows_to_excel, done_folder_for,
     move_to_done, read_jd_file, resolve_done_target,
 )
-from app_qt import dialogs, theme, widgets
+from app_qt import theme, widgets
 from app_qt.base_tool import BaseTool
+from app_qt.components.cv_rename import RenameConfigDialog
 from app_qt.components.modal import ModalDialog
 from app_qt.components.progress_dialog import ProgressDialog
 from app_qt.components.table import DataTable
@@ -226,6 +227,16 @@ class AiScanCvTool(BaseTool):
         widgets.hint(parent, "Each CV that scans successfully is imported into the Candidates "
                              "database and moved to a '…_scanned' folder, so if it stops "
                              "midway you can click again to continue with the rest.")
+        widgets.hint(parent, "Tip: use “Normalize file names” to batch-rename the CV files "
+                             "in the folder ({code}_{Candidate name}) before scanning.")
+
+    def extra_actions(self, parent):
+        """Nút phụ: mở hộp chuẩn hóa tên file CV trước khi quét."""
+        return [widgets.button(parent, "Normalize file names", variant="neutral",
+                               icon="pencil", command=self._open_rename)]
+
+    def _open_rename(self):
+        RenameConfigDialog(self._page, self.var_folder.get().strip()).exec()
 
     def run(self):
         # Bọc toàn bộ để mọi lỗi bất ngờ hiện ra hộp thoại thay vì "im lặng".

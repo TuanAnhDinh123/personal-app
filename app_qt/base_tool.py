@@ -51,6 +51,8 @@ class BaseTool(ABC):
             icon=self.action_icon, command=self.run,
         )
         actions.addWidget(btn)
+        for extra in self.extra_actions(card):
+            actions.addWidget(extra)
         actions.addStretch(1)
         card_lay.addLayout(actions)
 
@@ -58,6 +60,10 @@ class BaseTool(ABC):
         outer_lay.addStretch(1)
         self._page = outer
         return outer
+
+    def extra_actions(self, parent: QWidget) -> list:
+        """Nút phụ đặt cạnh nút chính (trả về list widget nút; mặc định không có)."""
+        return []
 
     @abstractmethod
     def build_body(self, parent: QWidget) -> None:
