@@ -16,6 +16,11 @@ _OL_APPOINTMENT = 26          # Class của item lịch đã tồn tại
 _OL_APPOINTMENT_ITEM = 1      # loại item khi tạo sự kiện lịch mới (olAppointmentItem)
 _OL_MAIL_ITEM = 0
 
+_OL_MEETING = 1               # MeetingStatus: sự kiện lịch trở thành LỜI MỜI HỌP
+_OL_REQUIRED = 1              # Recipient.Type: người tham dự bắt buộc
+_OL_OPTIONAL = 2              # Recipient.Type: người tham dự tùy chọn (thay cho CC)
+_OL_RESOURCE = 3              # Recipient.Type: tài nguyên — phòng họp
+
 # PR_SMTP_ADDRESS — dùng để lấy địa chỉ SMTP thật từ một địa chỉ Exchange (X.500)
 _PR_SMTP_ADDRESS = "http://schemas.microsoft.com/mapi/proptag/0x39FE001E"
 
@@ -216,6 +221,101 @@ def create_appointment(subject, start, duration_minutes=30, body="",
         appt.ReminderSet = True
         appt.ReminderMinutesBeforeStart = reminder_minutes
         appt.Save()
+    finally:
+        pythoncom.CoUninitialize()
+
+
+def _split_addresses(value):
+    """Tách chuỗi nhiều địa chỉ ("a@x.com; b@y.com") thành list."""
+    if not value:
+        return []
+    raw = str(value).replace(",", ";").split(";")
+    return [part.strip() for part in raw if part.strip()]
+
+
+def _insert_html_body(appt, html):
+    """Đổ nội dung HTML vào phần body của cửa sổ meeting ĐANG MỞ.
+
+    AppointmentItem không có thuộc tính HTMLBody (chỉ MailItem mới có), nên để
+    giữ định dạng (in đậm, màu, gạch đầu dòng…) phải ghi HTML ra file tạm rồi
+    nhờ trình soạn thảo Word của Inspector chèn vào — Word tự chuyển HTML thành
+    văn bản có định dạng. Trả về True nếu chèn được.
+    """
+    import os
+    import tempfile
+
+    path = None
+    try:
+        fd, path = tempfile.mkstemp(suffix=".html")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write('<html><head><meta http-equiv="Content-Type" '
+                     'content="text/html; charset=utf-8"></head><body>'
+                     f'{html}</body></html>')
+        doc = appt.GetInspector.WordEditor
+        # ConfirmConversions=False để Word không hỏi định dạng khi mở file HTML.
+        doc.Range(0, 0).InsertFile(path, "", False, False, False)
+        return True
+    except Exception:
+        return False
+    finally:
+        if path:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+
+def create_meeting(subject, start, end, to, optional="", location="",
+                   html="", body="", resources=None, reminder_minutes=15):
+    """Mở cửa sổ soạn LỜI MỜI HỌP của Outlook đã điền sẵn mọi thông tin.
+
+    Người dùng xem lại (thêm phòng họp nếu muốn) rồi bấm Send — Outlook lo trọn
+    gói: gửi mail mời cho người tham dự, tạo sự kiện trên lịch người gửi, và gửi
+    yêu cầu đặt phòng tới các phòng họp trong `resources`.
+
+    `start`/`end` là datetime. `to` / `optional` / `resources` nhận chuỗi nhiều
+    địa chỉ ngăn bằng ";" (hoặc list). `html` giữ định dạng cho nội dung; không
+    chèn được thì lùi về `body` thuần.
+
+    Cửa sổ mở ra KHÔNG chặn (modeless) — hàm trả về ngay, app không biết người
+    dùng có thực sự bấm Send hay không.
+    """
+    import pythoncom
+    import win32com.client
+
+    pythoncom.CoInitialize()
+    try:
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        appt = outlook.CreateItem(_OL_APPOINTMENT_ITEM)
+        appt.MeetingStatus = _OL_MEETING
+        appt.Subject = subject
+        appt.Start = start
+        appt.End = end
+        if location:
+            appt.Location = location
+        appt.ReminderSet = True
+        appt.ReminderMinutesBeforeStart = reminder_minutes
+
+        if isinstance(resources, str):
+            resources = _split_addresses(resources)
+        for addresses, kind in ((_split_addresses(to), _OL_REQUIRED),
+                                (_split_addresses(optional), _OL_OPTIONAL),
+                                (list(resources or []), _OL_RESOURCE)):
+            for addr in addresses:
+                appt.Recipients.Add(addr).Type = kind
+        try:
+            appt.Recipients.ResolveAll()
+        except Exception:
+            pass
+
+        # WordEditor chỉ dùng được khi cửa sổ đã mở → hiển thị trước, chèn sau.
+        appt.Display()
+        if not (html and _insert_html_body(appt, html)):
+            appt.Body = body or ""
+        try:
+            appt.GetInspector.Activate()
+        except Exception:
+            pass
     finally:
         pythoncom.CoUninitialize()
 

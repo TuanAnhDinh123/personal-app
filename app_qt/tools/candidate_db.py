@@ -10,11 +10,12 @@ Mỗi vị trí chỉ có ĐÚNG 1 mô tả công việc (JD) nên JD không cò
 tiêu đề + file JD nhập ngay trong form của trang "Vị trí tuyển dụng".
 """
 import os
+import re
 import unicodedata
 from pathlib import Path
 
 from PySide6.QtCore import QDate, QDateTime, QTime, Qt
-from PySide6.QtGui import QCursor
+from PySide6.QtGui import QCursor, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QCalendarWidget, QFileDialog, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QToolTip, QVBoxLayout, QWidget,
@@ -34,7 +35,6 @@ from app_qt.components.dialog_base import build_dialog_shell
 from app_qt.components.form_dialog import FormDialog
 from app_qt.components.modal import ModalDialog
 from app_qt.components.table import DataTable
-from app_qt.richtext import RichText
 
 try:
     import openpyxl  # noqa: F401
@@ -98,14 +98,49 @@ def _given_name(full_name):
     return _strip_accents(parts[-1]) if parts else ""
 
 
-def _fill_template(text, mapping):
+# Một placeholder có thể bị trình soạn thảo rich text cắt vụn bằng thẻ định dạng
+# ('{<span style="font-weight:600;">possion</span>}' khi chỉ bôi đậm chữ bên
+# trong), nên phần giữa hai dấu ngoặc chấp nhận cả thẻ HTML lẫn &nbsp;.
+_PLACEHOLDER_RE = re.compile(r"\{((?:<[^>]+>|&nbsp;|[^<>{}])*)\}")
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _fill_template(text, mapping, escape=False):
     """Thay các placeholder {name}{possion}{position}{date}{time}{time_start}
-    {time_end} trong `text` bằng giá trị thật."""
+    {time_end} trong `text` bằng giá trị thật.
+
+    Placeholder bôi đậm/đổi màu một phần vẫn nhận đúng tên khóa, và định dạng đó
+    được giữ lại cho giá trị thay vào. `escape=True` khi `text` là HTML — giá trị
+    thay vào được escape để tên kiểu "R&D Engineer" không phá cấu trúc HTML.
+    """
     if not text:
         return text or ""
-    for key, val in mapping.items():
-        text = text.replace("{" + key + "}", val)
-    return text
+
+    def _value(key):
+        val = mapping[key]
+        if escape:
+            val = val.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return val
+
+    def _replace(match):
+        inner = match.group(1)
+        key = _TAG_RE.sub("", inner).replace("&nbsp;", " ").strip()
+        if key not in mapping:
+            return match.group(0)
+        # Giữ nguyên các thẻ định dạng nằm trong placeholder, đặt giá trị vào chỗ
+        # đoạn chữ đầu tiên: '{<b>possion</b>}' → '<b>Sales Executive</b>'.
+        parts, filled = [], False
+        for token in re.split(r"(<[^>]+>)", inner):
+            if _TAG_RE.fullmatch(token):
+                parts.append(token)
+            elif token and not filled:
+                parts.append(_value(key))
+                filled = True
+        if not filled:
+            parts.append(_value(key))
+        return "".join(parts)
+
+    return _PLACEHOLDER_RE.sub(_replace, text)
 
 
 # Tên thứ/tháng tiếng Anh cố định — KHÔNG dùng locale máy (đang là tiếng Việt)
@@ -752,39 +787,70 @@ class CandidateDbTool(BaseTool):
         _CandidateDetailDialog(self._root, rows).exec()
 
     # ------------------------------------------------- gửi mail mời phỏng vấn
-    # Tick ĐÚNG 1 ứng viên → chọn ngày giờ → soạn mail (điền sẵn từ mẫu của VỊ
-    # TRÍ ứng tuyển, đã thay {name}{possion}{date}{time}) → gửi qua Outlook.
+    # Tick MỘT HOẶC NHIỀU ứng viên → chọn ngày giờ cho từng người → mở bấy nhiêu
+    # cửa sổ MEETING của Outlook đã điền sẵn (nội dung lấy từ mẫu của VỊ TRÍ ứng
+    # tuyển, đã thay {name}{possion}{date}{time}). Người dùng chỉ việc duyệt từng
+    # cửa sổ rồi bấm Send — Outlook vừa gửi mail mời, vừa tạo lịch, vừa đặt phòng.
     def _send_mail(self):
         if not outlook.available():
             dialogs.warning(self._root, "Outlook required",
                             "Sending email needs Outlook on Windows (pywin32).")
             return
         rows = self.table.checked_rows()
-        if len(rows) != 1:
+        if not rows:
             dialogs.warning(
-                self._root, "Select exactly one candidate",
-                "Please tick EXACTLY ONE candidate in the table to send an email.")
-            return
-        row = rows[0]
-        email = _txt(row, "email")
-        if not email:
-            dialogs.warning(self._root, "Missing email",
-                            "This candidate has no email — can't send.")
+                self._root, "Nothing selected",
+                "Tick at least one candidate in the table to send an invite.")
             return
 
-        pos_id = row["position_id"] if "position_id" in row.keys() else None
-        pos = repo.get_position(pos_id) if pos_id else None
-        if pos is None:
-            dialogs.warning(
-                self._root, "No position",
-                "This candidate has no position, so there's no email template. "
-                "Assign a position (and write its template under Positions).")
+        # Loại trước các ứng viên không đủ dữ liệu để soạn thư mời.
+        jobs, skipped = [], []
+        for row in rows:
+            who = _txt(row, "full_name") or f"#{row['candidate_id']}"
+            email = _txt(row, "email")
+            if not email:
+                skipped.append(f"{who} — no email address")
+                continue
+            pos_id = row["position_id"] if "position_id" in row.keys() else None
+            pos = repo.get_position(pos_id) if pos_id else None
+            if pos is None:
+                skipped.append(f"{who} — no position, so no email template")
+                continue
+            jobs.append((row, pos, email, who))
+        if not jobs:
+            dialogs.warning(self._root, "Nothing to send",
+                            "None of the selected candidates can be invited:\n• "
+                            + "\n• ".join(skipped))
             return
 
-        picked = self._pick_datetime()
-        if picked is None:
+        # Chọn giờ cho từng ứng viên trước, mở cửa sổ sau — người dùng chọn xong
+        # một lượt rồi mới phải làm việc với Outlook.
+        picks, previous = [], None
+        for idx, (row, pos, email, who) in enumerate(jobs, 1):
+            label = who if len(jobs) == 1 else f"{who}  ({idx}/{len(jobs)})"
+            picked = self._pick_datetime(label, previous, batch=len(jobs) > 1)
+            if picked is None:
+                skipped.append(f"{who} — skipped")
+                continue
+            picks.append((row, pos, email, who, picked))
+            previous = picked
+        if not picks:
             return
-        start, end = picked
+
+        opened, failed = 0, []
+        for row, pos, email, who, (start, end) in picks:
+            subject, body_html = self._meeting_content(row, pos, start, end)
+            err = self._open_meeting(email, _txt(pos, "mail_cc"), subject, body_html,
+                                     start.toPython(), end.toPython())
+            if err is None:
+                opened += 1
+            else:
+                failed.append(f"{who} — {err}")
+        self._report_meetings(opened, failed, skipped)
+
+    @staticmethod
+    def _meeting_content(row, pos, start, end):
+        """Tiêu đề + nội dung HTML của thư mời, điền từ mẫu của vị trí ứng tuyển."""
         title = _txt(pos, "position_title")
         sd, ed = start.toPython(), end.toPython()
         start_hm, end_hm = _fmt_time_en(sd), _fmt_time_en(ed)
@@ -797,26 +863,53 @@ class CandidateDbTool(BaseTool):
             "time_start": start_hm,            # '08:30 AM'
             "time_end":   end_hm,
         }
-        subject = _fill_template(_txt(pos, "mail_subject"), mapping)
-        body_html = _fill_template(
-            pos["mail_body"] if "mail_body" in pos.keys() and pos["mail_body"] else "",
-            mapping)
-        ctx = {"full_name": _txt(row, "full_name"), "position_title": title,
-               "start": start, "end": end}
-        self._compose_mail(email, _txt(pos, "mail_cc"), subject, body_html, ctx)
+        body = pos["mail_body"] if "mail_body" in pos.keys() and pos["mail_body"] else ""
+        return (_fill_template(_txt(pos, "mail_subject"), mapping),
+                _fill_template(body, mapping, escape=True))
 
-    def _pick_datetime(self):
-        """Hộp thoại chọn NGÀY + GIỜ bắt đầu/kết thúc phỏng vấn.
+    def _report_meetings(self, opened, failed, skipped):
+        """Tổng kết một lượt gửi: mở được bao nhiêu cửa sổ, ai bị bỏ qua/lỗi."""
+        lines = []
+        if opened:
+            lines.append(f"{opened} meeting invite(s) opened in Outlook. Review each "
+                         "one, add a meeting room if you need one, then press Send.")
+        if failed:
+            lines.append("Couldn't open:\n• " + "\n• ".join(failed))
+        if skipped:
+            lines.append("Not invited:\n• " + "\n• ".join(skipped))
+        message = "\n\n".join(lines)
+        if failed:
+            dialogs.error(self._root, "Some invites failed", message)
+        elif skipped:
+            dialogs.warning(self._root, "Meetings ready", message)
+        else:
+            dialogs.success(self._root, "Meetings ready", message)
+
+    def _pick_datetime(self, who="", previous=None, batch=False):
+        """Hộp thoại chọn NGÀY + GIỜ bắt đầu/kết thúc phỏng vấn của MỘT ứng viên.
 
         Dùng lịch INLINE (không phải popup) có style riêng — tránh lỗi hiển thị
         do QSS bảng toàn cục & popup trong modal frameless. Trả về (start, end)
-        dạng QDateTime, hoặc None nếu hủy.
+        dạng QDateTime, hoặc None nếu bỏ qua.
+
+        `who` hiện trên tiêu đề để biết đang xếp lịch cho ai. `previous` là lựa
+        chọn của ứng viên liền trước — mặc định của ứng viên này nối tiếp ngay
+        sau đó, cùng ngày và cùng độ dài, vì phỏng vấn thường xếp liền nhau.
+        `batch` đổi nút hủy thành "Skip" cho rõ là chỉ bỏ qua một người.
         """
-        dlg, card, lay = build_dialog_shell(self._root, "Pick interview date & time",
-                                            size="sm")
+        title = f"Interview time — {who}" if who else "Pick interview date & time"
+        dlg, card, lay = build_dialog_shell(self._root, title, size="sm")
         lbl = QLabel("Interview date:")
         lbl.setObjectName("FieldLabel")
         lay.addWidget(lbl)
+
+        day = QDate.currentDate().addDays(1)          # mặc định: ngày mai
+        first, second = QTime(9, 0), QTime(9, 30)
+        if previous is not None:
+            prev_start, prev_end = previous
+            day = prev_end.date()
+            first = prev_end.time()
+            second = first.addSecs(max(1800, prev_start.secsTo(prev_end)))
 
         cal = QCalendarWidget(card)
         cal.setStyleSheet(_picker_qss())
@@ -826,7 +919,7 @@ class CandidateDbTool(BaseTool):
         cal.setNavigationBarVisible(True)
         cal.setFirstDayOfWeek(Qt.Monday)
         cal.setMinimumDate(QDate.currentDate())
-        cal.setSelectedDate(QDate.currentDate().addDays(1))   # mặc định: ngày mai
+        cal.setSelectedDate(day)
         cal.setMinimumHeight(260)
         lay.addWidget(cal)
 
@@ -851,13 +944,15 @@ class CandidateDbTool(BaseTool):
             for t in _time_slots():
                 combo.addItem(t.toString("HH:mm"), t)
             idx = combo.findText(default.toString("HH:mm"))
-            combo.setCurrentIndex(idx if idx >= 0 else 0)
+            if idx < 0:      # giờ gợi ý rơi ngoài khung 08:00–20:00
+                idx = combo.count() - 1 if default > QTime(20, 0) else 0
+            combo.setCurrentIndex(idx)
             col.addWidget(combo)
             times.addLayout(col, 1)
             return combo
 
-        start_te = _time_col("Start time", QTime(9, 0))
-        end_te = _time_col("End time", QTime(9, 30))
+        start_te = _time_col("Start time", first)
+        end_te = _time_col("End time", second)
         lay.addLayout(times)
 
         result = {"val": None}
@@ -876,86 +971,28 @@ class CandidateDbTool(BaseTool):
         foot = QHBoxLayout()
         foot.addWidget(widgets.button(card, "Continue", variant="primary",
                                       icon="check", command=_confirm))
-        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
-                                      command=dlg.reject))
+        foot.addWidget(widgets.button(card, "Skip" if batch else "Cancel",
+                                      variant="neutral", icon="x", command=dlg.reject))
         foot.addStretch(1)
         lay.addLayout(foot)
         dlg.exec()
         return result["val"]
 
-    def _compose_mail(self, to, cc, subject, body_html, ctx):
-        """Hộp thoại soạn/duyệt mail → gửi qua Outlook (HTML) → tạo lịch phỏng vấn.
-
-        `ctx` = {full_name, position_title, start, end} để tạo cuộc hẹn (appointment)
-        trên lịch cá nhân ngay sau khi gửi mail thành công.
-        """
-        dlg, card, lay = build_dialog_shell(self._root, "Compose & send email", size="md")
-
-        def field(label):
-            lb = QLabel(label); lb.setObjectName("FieldLabel")
-            lay.addWidget(lb)
-
-        field("To")
-        to_w = QLineEdit(to); lay.addWidget(to_w)
-        field("CC")
-        cc_w = QLineEdit(cc); lay.addWidget(cc_w)
-        field("Subject")
-        subj_w = QLineEdit(subject); lay.addWidget(subj_w)
-        field("Body")
-        body_w = RichText(card, height=12)
-        body_w.set_html(body_html)
-        lay.addWidget(body_w)
-
-        foot = QHBoxLayout()
-
-        def do_send():
-            to_value = to_w.text().strip()
-            if not to_value:
-                dialogs.warning(dlg, "Missing recipient",
-                                "Please enter a recipient email.")
-                return
-            try:
-                outlook.send_mail(to_value, subj_w.text().strip(),
-                                  body_w.get_text(), cc=cc_w.text().strip(),
-                                  html=body_w.get_html())
-            except Exception as exc:
-                dialogs.error(dlg, "Send failed", f"Couldn't send:\n{exc}")
-                return
-            # Gửi xong → đặt lịch phỏng vấn (appointment cá nhân). Lỗi tạo lịch
-            # KHÔNG hủy việc đã gửi mail — chỉ báo để người dùng tự thêm tay.
-            appt_err = self._create_appointment(ctx, body_w.get_text())
-            dlg.accept()
-            if appt_err is None:
-                dialogs.success(self._root, "Done",
-                                "Email sent and interview scheduled ✅")
-            else:
-                dialogs.warning(
-                    self._root, "Email sent",
-                    f"Email sent, but the calendar event failed:\n{appt_err}")
-
-        foot.addWidget(widgets.button(card, "Send", variant="primary", icon="mail",
-                                      command=do_send))
-        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
-                                      command=dlg.reject))
-        foot.addStretch(1)
-        lay.addLayout(foot)
-        body_w.setMinimumHeight(round(dlg.modal_h * 0.5))   # vùng nội dung cao theo cỡ md
-        dlg.exec()
-
     @staticmethod
-    def _create_appointment(ctx, body_text):
-        """Tạo cuộc hẹn phỏng vấn trên lịch Outlook. Trả về None nếu OK, hoặc
-        chuỗi mô tả lỗi nếu thất bại (để bên gọi báo mà không chặn việc gửi mail)."""
-        start, end = ctx["start"], ctx["end"]
-        duration = max(15, start.secsTo(end) // 60)   # phút; tối thiểu 15
-        who = " ".join(p for p in (ctx.get("full_name"),
-                                   ctx.get("position_title")) if p)
-        subject = f"Interview {who}".strip()
+    def _open_meeting(to, cc, subject, body_html, start, end):
+        """Mở cửa sổ meeting của Outlook đã điền sẵn ứng viên, giờ và nội dung.
+
+        Nội dung mẫu là rich text nên truyền dạng HTML để giữ định dạng; bản
+        thuần chỉ dùng khi Outlook không chèn được HTML. CC của mẫu mail thành
+        người tham dự tùy chọn (meeting không có CC). Trả về None nếu mở được,
+        hoặc chuỗi lỗi để bên gọi gộp vào bảng tổng kết cuối lượt.
+        """
+        doc = QTextDocument()
+        doc.setHtml(body_html)
         try:
-            outlook.create_appointment(
-                subject, start.toPython(), duration_minutes=duration,
-                body=body_text or "")
-        except Exception as exc:   # noqa: BLE001 — báo lại cho UI, không chặn luồng
+            outlook.create_meeting(subject, start, end, to, optional=cc,
+                                   html=body_html, body=doc.toPlainText())
+        except Exception as exc:   # noqa: BLE001 — gom lỗi lại để báo một lần
             return str(exc)
         return None
 

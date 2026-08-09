@@ -64,7 +64,7 @@ personal-app/
 └── app/core/                # LOGIC NGHIỆP VỤ (thuần Python, KHÔNG dính UI)
     ├── config.py · settings.py          # cấu hình
     ├── cv_repository.py · cv_schema.py   # SQLite quản lý CV ứng viên
-    ├── outlook.py                        # Outlook COM (đọc lịch + gửi mail)
+    ├── outlook.py                        # Outlook COM (lịch · gửi mail · thư mời họp)
     ├── payroll_split.py                  # Tách bảng lương (Excel COM)
     ├── quarter_bonus.py                  # Thưởng quý (Excel COM)
     ├── ai_cv_scan.py                     # Quét CV bằng Gemini
@@ -183,6 +183,15 @@ Sửa · Xóa · Mở CV · Nhập từ Excel · Tải lại**.
 - Nút **📥 Nhập từ Excel** đọc thẳng file kết quả do tool *Quét CV bằng AI* xuất
   ra (tự khớp cột theo tiêu đề), ghi hàng loạt vào DB. Có thể chọn thư mục chứa
   CV để lưu **đường dẫn đầy đủ** vào cột `cv_file_path`.
+- Nút **Send email** (mời phỏng vấn): tick **một hoặc nhiều** ứng viên → hộp
+  thoại chọn ngày/giờ cho **từng người** (người sau mặc định nối tiếp ngay sau
+  người trước, nút *Skip* để bỏ qua một người) → app mở bấy nhiêu **cửa sổ
+  Meeting của Outlook** đã điền sẵn người nhận, giờ và nội dung theo mẫu mail của
+  vị trí ứng tuyển. Người dùng chỉ việc duyệt từng cửa sổ, thêm phòng họp nếu
+  cần rồi bấm **Send** — Outlook lo cả ba việc: gửi mail mời, tạo lịch, đặt
+  phòng. Placeholder trong mẫu (`{name} {possion} {date} {time_start}
+  {time_end}`) vẫn nhận đúng kể cả khi bị bôi đậm/đổi màu, và định dạng đó được
+  giữ cho giá trị thay vào.
 - Nút **📂 Mở CV** mở file CV của ứng viên đang chọn. Nếu file đã bị **di chuyển
   / đổi tên** (đường dẫn trong DB không còn đúng), tool mời chọn lại vị trí và
   **tự lưu đường dẫn mới** vào DB để lần sau khỏi hỏi.
