@@ -22,12 +22,17 @@ SƠ ĐỒ QUAN HỆ (mềm, không ràng buộc FK)
                           ▼
                       candidates (+ cv_file_path)
 
+  mail_templates ──1:N──> positions  (qua 3 cột mail_template_r1/r2/r3_id)
+
   • departments (phòng ban)  1—N  positions (vị trí)
   • positions   (vị trí)     1—N  candidates
   • MỖI VỊ TRÍ CHỈ CÓ 1 JD → đường dẫn file JD nằm THẲNG trong bảng positions
     (tiêu đề JD = luôn dùng tên vị trí); KHÔNG còn bảng job_descriptions riêng.
   • Đường dẫn file lưu thẳng: candidates.cv_file_path, positions.jd_file_path
     (không còn bảng document_files — file thực tế đã nằm sẵn trên máy).
+  • MẪU MAIL nằm ở bảng dùng chung `mail_templates` (không còn nhúng trong
+    positions). Luồng tuyển dụng có 3 VÒNG phỏng vấn nên mỗi vị trí trỏ tới 3
+    mẫu khác nhau — xem INTERVIEW_ROUNDS.
 
   departments ──1:N──> employees
   levels · cost_centers · employee_types ──1:N──> employees
@@ -113,22 +118,40 @@ CREATE TABLE IF NOT EXISTS app_meta (
     value VARCHAR
 );
 
+-- ───────────────────── MASTER: MẪU MAIL (mail_templates) ──────────────
+-- Kho mẫu mail dùng chung cho cả tuyển dụng: thư mời phỏng vấn từng vòng, thư
+-- cảm ơn đã ứng tuyển, thư thông báo… Vị trí tuyển dụng chỉ TRỎ tới mẫu qua id.
+-- Nội dung hỗ trợ placeholder {name} {possion} {position} {date} {time_start}
+-- {time_end} — điền lúc gửi (xem _fill_template trong app_qt/tools/candidate_db.py).
+CREATE TABLE IF NOT EXISTS mail_templates (
+    mail_template_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name             VARCHAR,           -- tên mẫu (để nhận diện khi chọn)
+    type             VARCHAR,           -- loại mẫu (xem MAIL_TEMPLATE_TYPE_CHOICES)
+    mail_cc          VARCHAR,           -- CC mặc định (nhiều email ngăn bởi ";")
+    mail_subject     VARCHAR,           -- tiêu đề mẫu mail
+    mail_body        TEXT,              -- nội dung mẫu mail (HTML)
+    created_at       DATETIME DEFAULT (datetime('now', 'localtime')),
+    updated_at       DATETIME DEFAULT (datetime('now', 'localtime'))
+);
+
 -- ────────── MASTER: VỊ TRÍ TUYỂN DỤNG (kèm luôn JD của vị trí đó) ──────
 -- Mỗi vị trí chỉ có ĐÚNG 1 mô tả công việc (JD) → cột jd_file_path nằm ngay đây.
+-- 3 cột mail_template_r*_id = mẫu mail dùng cho 3 vòng phỏng vấn (xem
+-- INTERVIEW_ROUNDS); tham chiếu mềm → mail_templates.mail_template_id.
 CREATE TABLE IF NOT EXISTS positions (
-    position_id    INTEGER PRIMARY KEY AUTOINCREMENT,
-    department_id  INT,                 -- tham chiếu mềm → departments.department_id
-    position_code  VARCHAR,
-    position_title VARCHAR,
-    level          VARCHAR,             -- cấp bậc (Junior/Senior/Lead…)
-    headcount      INT,                 -- số lượng cần tuyển
-    status         VARCHAR,             -- Đang tuyển / Tạm dừng / Đã đóng
-    jd_file_path   VARCHAR,             -- đường dẫn file JD trên máy
-    mail_cc        VARCHAR,             -- CC mặc định khi gửi mail mời PV
-    mail_subject   VARCHAR,             -- tiêu đề mẫu mail (hỗ trợ {name}{possion}{date}{time})
-    mail_body      TEXT,                -- nội dung mẫu mail (HTML, hỗ trợ placeholder trên)
-    created_at     DATETIME DEFAULT (datetime('now', 'localtime')),
-    updated_at     DATETIME DEFAULT (datetime('now', 'localtime'))
+    position_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    department_id      INT,             -- tham chiếu mềm → departments.department_id
+    position_code      VARCHAR,
+    position_title     VARCHAR,
+    level              VARCHAR,         -- cấp bậc (Junior/Senior/Lead…)
+    headcount          INT,             -- số lượng cần tuyển
+    status             VARCHAR,         -- Đang tuyển / Tạm dừng / Đã đóng
+    jd_file_path       VARCHAR,         -- đường dẫn file JD trên máy
+    mail_template_r1_id INT,            -- mẫu mail vòng 1
+    mail_template_r2_id INT,            -- mẫu mail vòng 2
+    mail_template_r3_id INT,            -- mẫu mail vòng 3
+    created_at         DATETIME DEFAULT (datetime('now', 'localtime')),
+    updated_at         DATETIME DEFAULT (datetime('now', 'localtime'))
 );
 
 -- ───────────────────────── ỨNG VIÊN ─────────────────────────────────
@@ -320,6 +343,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_ce_unique    ON course_employees(course_id
 CREATE INDEX IF NOT EXISTS idx_emptype_code        ON employee_types(code);
 CREATE INDEX IF NOT EXISTS idx_costcenter_code     ON cost_centers(code);
 CREATE INDEX IF NOT EXISTS idx_levels_name         ON levels(level_name);
+CREATE INDEX IF NOT EXISTS idx_mail_templates_type ON mail_templates(type);
 """
 
 # =============================================================================
@@ -331,7 +355,16 @@ CREATE INDEX IF NOT EXISTS idx_levels_name         ON levels(level_name);
 #  Chỉ mục cho cột thêm bằng ALTER cũng đặt ở đây, KHÔNG đặt trong SCHEMA_SQL:
 #  SCHEMA_SQL chạy trước, index trỏ vào cột chưa có sẽ làm vỡ cả script.
 # =============================================================================
-MIGRATIONS: list[str] = []
+MIGRATIONS: list[str] = [
+    # Mẫu mail tách khỏi bảng positions → chỉ còn 3 cột trỏ tới mail_templates.
+    "ALTER TABLE positions ADD COLUMN mail_template_r1_id INT",
+    "ALTER TABLE positions ADD COLUMN mail_template_r2_id INT",
+    "ALTER TABLE positions ADD COLUMN mail_template_r3_id INT",
+    # Bỏ hẳn 3 cột mẫu mail cũ (nội dung nhập lại ở màn hình Mail templates).
+    "ALTER TABLE positions DROP COLUMN mail_cc",
+    "ALTER TABLE positions DROP COLUMN mail_subject",
+    "ALTER TABLE positions DROP COLUMN mail_body",
+]
 
 # =============================================================================
 #  DATA_MIGRATIONS — sửa DỮ LIỆU (không phải cấu trúc), chạy đúng MỘT LẦN cho
@@ -513,6 +546,19 @@ CANDIDATE_STATUS_CHOICES = [
 # Trạng thái mặc định của hồ sơ vừa vào DB (nhập tay hoặc quét CV bằng AI).
 CANDIDATE_STATUS_DEFAULT = CANDIDATE_STATUS_CHOICES[0]
 
+# Bước kế tiếp trong luồng — dùng làm gợi ý sẵn khi đổi trạng thái hàng loạt.
+# Nhãn KHÔNG có mặt ở đây là điểm dừng của luồng (Not Proceed · Rejected Offer ·
+# Fail Probation Period): hồ sơ đến đó thì không còn bước kế tiếp mặc định.
+CANDIDATE_STATUS_NEXT = {
+    "New Application":  "Screening",
+    "Screening":        "Short List",
+    "Short List":       "First Interview",
+    "First Interview":  "Second Interview",
+    "Second Interview": "Third Interview",
+    "Third Interview":  "Offer Approval",
+    "Offer Approval":   "Ready To Hire",
+}
+
 
 def candidate_status_order(status: str) -> int:
     """Thứ tự giai đoạn của một trạng thái (-1 nếu là nhãn lạ/rỗng)."""
@@ -523,7 +569,66 @@ def candidate_status_order(status: str) -> int:
     return -1
 
 
+def candidate_next_status(status: str) -> str:
+    """Bước kế tiếp gợi ý của một trạng thái.
+
+    Hồ sơ chưa có trạng thái → bắt đầu từ đầu luồng. Trả về chuỗi rỗng khi
+    trạng thái là điểm dừng hoặc là nhãn lạ (không có bước kế tiếp).
+    """
+    target = (status or "").strip().lower()
+    if not target:
+        return CANDIDATE_STATUS_DEFAULT
+    for label, nxt in CANDIDATE_STATUS_NEXT.items():
+        if label.lower() == target:
+            return nxt
+    return ""
+
+
 POSITION_STATUS_CHOICES = ["Open", "Paused", "Closed"]
+
+# Loại mẫu mail (cột mail_templates.type) — chỉ để phân nhóm/lọc cho dễ tìm,
+# KHÔNG ràng buộc: vị trí tuyển dụng vẫn chọn được bất kỳ mẫu nào cho mỗi vòng.
+#
+# Riêng "Application Thank You" có ý nghĩa với luồng gửi mail: mẫu loại này KHÔNG
+# gắn vào vị trí mà chọn thẳng lúc gửi, và gửi dạng MAIL THƯỜNG (không giờ giấc,
+# không phải thư mời họp) — xem MAIL_TEMPLATE_TYPE_THANK_YOU.
+MAIL_TEMPLATE_TYPE_THANK_YOU = "Application Thank You"
+
+MAIL_TEMPLATE_TYPE_CHOICES = [
+    "Interview Round 1",
+    "Interview Round 2",
+    "Interview Round 3",
+    MAIL_TEMPLATE_TYPE_THANK_YOU,
+    "Notification",
+    "Offer",
+    "Rejection",
+]
+
+# 3 VÒNG PHỎNG VẤN của một vị trí: (cột trong positions, nhãn hiển thị, trạng
+# thái ứng viên gợi ý sau khi gửi thư mời vòng đó).
+INTERVIEW_ROUNDS = [
+    ("mail_template_r1_id", "Interview Round 1", "First Interview"),
+    ("mail_template_r2_id", "Interview Round 2", "Second Interview"),
+    ("mail_template_r3_id", "Interview Round 3", "Third Interview"),
+]
+
+# Trạng thái HIỆN TẠI của hồ sơ → vòng phỏng vấn gợi ý sẵn khi bấm Send email
+# (chỉ số trong INTERVIEW_ROUNDS). Hồ sơ vừa lọt short list thì mời vòng 1; mời
+# xong vòng 1 trạng thái thành "First Interview" nên lần sau gợi ý vòng 2…
+INTERVIEW_ROUND_BY_STATUS = {
+    "Short List":       0,
+    "First Interview":  1,
+    "Second Interview": 2,
+}
+
+
+def interview_round_for_status(status: str) -> int:
+    """Vòng phỏng vấn gợi ý cho một trạng thái (mặc định vòng 1 nếu không khớp)."""
+    target = (status or "").strip().lower()
+    for label, idx in INTERVIEW_ROUND_BY_STATUS.items():
+        if label.lower() == target:
+            return idx
+    return 0
 
 # Nhân viên: giới tính — dùng cho ô lọc + form nhập. Cấp bậc (level) tham chiếu
 # bảng danh mục `levels` qua level_id.
@@ -556,5 +661,5 @@ COURSE_STATUS_CHOICES = ["Not started", "Completed"]
 _MANAGED_TABLES = [
     "departments", "positions", "candidates",
     "employees", "courses", "course_employees",
-    "employee_types", "cost_centers", "levels",
+    "employee_types", "cost_centers", "levels", "mail_templates",
 ]

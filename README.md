@@ -107,11 +107,11 @@ App sẽ **tự động** nhận tool mới và hiện trong sidebar — không 
 Đặt `auto_startup = True` và ghi đè `startup(self, window)` trong class tool.
 Mỗi lần mở app, `MainWindow` sẽ gọi `startup()` của các tool bật cờ này (sau
 khi cửa sổ đã hiện). Dùng `app/core/config.py` để lưu trạng thái giữa các lần
-chạy (ví dụ "đã quét hôm nay chưa"). Xem mẫu ở `app/tools/interview_gate.py`.
+chạy (ví dụ "đã quét hôm nay chưa"). Xem mẫu ở `app_qt/tools/interview_gate.py`.
 
 ## Tool: Mở cổng lịch phỏng vấn 🛂
 
-`app/tools/interview_gate.py` — mỗi sáng khi mở app sẽ tự quét **lịch Outlook
+`app_qt/tools/interview_gate.py` — mỗi sáng khi mở app sẽ tự quét **lịch Outlook
 hôm nay**, tìm sự kiện có tiêu đề chứa từ khóa phỏng vấn (cấu hình được), rồi
 **soạn sẵn mail** nhờ team Security mở cổng và **hiện ra cho bạn xem/sửa trước
 khi gửi**. Chỉ quét 1 lần/ngày; vẫn có nút bấm tay để quét bất cứ lúc nào.
@@ -121,7 +121,7 @@ khi gửi**. Chỉ quét 1 lần/ngày; vẫn có nút bấm tay để quét b�
 
 ## Tool: Quét CV bằng AI 🤖
 
-`app/tools/ai_scan_cv.py` — gửi **nguyên file PDF** cho mô hình **Google Gemini**
+`app_qt/tools/ai_scan_cv.py` — gửi **nguyên file PDF** cho mô hình **Google Gemini**
 để đọc hiểu và chấm điểm ứng viên theo JD.
 
 Giao diện gồm: ô chọn **thư mục chứa CV (PDF)**, ô chọn **vị trí tuyển dụng** và
@@ -157,47 +157,98 @@ theo dạng `{prefix}{startcode}_{Tên ứng viên}.pdf`. Cấu hình lưu ở s
 
 ## Tool: Quản lý CV ứng viên 🗂️
 
-`app/tools/candidate_db.py` — quản lý hồ sơ ứng viên + danh mục tuyển dụng,
-lưu bằng **SQLite** ngay trên máy (`%APPDATA%\PersonalToolbox\candidates.sqlite`).
+[app_qt/tools/candidate_db.py](app_qt/tools/candidate_db.py) — quản lý hồ sơ ứng
+viên + danh mục tuyển dụng, lưu bằng **SQLite** ngay trên máy
+(`%APPDATA%\PersonalToolbox\candidates.sqlite`).
 
-Màn hình chính (ỨNG VIÊN): **thanh tìm kiếm** (tên / email / SĐT + lọc vị trí +
-trạng thái), **bảng kết quả** (double-click để sửa), và các nút **Thêm mới ·
-Sửa · Xóa · Mở CV · Nhập từ Excel · Tải lại**.
+Màn hình chính (ỨNG VIÊN) gồm **ô tìm kiếm toàn văn**, hàng lọc *Position ·
+Department · Status · Batch*, **bảng kết quả** có cột tick chọn, và toolbar:
 
-- **Chống trùng**: khi Thêm mới (hoặc Sửa) ứng viên, nếu **trùng email hoặc SĐT**
-  với người đã có, tool cảnh báo và cho quyết định vẫn lưu hay không. Khi *Nhập
-  từ Excel* có thể chọn **bỏ qua các bản trùng** (email/SĐT — cả trong file lẫn
-  so với DB).
-- **Master data** tách thành nhóm **Master Data** riêng ở sidebar, gồm 6 trang:
-  **Departments · Employee types · Levels · Cost centers · Positions · Courses**
-  — mỗi trang là một bảng + thanh *Add / Edit / Delete / Reload* (dùng chung
-  `CrudTablePanel`), thêm/sửa/xóa riêng. (Các trang này không hiện thẻ ở Trang
-  chủ.) Bốn trang danh mục nhân sự đã có **dữ liệu nạp sẵn** từ `Code.xlsx`:
+| Nút | Cần tick hồ sơ? | Việc |
+|-----|-----------------|------|
+| **View details** | có (1 hoặc nhiều) | mở modal xem chi tiết từng hồ sơ |
+| **Update status** | có | đổi trạng thái hàng loạt (xem bên dưới) |
+| **Send email** | có | mời phỏng vấn / gửi thư cảm ơn qua Outlook (xem bên dưới) |
+| **Export to Excel** | có | xuất các hồ sơ đã tick ra `.xlsx` (file đã có thì **ghi nối thêm**) |
+| **Add** | không | thêm hồ sơ nhập tay |
+| **Reload** | không | tải lại bảng |
+
+*Add* nằm ở **cụm bên phải cạnh Reload**, tông neutral: toolbar chia hai vùng —
+trái là thao tác trên **các hồ sơ đang tick**, phải là thao tác **cấp trang**.
+Hồ sơ giờ chủ yếu vào DB qua tool *Quét CV bằng AI*, nhập tay chỉ còn là trường
+hợp lẻ. **Sửa** một hồ sơ: **double-click vào dòng**; **xóa**: mở form sửa rồi
+bấm *Delete* trong đó — cả hai không có nút riêng trên toolbar.
+
+- **Chống trùng**: khi thêm mới (hoặc sửa) ứng viên, nếu **trùng email hoặc SĐT**
+  với người đã có, tool cảnh báo và cho quyết định vẫn lưu hay không.
+- **Master data** tách thành nhóm **Master Data** riêng ở sidebar, gồm 7 trang:
+  **Departments · Employee types · Levels · Cost centers · Positions ·
+  Mail templates · Courses** — mỗi trang là một bảng + thanh
+  *Add / Edit / Delete / Reload* (dùng chung `CrudTablePanel`), thêm/sửa/xóa
+  riêng. (Các trang này không hiện thẻ ở Trang chủ.) Bốn trang danh mục nhân sự
+  đã có **dữ liệu nạp sẵn** từ `Code.xlsx`:
   20 bộ phận · 6 loại nhân viên · 12 cấp bậc · 42 cost center.
   Muốn thêm/bớt cột hay ô nhập của một trang → sửa `_master_specs()` trong
   [app_qt/tools/candidate_db.py](app_qt/tools/candidate_db.py).
+- **Mẫu mail dùng chung**: trang **Mail templates** (bảng `mail_templates`) giữ
+  mọi mẫu mail — *tên · loại · CC · tiêu đề · nội dung (rich text)*. Loại lấy từ
+  `MAIL_TEMPLATE_TYPE_CHOICES` (Interview Round 1/2/3 · Application Thank You ·
+  Notification · Offer · Rejection) và chủ yếu để phân nhóm cho dễ tìm, không
+  ràng buộc — **trừ `Application Thank You`**: nút *Send email* lọc đúng loại này
+  cho ô chọn thư cảm ơn (hằng `cv_schema.MAIL_TEMPLATE_TYPE_THANK_YOU`).
+  Ngoài CRUD, trang này có thêm nút **Duplicate**: chọn 1 dòng → tạo bản
+  sao y hệt, tên thêm hậu tố `_copy` (trùng nữa thì `_copy2`, `_copy3`…) rồi mở
+  luôn form sửa bản mới.
+- **Mỗi vị trí gán 3 mẫu mail** cho **3 vòng phỏng vấn**: form của trang
+  *Positions* có 3 ô chọn (Interview Round 1/2/3) trỏ tới `mail_templates` qua
+  `positions.mail_template_r1_id / _r2_id / _r3_id`. Danh sách vòng khai báo ở
+  `cv_schema.INTERVIEW_ROUNDS` (kèm trạng thái ứng viên gợi ý sau khi gửi thư mời
+  vòng đó).
 - **JD nằm trong vị trí**: mỗi vị trí chỉ có **đúng 1 mô tả công việc**, nên
   *file JD* nhập ngay trong form của trang **Vị trí tuyển dụng**
   (cột `positions.jd_file_path`); tiêu đề JD luôn lấy theo **tên vị trí**. Không
   còn bảng `job_descriptions` lẫn trang master "Mô tả công việc (JD)" riêng.
-- Nút **📥 Nhập từ Excel** đọc thẳng file kết quả do tool *Quét CV bằng AI* xuất
-  ra (tự khớp cột theo tiêu đề), ghi hàng loạt vào DB. Có thể chọn thư mục chứa
-  CV để lưu **đường dẫn đầy đủ** vào cột `cv_file_path`.
-- Nút **Send email** (mời phỏng vấn): tick **một hoặc nhiều** ứng viên → hộp
-  thoại chọn ngày/giờ cho **từng người** (người sau mặc định nối tiếp ngay sau
-  người trước, nút *Skip* để bỏ qua một người) → app mở bấy nhiêu **cửa sổ
-  Meeting của Outlook** đã điền sẵn người nhận, giờ và nội dung theo mẫu mail của
-  vị trí ứng tuyển, **kèm file CV** của ứng viên (bỏ qua nếu chưa có CV hoặc
-  đường dẫn không còn đúng). Người dùng chỉ việc duyệt từng cửa sổ, thêm phòng họp nếu
-  cần rồi bấm **Send** — Outlook lo cả ba việc: gửi mail mời, tạo lịch, đặt
-  phòng. Mở xong, app hiện modal **cập nhật trạng thái** cho đúng những ứng viên
-  đó (mặc định **First Interview**, đổi được từng người); bấm *Update* mới ghi xuống
-  DB. Placeholder trong mẫu (`{name} {possion} {date} {time_start}
-  {time_end}`) vẫn nhận đúng kể cả khi bị bôi đậm/đổi màu, và định dạng đó được
-  giữ cho giá trị thay vào.
-- Nút **📂 Mở CV** mở file CV của ứng viên đang chọn. Nếu file đã bị **di chuyển
-  / đổi tên** (đường dẫn trong DB không còn đúng), tool mời chọn lại vị trí và
-  **tự lưu đường dẫn mới** vào DB để lần sau khỏi hỏi.
+- Nút **Update status** (đổi trạng thái hàng loạt): tick **một hoặc nhiều** ứng
+  viên đang ở **CÙNG một trạng thái** → modal hiện trạng thái hiện tại và ô
+  *Move to* điền sẵn **bước kế tiếp** trong luồng (sửa được, chọn bất kỳ nhãn
+  nào trong `CANDIDATE_STATUS_CHOICES`); bấm *OK* mới ghi xuống DB. Nếu các hồ
+  sơ đang ở trạng thái khác nhau thì app **báo lỗi kèm danh sách từng nhóm** và
+  không đổi gì.
+- Nút **Send email**: tick **một hoặc nhiều** ứng viên đang ở
+  **CÙNG một trạng thái** (lệch nhau thì báo lỗi kèm danh sách từng nhóm, giống
+  *Update status*) → hộp thoại chọn **loại mail muốn gửi**: 3 **vòng phỏng vấn**
+  (mẫu lấy theo vị trí ứng tuyển) hoặc **Application Thank You** (thư cảm ơn đã
+  ứng tuyển — mẫu chọn thẳng trong hộp thoại vì không gắn với vị trí nào). Hộp
+  thoại hiện **trạng thái hiện tại** của các hồ sơ và **chọn sẵn vòng suy ra từ
+  trạng thái đó** (*Short List* → vòng 1, *First Interview* →
+  vòng 2, *Second Interview* → vòng 3, còn lại → vòng 1; bảng tra ở
+  `cv_schema.INTERVIEW_ROUND_BY_STATUS`), vẫn đổi tay được.
+- **Chọn một vòng phỏng vấn** → hộp thoại chọn
+  ngày/giờ cho **từng người** (người sau mặc định nối tiếp ngay
+  sau người trước, nút *Skip* để bỏ qua một người) → app mở bấy nhiêu **cửa sổ
+  Meeting của Outlook** đã điền sẵn người nhận, CC, giờ và nội dung theo mẫu mail
+  của vòng đó, **kèm file CV** của ứng viên (bỏ qua nếu chưa có CV hoặc
+  đường dẫn không còn đúng). Ứng viên mà vị trí **chưa gán mẫu cho vòng đang mời**
+  thì bị bỏ qua và liệt kê lại cuối lượt. Người dùng chỉ việc duyệt từng cửa sổ,
+  thêm phòng họp nếu cần rồi bấm **Send** — Outlook lo cả ba việc: gửi mail mời,
+  tạo lịch, đặt phòng. Mở xong, app hiện modal **cập nhật trạng thái** cho đúng
+  những ứng viên đó (điền sẵn trạng thái của vòng vừa mời — vòng 1 →
+  *First Interview*, vòng 2 → *Second Interview*…, đổi được từng người); bấm
+  *Update* mới ghi xuống DB. Placeholder trong mẫu (`{name} {possion} {date}
+  {time_start} {time_end}`) vẫn nhận đúng kể cả khi bị bôi đậm/đổi màu, và định
+  dạng đó được giữ cho giá trị thay vào.
+- **Chọn Application Thank You** → **không hỏi giờ, không phải thư mời họp**: app
+  mở thẳng **cửa sổ mail thường của Outlook** cho từng ứng viên, điền sẵn người
+  nhận · CC · tiêu đề · nội dung từ mẫu (`outlook.create_mail`, không đính kèm
+  CV), người dùng xem lại rồi bấm **Send**. **Trạng thái ứng viên giữ nguyên** —
+  không hiện modal cập nhật trạng thái. Chỉ thay `{name} {possion} {position}`;
+  `{date}`/`{time…}` (nếu lỡ có trong mẫu) được **giữ nguyên** để nhìn thấy mà
+  sửa trước khi gửi. Chưa có mẫu nào loại này thì app báo và mời tạo ở trang
+  **Mail templates**.
+- **Mở CV**: click thẳng vào tên file ở cột *CV file* trong bảng (cột này hiển
+  thị dạng link, không có nút riêng). Ứng viên **chưa gắn CV**, hoặc file đã bị
+  **di chuyển / đổi tên** (đường dẫn trong DB không còn đúng) → tool mời chọn lại
+  file và **tự lưu đường dẫn mới** vào DB để lần sau khỏi hỏi.
 
 **Đường dẫn file** lưu thẳng vào cột `candidates.cv_file_path` và
 `positions.jd_file_path` (không dùng bảng riêng — file thực tế đã nằm sẵn trên
@@ -205,7 +256,7 @@ máy). Xem thảo luận về xử lý đường dẫn bị lệch ở cuối m�
 
 > Cờ ở `BaseTool`: `show_on_home=False` để ẩn thẻ khỏi Trang chủ (vẫn hiện ở
 > sidebar), `fills_height=True` để trang chiếm full chiều cao khi phóng to cửa
-> sổ. Tool chưa gắn logic (`clean_data`, `pdf_tools`) đã đặt `show_on_home=False`.
+> sổ.
 
 Thiết kế cơ sở dữ liệu tách riêng để dễ chỉnh:
 
@@ -213,11 +264,12 @@ Thiết kế cơ sở dữ liệu tách riêng để dễ chỉnh:
 |------|---------|
 | `app/core/cv_schema.py` | **Thiết kế DB** — toàn bộ bảng dưới dạng SQL (`SCHEMA_SQL`) kèm chú thích. Sửa cấu trúc DB ở đây; có sẵn `MIGRATIONS` để thêm cột an toàn cho DB đã có dữ liệu, và `DATA_MIGRATIONS` để sửa dữ liệu sẵn có (chạy **một lần** mỗi file .db, đánh dấu ở `app_meta` với khóa `data:<tên lượt>`). |
 | `app/core/cv_repository.py` | **Tầng truy cập dữ liệu** — kết nối SQLite + CRUD generic cho mọi bảng. Giao diện chỉ gọi hàm, không đụng SQL. |
-| `app/tools/candidate_db.py` | **Giao diện** tool + form nhập liệu tổng quát. |
+| `app_qt/tools/candidate_db.py` | **Giao diện** tool + form nhập liệu tổng quát. |
 
 **Các bảng** (quan hệ mềm, không dùng khóa ngoại; mọi cột cho phép NULL trừ PK):
-`departments` (phòng ban) → `positions` (vị trí, **kèm JD**: `jd_file_path`, và
-mẫu mail mời PV) → `candidates` (ứng viên, có `cv_file_path`);
+`departments` (phòng ban) → `positions` (vị trí, **kèm JD**: `jd_file_path`) →
+`candidates` (ứng viên, có `cv_file_path`); `mail_templates` (mẫu mail dùng
+chung) → `positions` qua 3 cột `mail_template_r1_id / _r2_id / _r3_id`;
 ngoài ra `employees` (nhân viên) và `courses` ↔ `course_employees` (đào tạo).
 Đường dẫn file lưu thẳng vào cột — không có bảng file riêng.
 
@@ -264,6 +316,11 @@ hành), `levels` (Director, Manager, Officer…).
 > **Bảng `job_descriptions` đã bị bỏ**: JD nằm trong `positions`. Khi mở tool
 > trên DB cũ, `init_db()` **xóa hẳn** bảng đó — dữ liệu JD cũ **không** được
 > chuyển sang, cột `jd_file_path` để trống, nhập lại ở form vị trí.
+
+> **3 cột `positions.mail_cc / mail_subject / mail_body` đã bị bỏ**: mẫu mail
+> chuyển sang bảng dùng chung `mail_templates`. Khi mở tool trên DB cũ,
+> `MIGRATIONS` **xóa hẳn** 3 cột đó — nội dung cũ **không** được chuyển sang;
+> soạn lại ở trang **Mail templates** rồi gán cho từng vị trí ở form vị trí.
 
 > Vì thiết kế cố tình **không dùng khóa ngoại**, các cột `*_id` chỉ là tham
 > chiếu mềm — ứng dụng tự đảm bảo liên kết. `init_db()` tự tạo bảng khi mở tool;

@@ -16,7 +16,9 @@ from app.core import cv_schema
 DEPARTMENT_FIELDS = ["department_name", "short_name", "manager_name", "description"]
 POSITION_FIELDS = ["department_id", "position_code", "position_title", "level",
                    "headcount", "status", "jd_file_path",
-                   "mail_cc", "mail_subject", "mail_body"]
+                   "mail_template_r1_id", "mail_template_r2_id",
+                   "mail_template_r3_id"]
+MAIL_TEMPLATE_FIELDS = ["name", "type", "mail_cc", "mail_subject", "mail_body"]
 CANDIDATE_FIELDS = [
     "full_name", "email", "phone", "date_of_birth", "address",
     "position_id", "years_experience", "education", "applied_at", "status",
@@ -79,6 +81,7 @@ _PK = {
     "employee_types": "employee_type_id",
     "cost_centers": "cost_center_id",
     "levels": "level_id",
+    "mail_templates": "mail_template_id",
 }
 
 
@@ -489,15 +492,91 @@ def delete_level(level_id) -> None:
     _delete("levels", level_id)
 
 
+# ─────────────────────────── MẪU MAIL (mail_templates) ───────────────────
+
+# Hậu tố đặt cho bản sao khi bấm Duplicate ở màn hình Mail templates.
+_COPY_SUFFIX = "_copy"
+
+
+def list_mail_templates(template_type: str = ""):
+    """Danh sách mẫu mail, lọc tùy chọn theo loại (MAIL_TEMPLATE_TYPE_CHOICES)."""
+    sql = "SELECT * FROM mail_templates"
+    params: list = []
+    if template_type:
+        sql += " WHERE type = ?"
+        params.append(template_type)
+    sql += " ORDER BY type, name"
+    with get_connection() as conn:
+        return conn.execute(sql, params).fetchall()
+
+
+def get_mail_template(template_id):
+    return _get("mail_templates", template_id)
+
+
+def insert_mail_template(data: dict) -> int:
+    return _insert("mail_templates", MAIL_TEMPLATE_FIELDS, data)
+
+
+def update_mail_template(template_id, data: dict) -> None:
+    _update("mail_templates", MAIL_TEMPLATE_FIELDS, template_id, data)
+
+
+def delete_mail_template(template_id) -> None:
+    _delete("mail_templates", template_id)
+
+
+def _copy_template_name(name: str, existing: set[str]) -> str:
+    """Tên cho bản sao: '<tên>_copy'; đã có rồi thì thêm số ('_copy2', '_copy3'…).
+
+    `existing` là tập tên đang có (đã hạ hoa/thường + strip) để so trùng.
+    """
+    base = (name or "").strip() + _COPY_SUFFIX
+    if base.lower() not in existing:
+        return base
+    i = 2
+    while f"{base}{i}".lower() in existing:
+        i += 1
+    return f"{base}{i}"
+
+
+def duplicate_mail_template(template_id) -> int:
+    """Nhân bản 1 mẫu mail: chép nguyên nội dung, tên thêm hậu tố '_copy'.
+
+    Trả về id bản mới, hoặc 0 nếu không tìm thấy mẫu gốc.
+    """
+    row = _get("mail_templates", template_id)
+    if row is None:
+        return 0
+    with get_connection() as conn:
+        existing = {(r["name"] or "").strip().lower()
+                    for r in conn.execute("SELECT name FROM mail_templates")}
+    data = {f: row[f] for f in MAIL_TEMPLATE_FIELDS}
+    data["name"] = _copy_template_name(row["name"], existing)
+    return _insert("mail_templates", MAIL_TEMPLATE_FIELDS, data)
+
+
 # ───────────────────────────── VỊ TRÍ ───────────────────────────────────
+
+# Mỗi vị trí trỏ tới 3 mẫu mail (3 vòng phỏng vấn) — danh sách vị trí trả kèm
+# TÊN của từng mẫu (mail_template_r1_name…) để bảng hiển thị chữ thay vì id.
+_POSITION_SELECT = (
+    "SELECT p.*, d.department_name, "
+    "       t1.name AS mail_template_r1_name, "
+    "       t2.name AS mail_template_r2_name, "
+    "       t3.name AS mail_template_r3_name "
+    "FROM positions p "
+    "LEFT JOIN departments d     ON d.department_id = p.department_id "
+    "LEFT JOIN mail_templates t1 ON t1.mail_template_id = p.mail_template_r1_id "
+    "LEFT JOIN mail_templates t2 ON t2.mail_template_id = p.mail_template_r2_id "
+    "LEFT JOIN mail_templates t3 ON t3.mail_template_id = p.mail_template_r3_id "
+)
+
 
 def list_positions():
     with get_connection() as conn:
         return conn.execute(
-            "SELECT p.*, d.department_name "
-            "FROM positions p "
-            "LEFT JOIN departments d ON d.department_id = p.department_id "
-            "ORDER BY p.position_title").fetchall()
+            _POSITION_SELECT + "ORDER BY p.position_title").fetchall()
 
 
 def get_position(pos_id):

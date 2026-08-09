@@ -3,11 +3,14 @@
 Port của app/tools/candidate_db.py. Tầng dữ liệu (app.core.cv_repository,
 app.core.cv_schema) dùng lại 100% — chỉ dựng lại giao diện bằng Qt:
     • Tool chính "Quản lý CV ứng viên": tìm kiếm + bảng + CRUD + nhập Excel.
-    • 6 trang Master Data (dùng CrudTablePanel): Bộ phận · Loại nhân viên ·
-      Cấp bậc · Cost center · Vị trí · Khóa học.
+    • 7 trang Master Data (dùng CrudTablePanel): Bộ phận · Loại nhân viên ·
+      Cấp bậc · Cost center · Vị trí · Mẫu mail · Khóa học.
 
 Mỗi vị trí chỉ có ĐÚNG 1 mô tả công việc (JD) nên JD không còn trang riêng —
 tiêu đề + file JD nhập ngay trong form của trang "Vị trí tuyển dụng".
+
+Mẫu mail nằm ở bảng dùng chung `mail_templates` (trang "Mail templates"); mỗi vị
+trí chỉ TRỎ tới 3 mẫu, tương ứng 3 vòng phỏng vấn (cv_schema.INTERVIEW_ROUNDS).
 """
 import os
 import re
@@ -42,8 +45,8 @@ try:
 except ImportError:
     _OPENPYXL_OK = False
 
-# Trạng thái gợi ý sẵn sau khi mở thư mời phỏng vấn (đổi được trong modal).
-_STATUS_AFTER_INVITE = "First Interview"
+# Nhãn hiển thị cho hồ sơ chưa có trạng thái (cột status rỗng/NULL).
+_NO_STATUS = "(no status yet)"
 
 # ─────────────────────────────────────────────────────────────────────────
 #  BỀ RỘNG (px) CÁC CỘT BẢNG ỨNG VIÊN — chỉnh tùy ý ở đây.
@@ -222,6 +225,16 @@ def _position_options():
             for p in repo.list_positions()}
 
 
+def _mail_template_options():
+    """Mẫu mail → id, nhãn kèm loại cho dễ chọn: 'Interview Round 1 · Sales R1'."""
+    opts = {}
+    for t in repo.list_mail_templates():
+        name = (t["name"] or f"#{t['mail_template_id']}").strip()
+        kind = (t["type"] or "").strip()
+        opts[f"{kind} · {name}" if kind else name] = t["mail_template_id"]
+    return opts
+
+
 def _course_type_options():
     """Tên loại khóa học → mã số lưu trong DB (inhouse=0, external=1, funded=2)."""
     return {name: i for i, name in enumerate(cv_schema.COURSE_TYPE_CHOICES)}
@@ -233,6 +246,22 @@ def _course_type_label(v):
         return cv_schema.COURSE_TYPE_CHOICES[int(v)]
     except (ValueError, TypeError, IndexError):
         return "—"
+
+
+def _text_preview(value, limit=60):
+    """Rút gọn giá trị về MỘT dòng cho ô bảng (rỗng → '—').
+
+    Nội dung mẫu mail lưu dạng HTML nên bóc lấy chữ thuần trước khi cắt.
+    """
+    s = str(value or "").strip()
+    if not s:
+        return "—"
+    if s.startswith("<"):
+        doc = QTextDocument()
+        doc.setHtml(s)
+        s = doc.toPlainText()
+    s = " ".join(s.split())
+    return s[:limit] + "…" if len(s) > limit else s
 
 
 def _txt(row, key):
@@ -265,6 +294,43 @@ def _chip(parent, text, color):
         f"background: rgba({r},{g},{b},0.15); color:{color}; border-radius:10px;"
         " padding:3px 10px; font-size:12px; font-weight:600;")
     return lbl
+
+
+def _launch_file(parent, path):
+    """Mở file bằng ứng dụng mặc định của hệ điều hành."""
+    try:
+        os.startfile(path)
+    except AttributeError:
+        import subprocess
+        subprocess.Popen(["xdg-open", path])
+    except Exception as exc:
+        dialogs.error(parent, "Open error", f"Couldn't open the file:\n{exc}")
+
+
+def _open_jd_link(panel, row, _key):
+    """Click cột 'JD file' ở trang Positions → mở file JD của vị trí đó.
+
+    File không còn ở đường dẫn đã lưu thì cho chọn lại, lưu lại vào DB rồi mở.
+    """
+    pid = row["position_id"]
+    path = _txt(row, "jd_file_path")
+    if path and os.path.isfile(path):
+        _launch_file(panel, path)
+        return
+    if not dialogs.confirm(
+            panel, "File not found",
+            f"The JD file wasn't found at the saved path:\n{path}\n\n"
+            "It may have been moved or renamed. Locate the file now?",
+            ok_label="Choose file"):
+        return
+    new_path, _ = QFileDialog.getOpenFileName(
+        panel, "Locate the JD file", "",
+        "PDF/Word/Text (*.pdf *.doc *.docx *.txt);;All files (*.*)")
+    if not new_path:
+        return
+    repo.update_position(pid, {"jd_file_path": new_path})
+    panel.reload()
+    _launch_file(panel, new_path)
 
 
 def _copy_chip(parent, value):
@@ -320,6 +386,10 @@ def _master_specs():
             "list_fn": repo.list_positions,
             "get": repo.get_position, "insert": repo.insert_position,
             "update": repo.update_position, "delete": repo.delete_position,
+            # Tên file JD hiển thị dạng link — bấm để mở file (như cột CV ở
+            # màn hình ứng viên).
+            "link_keys": {"jd_file_path"},
+            "on_link": _open_jd_link,
             "columns": [
                 ("position_id", "ID", 50),
                 ("position_code", "Code", 90),
@@ -328,11 +398,16 @@ def _master_specs():
                 ("level", "Level", 80),
                 ("headcount", "Qty", 50),
                 ("status", "Status", 105),
+                # Ô rỗng (không phải "—") khi chưa gắn JD: cột này là link nên
+                # chỉ ô có chữ mới được tô màu/gạch chân & bấm được.
                 ("jd_file_path", "JD file", 160, "w",
-                 lambda v: os.path.basename(str(v)) if v else "—"),
-                ("mail_subject", "Mail template", 180, "w",
-                 lambda v: (str(v).replace("\n", " ")[:50] + "…")
-                 if v and len(str(v)) > 50 else (str(v) if v else "—")),
+                 lambda v: os.path.basename(str(v)) if v else ""),
+                ("mail_template_r1_name", "Mail · round 1", 150, "w",
+                 lambda v: _text_preview(v, 30)),
+                ("mail_template_r2_name", "Mail · round 2", 150, "w",
+                 lambda v: _text_preview(v, 30)),
+                ("mail_template_r3_name", "Mail · round 3", 150, "w",
+                 lambda v: _text_preview(v, 30)),
             ],
             "form": [
                 {"key": "department_id", "label": "Department", "kind": "dropdown",
@@ -351,7 +426,33 @@ def _master_specs():
                  "kind": "file",
                  "filetypes": [("PDF/Word/Text", "*.pdf *.doc *.docx *.txt"),
                                ("All files", "*.*")]},
-                {"kind": "section", "label": "Interview invite email template"},
+                # 3 vòng phỏng vấn → 3 mẫu mail lấy từ màn hình "Mail templates".
+                {"kind": "section", "label": "Interview invite email templates"},
+                *[{"key": col, "label": label, "kind": "dropdown",
+                   "options": _mail_template_options}
+                  for col, label, _ in cv_schema.INTERVIEW_ROUNDS],
+            ],
+        },
+        "mail_template": {
+            "title": "mail template", "pk": "mail_template_id",
+            "modal_size": "md",   # form có ô soạn nội dung mail dài → cỡ md
+            "list_fn": repo.list_mail_templates,
+            "get": repo.get_mail_template, "insert": repo.insert_mail_template,
+            "update": repo.update_mail_template, "delete": repo.delete_mail_template,
+            "duplicate": repo.duplicate_mail_template,
+            "columns": [
+                ("mail_template_id", "ID", 50),
+                ("name", "Template name", 200),
+                ("type", "Type", 150),
+                ("mail_subject", "Subject", 240, "w", _text_preview),
+                ("mail_cc", "CC", 180, "w", _text_preview),
+                ("mail_body", "Body", 260, "w", _text_preview),
+            ],
+            "form": [
+                {"key": "name", "label": "Template name (*)",
+                 "kind": "text", "required": True},
+                {"key": "type", "label": "Type", "kind": "choice",
+                 "choices": cv_schema.MAIL_TEMPLATE_TYPE_CHOICES, "allow_empty": True},
                 {"key": "mail_cc", "label": "CC (separate emails with ;)",
                  "kind": "text"},
                 {"key": "mail_subject", "label": "Email subject", "kind": "text"},
@@ -515,10 +616,18 @@ class CostCenterTool(_MasterPageTool):
 
 class PositionTool(_MasterPageTool):
     name = "Positions"
-    description = "Open positions (with each position's JD & email template)."
+    description = "Open positions (with each position's JD & 3 interview-round email templates)."
     icon = "💼"
     order = 20
     spec_key = "position"
+
+
+class MailTemplateTool(_MasterPageTool):
+    name = "Mail templates"
+    description = "Email templates (interview rounds, thank-you, notification…) — duplicate to reuse."
+    icon = "✉"
+    order = 22
+    spec_key = "mail_template"
 
 
 class CourseTool(_MasterPageTool):
@@ -737,15 +846,21 @@ class CandidateDbTool(BaseTool):
         bar = QHBoxLayout()
         bar.setSpacing(6)
         B = widgets.button
-        bar.addWidget(B(None, "Add", variant="success", icon="plus", command=self._add))
+        # Toolbar chia hai vùng: BÊN TRÁI là thao tác trên các hồ sơ đang tick,
+        # BÊN PHẢI (sau stretch) là thao tác cấp trang. "Add" nằm bên phải, tông
+        # neutral vì hồ sơ chủ yếu vào DB qua tool Quét CV bằng AI — nhập tay chỉ
+        # còn là trường hợp lẻ (ứng viên walk-in, giới thiệu nội bộ).
         bar.addWidget(B(None, "View details", variant="info", icon="sparkles",
                         command=self._show_details))
+        bar.addWidget(B(None, "Update status", variant="primary", icon="check",
+                        command=self._bulk_status))
         bar.addWidget(B(None, "Send email", variant="info", icon="mail",
                         command=self._send_mail))
         self._btn_export = B(None, "Export to Excel", variant="warning", icon="save",
                              command=self._export_excel)
         bar.addWidget(self._btn_export)
         bar.addStretch(1)
+        bar.addWidget(B(None, "Add", variant="neutral", icon="plus", command=self._add))
         bar.addWidget(B(None, "Reload", variant="neutral", icon="refresh", command=self._reload))
         lay.addLayout(bar)
 
@@ -789,11 +904,115 @@ class CandidateDbTool(BaseTool):
             return
         _CandidateDetailDialog(self._root, rows).exec()
 
-    # ------------------------------------------------- gửi mail mời phỏng vấn
-    # Tick MỘT HOẶC NHIỀU ứng viên → chọn ngày giờ cho từng người → mở bấy nhiêu
-    # cửa sổ MEETING của Outlook đã điền sẵn (nội dung lấy từ mẫu của VỊ TRÍ ứng
-    # tuyển, đã thay {name}{possion}{date}{time}). Người dùng chỉ việc duyệt từng
-    # cửa sổ rồi bấm Send — Outlook vừa gửi mail mời, vừa tạo lịch, vừa đặt phòng.
+    # ------------------------------------------ đổi trạng thái hàng loạt
+    # Tick NHIỀU ứng viên → tất cả phải đang CÙNG một trạng thái thì mới đổi
+    # chung được; khác nhau thì báo lỗi kèm danh sách để người dùng tick lại.
+    def _common_status(self, rows, what):
+        """Trạng thái CHUNG của các dòng đã tick — None nếu chúng lệch nhau.
+
+        Lệch thì báo lỗi kèm danh sách từng nhóm để người dùng tick lại; `what`
+        là tên thao tác đang làm, ghép vào câu báo lỗi.
+        """
+        groups = {}
+        for row in rows:
+            label = _txt(row, "status").strip() or _NO_STATUS
+            groups.setdefault(label, []).append(
+                _txt(row, "full_name") or f"#{row['candidate_id']}")
+        if len(groups) > 1:
+            detail = "\n\n".join(f"{status}:\n• " + "\n• ".join(names)
+                                 for status, names in groups.items())
+            dialogs.error(
+                self._root, "Statuses don't match",
+                f"{what} only works when every ticked candidate is at the "
+                "same status. Right now they are at different ones:\n\n" + detail)
+            return None
+        return next(iter(groups))
+
+    def _bulk_status(self):
+        rows = self.table.checked_rows()
+        if not rows:
+            dialogs.info(self._root, "Nothing selected",
+                         "Tick at least one candidate in the table to update status.")
+            return
+
+        current = self._common_status(rows, "A bulk update")
+        if current is None:
+            return
+        self._ask_bulk_status(rows, current)
+
+    def _ask_bulk_status(self, rows, current):
+        """Modal xác nhận: trạng thái hiện tại (cố định) → trạng thái mới (sửa được).
+
+        Ô trạng thái mới điền sẵn bước kế tiếp trong luồng; hồ sơ đang ở điểm
+        dừng thì để nguyên trạng thái hiện tại. Chỉ bấm OK mới ghi xuống DB.
+        """
+        dlg, card, lay = build_dialog_shell(
+            self._root, f"Update status — {len(rows)} candidate(s)")
+
+        line = QHBoxLayout()
+        line.setSpacing(10)
+        lbl = QLabel("Current status:")
+        lbl.setObjectName("FieldLabel")
+        line.addWidget(lbl)
+        line.addWidget(_chip(card, current, theme.PALETTE["--info"]))
+        line.addStretch(1)
+        lay.addLayout(line)
+
+        lbl_new = QLabel("Move to:")
+        lbl_new.setObjectName("FieldLabel")
+        lay.addWidget(lbl_new)
+        combo = widgets.ComboBox(card)
+        combo.addItems(cv_schema.CANDIDATE_STATUS_CHOICES)
+        nxt = cv_schema.candidate_next_status(
+            "" if current == _NO_STATUS else current)
+        combo.setCurrentIndex(max(0, combo.findText(nxt or current)))
+        lay.addWidget(combo)
+
+        names = QLabel("• " + "\n• ".join(
+            _txt(r, "full_name") or f"#{r['candidate_id']}" for r in rows))
+        names.setObjectName("Hint")
+        names.setWordWrap(True)
+        sa = widgets.scroll_area(names)
+        sa.setMaximumHeight(dlg.modal_h)   # danh sách dài thì cuộn, ngắn thì vừa khít
+        lay.addWidget(sa, 1)
+
+        def do_update():
+            status = combo.currentText()
+            failed = []
+            for row in rows:
+                cid = row["candidate_id"]
+                try:
+                    repo.update_candidate(cid, {"status": status})
+                except Exception as exc:   # noqa: BLE001 — gom lỗi báo một lần
+                    failed.append(f"#{cid} — {exc}")
+            dlg.accept()
+            self._reload()
+            if failed:
+                dialogs.error(self._root, "Update failed",
+                              "Couldn't update:\n• " + "\n• ".join(failed))
+            else:
+                dialogs.success(
+                    self._root, "Status updated",
+                    f"Moved {len(rows)} candidate(s) to \"{status}\".")
+
+        foot = QHBoxLayout()
+        foot.addWidget(widgets.button(card, "OK", variant="primary", icon="check",
+                                      command=do_update))
+        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
+                                      command=dlg.reject))
+        foot.addStretch(1)
+        lay.addLayout(foot)
+        dlg.exec()
+
+    # ------------------------------------------------- gửi mail cho ứng viên
+    # Tick MỘT HOẶC NHIỀU ứng viên → chọn loại mail muốn gửi:
+    #   • VÒNG phỏng vấn (1/2/3) → chọn ngày giờ cho từng người → mở bấy nhiêu cửa
+    #     sổ MEETING của Outlook đã điền sẵn (nội dung lấy từ MẪU MAIL mà vị trí
+    #     ứng tuyển gán cho vòng đó). Người dùng duyệt rồi bấm Send — Outlook vừa
+    #     gửi mail mời, vừa tạo lịch, vừa đặt phòng.
+    #   • Thư CẢM ƠN ĐÃ ỨNG TUYỂN → mẫu chọn thẳng trong modal (không gắn theo vị
+    #     trí), mở cửa sổ MAIL THƯỜNG: không hỏi giờ, không tạo lịch.
+    # Cả hai đều thay placeholder {name}{possion}{date}{time} trước khi mở cửa sổ.
     def _send_mail(self):
         if not outlook.available():
             dialogs.warning(self._root, "Outlook required",
@@ -803,8 +1022,23 @@ class CandidateDbTool(BaseTool):
         if not rows:
             dialogs.warning(
                 self._root, "Nothing selected",
-                "Tick at least one candidate in the table to send an invite.")
+                "Tick at least one candidate in the table to send an email.")
             return
+
+        # Cùng một lượt gửi thì các hồ sơ phải đang ở CÙNG trạng thái — trạng thái
+        # đó cho biết đang mời vòng nào, hiện luôn trong hộp chọn loại mail.
+        current = self._common_status(rows, "Sending emails")
+        if current is None:
+            return
+
+        choice = self._pick_mail_kind(len(rows), current)
+        if choice is None:
+            return
+        kind, value = choice
+        if kind == "thank_you":
+            self._send_thank_you(rows, repo.get_mail_template(value))
+            return
+        tpl_col, round_label, after_status = cv_schema.INTERVIEW_ROUNDS[value]
 
         # Loại trước các ứng viên không đủ dữ liệu để soạn thư mời.
         jobs, skipped = [], []
@@ -819,7 +1053,14 @@ class CandidateDbTool(BaseTool):
             if pos is None:
                 skipped.append(f"{who} — no position, so no email template")
                 continue
-            jobs.append((row, pos, email, who))
+            tpl_id = pos[tpl_col] if tpl_col in pos.keys() else None
+            tpl = repo.get_mail_template(tpl_id) if tpl_id else None
+            if tpl is None:
+                skipped.append(
+                    f"{who} — position \"{_txt(pos, 'position_title')}\" has no "
+                    f"{round_label} email template")
+                continue
+            jobs.append((row, pos, tpl, email, who))
         if not jobs:
             dialogs.warning(self._root, "Nothing to send",
                             "None of the selected candidates can be invited:\n• "
@@ -829,20 +1070,20 @@ class CandidateDbTool(BaseTool):
         # Chọn giờ cho từng ứng viên trước, mở cửa sổ sau — người dùng chọn xong
         # một lượt rồi mới phải làm việc với Outlook.
         picks, previous = [], None
-        for idx, (row, pos, email, who) in enumerate(jobs, 1):
+        for idx, (row, pos, tpl, email, who) in enumerate(jobs, 1):
             label = who if len(jobs) == 1 else f"{who}  ({idx}/{len(jobs)})"
             picked = self._pick_datetime(label, previous, batch=len(jobs) > 1)
             if picked is None:
                 skipped.append(f"{who} — skipped")
                 continue
-            picks.append((row, pos, email, who, picked))
+            picks.append((row, pos, tpl, email, who, picked))
             previous = picked
         if not picks:
             return
 
         opened, failed, no_cv = [], [], []
-        for row, pos, email, who, (start, end) in picks:
-            subject, body_html = self._meeting_content(row, pos, start, end)
+        for row, pos, tpl, email, who, (start, end) in picks:
+            subject, body_html = self._meeting_content(row, pos, tpl, start, end)
             cv_path = _txt(row, "cv_file_path")
             if cv_path and os.path.isfile(cv_path):
                 attachments = [cv_path]
@@ -850,17 +1091,163 @@ class CandidateDbTool(BaseTool):
                 attachments = []
                 no_cv.append(f"{who} — " + ("CV file not found: " + cv_path
                                             if cv_path else "no CV file on record"))
-            err = self._open_meeting(email, _txt(pos, "mail_cc"), subject, body_html,
+            err = self._open_meeting(email, _txt(tpl, "mail_cc"), subject, body_html,
                                      start.toPython(), end.toPython(), attachments)
             if err is None:
                 opened.append((row, who))
             else:
                 failed.append(f"{who} — {err}")
-        self._report_meetings(opened, failed, skipped, no_cv)
+        self._report_meetings(opened, failed, skipped, no_cv, after_status)
+
+    def _pick_mail_kind(self, count, current=""):
+        """Hỏi loại mail muốn gửi: 3 vòng phỏng vấn, hoặc thư cảm ơn đã ứng tuyển.
+
+        Hiện luôn trạng thái hiện tại của các hồ sơ đã tick (đều giống nhau — xem
+        _common_status) và chọn sẵn vòng suy ra từ trạng thái đó (Short List →
+        vòng 1, First Interview → vòng 2…, xem cv_schema.interview_round_for_status);
+        vẫn đổi được.
+
+        Mẫu của 3 vòng lấy theo VỊ TRÍ ứng tuyển, còn thư cảm ơn không gắn với vị
+        trí nên chọn thẳng mẫu ở ô bên dưới (chỉ hiện khi chọn loại này).
+
+        Trả về ("round", chỉ số trong INTERVIEW_ROUNDS) / ("thank_you", id mẫu
+        mail), hoặc None nếu hủy.
+        """
+        dlg, card, lay = build_dialog_shell(
+            self._root, f"Send email — {count} candidate(s)", size="sm")
+
+        if current:
+            line = QHBoxLayout()
+            line.setSpacing(10)
+            lbl = QLabel("Current status:")
+            lbl.setObjectName("FieldLabel")
+            line.addWidget(lbl)
+            line.addWidget(_chip(card, current, theme.PALETTE["--info"]))
+            line.addStretch(1)
+            lay.addLayout(line)
+
+        note = QLabel("Pick the email to send:")
+        note.setObjectName("DialogMsg")
+        note.setWordWrap(True)
+        lay.addWidget(note)
+
+        thank_you = cv_schema.MAIL_TEMPLATE_TYPE_THANK_YOU
+        combo = widgets.ComboBox(card)
+        combo.addItems([label for _, label, _ in cv_schema.INTERVIEW_ROUNDS]
+                       + [thank_you])
+        combo.setCurrentIndex(cv_schema.interview_round_for_status(current))
+        lay.addWidget(combo)
+
+        # Ô chọn mẫu thư cảm ơn — chỉ hiện khi chọn loại đó ở ô trên.
+        tpl_opts = {(t["name"] or f"#{t['mail_template_id']}").strip():
+                    t["mail_template_id"]
+                    for t in repo.list_mail_templates(thank_you)}
+        tpl_lbl = QLabel("Template:")
+        tpl_lbl.setObjectName("FieldLabel")
+        tpl_combo = widgets.ComboBox(card)
+        tpl_combo.addItems(list(tpl_opts) or ["(no template of this type yet)"])
+        tpl_combo.setEnabled(bool(tpl_opts))
+        lay.addWidget(tpl_lbl)
+        lay.addWidget(tpl_combo)
+
+        def _sync(idx):
+            picked_thank_you = idx == combo.count() - 1
+            tpl_lbl.setVisible(picked_thank_you)
+            tpl_combo.setVisible(picked_thank_you)
+
+        combo.currentIndexChanged.connect(_sync)
+        _sync(combo.currentIndex())
+
+        result = {"val": None}
+
+        def _confirm():
+            idx = combo.currentIndex()
+            if idx < len(cv_schema.INTERVIEW_ROUNDS):
+                result["val"] = ("round", idx)
+            elif not tpl_opts:
+                dialogs.warning(
+                    dlg, "No template",
+                    f'There is no "{thank_you}" mail template yet. '
+                    "Create one on the Mail templates page first.")
+                return
+            else:
+                result["val"] = ("thank_you", tpl_opts[tpl_combo.currentText()])
+            dlg.accept()
+
+        foot = QHBoxLayout()
+        foot.addWidget(widgets.button(card, "Continue", variant="primary",
+                                      icon="check", command=_confirm))
+        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
+                                      command=dlg.reject))
+        foot.addStretch(1)
+        lay.addLayout(foot)
+        dlg.exec()
+        return result["val"]
+
+    # ------------------------------------------------- thư cảm ơn đã ứng tuyển
+    def _send_thank_you(self, rows, tpl):
+        """Mở cửa sổ MAIL THƯỜNG của Outlook cho từng ứng viên đã tick.
+
+        Không hỏi giờ, không tạo lịch, không đính kèm CV — chỉ điền sẵn người
+        nhận / CC / tiêu đề / nội dung từ mẫu rồi để người dùng bấm Send. Trạng
+        thái ứng viên GIỮ NGUYÊN (thư cảm ơn không đổi giai đoạn tuyển dụng).
+        """
+        if tpl is None:
+            dialogs.error(self._root, "Template missing",
+                          "That mail template no longer exists.")
+            return
+        opened, failed, skipped = [], [], []
+        for row in rows:
+            who = _txt(row, "full_name") or f"#{row['candidate_id']}"
+            email = _txt(row, "email")
+            if not email:
+                skipped.append(f"{who} — no email address")
+                continue
+            subject, body_html = self._mail_content(row, tpl)
+            try:
+                outlook.create_mail(email, subject, cc=_txt(tpl, "mail_cc"),
+                                    html=body_html)
+            except Exception as exc:   # noqa: BLE001 — gom lỗi báo một lần
+                failed.append(f"{who} — {exc}")
+                continue
+            opened.append(who)
+
+        lines = []
+        if failed:
+            lines.append("Couldn't open a draft for:\n• " + "\n• ".join(failed))
+        if skipped:
+            lines.append("Not emailed:\n• " + "\n• ".join(skipped))
+        if lines:
+            report = dialogs.error if failed else dialogs.warning
+            report(self._root, "Some emails were left out", "\n\n".join(lines))
+        if opened:
+            dialogs.success(
+                self._root, "Drafts opened",
+                f"{len(opened)} email draft(s) opened in Outlook — review each "
+                "window then press Send there.\n\n• " + "\n• ".join(opened))
 
     @staticmethod
-    def _meeting_content(row, pos, start, end):
-        """Tiêu đề + nội dung HTML của thư mời, điền từ mẫu của vị trí ứng tuyển."""
+    def _mail_content(row, tpl):
+        """Tiêu đề + nội dung HTML của mail thường (không có ngày/giờ phỏng vấn).
+
+        Chỉ điền các placeholder liên quan tới ứng viên; {date}/{time…} nếu lỡ có
+        trong mẫu thì GIỮ NGUYÊN để người dùng nhìn thấy mà sửa trước khi gửi.
+        """
+        pos_id = row["position_id"] if "position_id" in row.keys() else None
+        pos = repo.get_position(pos_id) if pos_id else None
+        title = _txt(pos, "position_title") if pos is not None else ""
+        mapping = {
+            "name":     _given_name(_txt(row, "full_name")),
+            "possion":  title,
+            "position": title,
+        }
+        body = tpl["mail_body"] if "mail_body" in tpl.keys() and tpl["mail_body"] else ""
+        return (_fill_template(_txt(tpl, "mail_subject"), mapping),
+                _fill_template(body, mapping, escape=True))
+
+    @staticmethod
+    def _meeting_content(row, pos, tpl, start, end):
+        """Tiêu đề + nội dung HTML của thư mời, điền từ mẫu mail của vòng đang mời."""
         title = _txt(pos, "position_title")
         sd, ed = start.toPython(), end.toPython()
         start_hm, end_hm = _fmt_time_en(sd), _fmt_time_en(ed)
@@ -873,11 +1260,11 @@ class CandidateDbTool(BaseTool):
             "time_start": start_hm,            # '08:30 AM'
             "time_end":   end_hm,
         }
-        body = pos["mail_body"] if "mail_body" in pos.keys() and pos["mail_body"] else ""
-        return (_fill_template(_txt(pos, "mail_subject"), mapping),
+        body = tpl["mail_body"] if "mail_body" in tpl.keys() and tpl["mail_body"] else ""
+        return (_fill_template(_txt(tpl, "mail_subject"), mapping),
                 _fill_template(body, mapping, escape=True))
 
-    def _report_meetings(self, opened, failed, skipped, no_cv=()):
+    def _report_meetings(self, opened, failed, skipped, no_cv=(), after_status=""):
         """Kết thúc một lượt gửi: báo trước các trường hợp lỗi/bỏ qua/thiếu CV
         (nếu có), rồi mời cập nhật trạng thái cho những ứng viên đã mở thư mời."""
         lines = []
@@ -894,14 +1281,15 @@ class CandidateDbTool(BaseTool):
                 title = "Some candidates were left out" if skipped else "Missing CV file"
                 dialogs.warning(self._root, title, "\n\n".join(lines))
         if opened:
-            self._ask_status_update(opened)
+            self._ask_status_update(opened, after_status)
 
-    def _ask_status_update(self, entries):
+    def _ask_status_update(self, entries, after_status=""):
         """Modal cập nhật trạng thái cho các ứng viên vừa mở thư mời.
 
-        Mặc định là 'First Interview' nhưng đổi được từng người (vd hẹn vòng 2 thì
-        để 'Second Interview'). Chỉ bấm Update mới ghi xuống DB; đóng modal thì
-        trạng thái giữ nguyên như cũ. `entries` là list (row, tên hiển thị).
+        Điền sẵn trạng thái ứng với VÒNG vừa mời (`after_status` — xem
+        cv_schema.INTERVIEW_ROUNDS) nhưng đổi được từng người. Chỉ bấm Update mới
+        ghi xuống DB; đóng modal thì trạng thái giữ nguyên như cũ. `entries` là
+        list (row, tên hiển thị).
         """
         dlg, card, lay = build_dialog_shell(self._root, "Update candidate status")
 
@@ -927,8 +1315,7 @@ class CandidateDbTool(BaseTool):
             line.addWidget(name, 1)
             combo = widgets.ComboBox(body)
             combo.addItems(cv_schema.CANDIDATE_STATUS_CHOICES)
-            idx = combo.findText(_STATUS_AFTER_INVITE)
-            combo.setCurrentIndex(max(0, idx))
+            combo.setCurrentIndex(max(0, combo.findText(after_status)))
             line.addWidget(combo, 1)
             col.addLayout(line)
             selects.append((row["candidate_id"], combo))
@@ -1282,10 +1669,4 @@ class CandidateDbTool(BaseTool):
         self._launch(new_path)
 
     def _launch(self, path):
-        try:
-            os.startfile(path)
-        except AttributeError:
-            import subprocess
-            subprocess.Popen(["xdg-open", path])
-        except Exception as exc:
-            dialogs.error(self._root, "Open error", f"Couldn't open the file:\n{exc}")
+        _launch_file(self._root, path)

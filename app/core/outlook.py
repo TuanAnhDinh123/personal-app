@@ -338,6 +338,40 @@ def create_meeting(subject, start, end, to, optional="", location="",
         pythoncom.CoUninitialize()
 
 
+def create_mail(to, subject, cc="", html="", body="", attachments=None):
+    """Mở cửa sổ soạn MAIL THƯỜNG của Outlook đã điền sẵn — KHÔNG tự gửi.
+
+    Khác `send_mail` (gửi thẳng) và `create_meeting` (thư mời họp, có giờ + lịch):
+    đây chỉ là một mail bình thường hiện lên để người dùng xem lại rồi bấm Send.
+    MailItem có sẵn HTMLBody nên đổ HTML thẳng vào, không cần mẹo Word như
+    thư mời họp. Cửa sổ mở KHÔNG chặn (modeless) — hàm trả về ngay.
+    """
+    import pythoncom
+    import win32com.client
+
+    pythoncom.CoInitialize()
+    try:
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        mail = outlook.CreateItem(_OL_MAIL_ITEM)
+        mail.To = to
+        if cc:
+            mail.CC = cc
+        mail.Subject = subject
+        for path in (attachments or []):
+            mail.Attachments.Add(str(path))
+        if html:
+            mail.HTMLBody = html
+        else:
+            mail.Body = body or ""
+        mail.Display()
+        try:
+            mail.GetInspector.Activate()
+        except Exception:
+            pass
+    finally:
+        pythoncom.CoUninitialize()
+
+
 def _account_smtp(acct):
     """SMTP thật của một Account — tài khoản Exchange đôi khi trả `SmtpAddress`
     rỗng qua MAPI cổ điển, phải tra qua ExchangeUser.PrimarySmtpAddress (giống
