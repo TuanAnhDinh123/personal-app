@@ -172,10 +172,32 @@ def init_db() -> None:
                 conn.execute(stmt)
             except sqlite3.OperationalError:
                 pass  # thường là "duplicate column" — đã thêm rồi, bỏ qua
+        _run_data_migrations(conn)
         _migrate_document_files(conn)
         _drop_job_descriptions(conn)
         _backfill_timestamps(conn)
         _seed_master_data(conn)
+
+
+def _run_data_migrations(conn: sqlite3.Connection) -> None:
+    """Chạy các lượt sửa DỮ LIỆU trong cv_schema.DATA_MIGRATIONS.
+
+    Mỗi lượt chỉ chạy MỘT LẦN cho mỗi file DB — đánh dấu bằng khóa
+    "data:<tên lượt>" trong app_meta, nên lần mở tool sau bỏ qua luôn, không
+    quét lại bảng. Xóa dòng đánh dấu trong app_meta nếu muốn chạy lại.
+
+    Lượt nào lỗi giữa chừng thì KHÔNG ghi dấu (cả init_db nằm trong một
+    transaction → rollback), lần mở sau sẽ thử lại.
+    """
+    for name, statements in cv_schema.DATA_MIGRATIONS.items():
+        key = f"data:{name}"
+        if conn.execute("SELECT 1 FROM app_meta WHERE key = ?", (key,)).fetchone():
+            continue
+        for stmt in statements:
+            conn.execute(stmt)
+        conn.execute(
+            "INSERT OR REPLACE INTO app_meta (key, value) VALUES "
+            "(?, datetime('now', 'localtime'))", (key,))
 
 
 def _table_exists(conn, name) -> bool:

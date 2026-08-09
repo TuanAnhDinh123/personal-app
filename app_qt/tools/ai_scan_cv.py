@@ -18,7 +18,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QWidget
 
-from app.core import config, cv_repository as repo, settings
+from app.core import config, cv_repository as repo, cv_schema, settings
 from app.core.ai_cv_scan import (
     _call_gemini, _Cancelled, append_rows_to_excel, done_folder_for,
     move_to_done, read_jd_file, resolve_done_target,
@@ -48,7 +48,7 @@ def _to_candidate_row(data, position_id):
         "phone": data.get("phone") or "",
         "date_of_birth": data.get("dob") or "",
         "position_id": position_id,
-        "status": "New",
+        "status": cv_schema.CANDIDATE_STATUS_DEFAULT,
         "source": "AI CV Scan",
         "batch": data.get("batch"),
         "fit_score": data.get("fit_score"),

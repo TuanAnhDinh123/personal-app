@@ -187,9 +187,12 @@ Sửa · Xóa · Mở CV · Nhập từ Excel · Tải lại**.
   thoại chọn ngày/giờ cho **từng người** (người sau mặc định nối tiếp ngay sau
   người trước, nút *Skip* để bỏ qua một người) → app mở bấy nhiêu **cửa sổ
   Meeting của Outlook** đã điền sẵn người nhận, giờ và nội dung theo mẫu mail của
-  vị trí ứng tuyển. Người dùng chỉ việc duyệt từng cửa sổ, thêm phòng họp nếu
+  vị trí ứng tuyển, **kèm file CV** của ứng viên (bỏ qua nếu chưa có CV hoặc
+  đường dẫn không còn đúng). Người dùng chỉ việc duyệt từng cửa sổ, thêm phòng họp nếu
   cần rồi bấm **Send** — Outlook lo cả ba việc: gửi mail mời, tạo lịch, đặt
-  phòng. Placeholder trong mẫu (`{name} {possion} {date} {time_start}
+  phòng. Mở xong, app hiện modal **cập nhật trạng thái** cho đúng những ứng viên
+  đó (mặc định **First Interview**, đổi được từng người); bấm *Update* mới ghi xuống
+  DB. Placeholder trong mẫu (`{name} {possion} {date} {time_start}
   {time_end}`) vẫn nhận đúng kể cả khi bị bôi đậm/đổi màu, và định dạng đó được
   giữ cho giá trị thay vào.
 - Nút **📂 Mở CV** mở file CV của ứng viên đang chọn. Nếu file đã bị **di chuyển
@@ -208,7 +211,7 @@ Thiết kế cơ sở dữ liệu tách riêng để dễ chỉnh:
 
 | File | Vai trò |
 |------|---------|
-| `app/core/cv_schema.py` | **Thiết kế DB** — toàn bộ bảng dưới dạng SQL (`SCHEMA_SQL`) kèm chú thích. Sửa cấu trúc DB ở đây; có sẵn mục `MIGRATIONS` để thêm cột an toàn cho DB đã có dữ liệu. |
+| `app/core/cv_schema.py` | **Thiết kế DB** — toàn bộ bảng dưới dạng SQL (`SCHEMA_SQL`) kèm chú thích. Sửa cấu trúc DB ở đây; có sẵn `MIGRATIONS` để thêm cột an toàn cho DB đã có dữ liệu, và `DATA_MIGRATIONS` để sửa dữ liệu sẵn có (chạy **một lần** mỗi file .db, đánh dấu ở `app_meta` với khóa `data:<tên lượt>`). |
 | `app/core/cv_repository.py` | **Tầng truy cập dữ liệu** — kết nối SQLite + CRUD generic cho mọi bảng. Giao diện chỉ gọi hàm, không đụng SQL. |
 | `app/tools/candidate_db.py` | **Giao diện** tool + form nhập liệu tổng quát. |
 

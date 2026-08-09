@@ -42,6 +42,9 @@ try:
 except ImportError:
     _OPENPYXL_OK = False
 
+# Trạng thái gợi ý sẵn sau khi mở thư mời phỏng vấn (đổi được trong modal).
+_STATUS_AFTER_INVITE = "First Interview"
+
 # ─────────────────────────────────────────────────────────────────────────
 #  BỀ RỘNG (px) CÁC CỘT BẢNG ỨNG VIÊN — chỉnh tùy ý ở đây.
 #  (Cột checkbox 'chọn' nằm ở app_qt/components/table.py → CHECK_COL_WIDTH.)
@@ -56,7 +59,7 @@ CAND_COL_WIDTHS = {
     "cv_file_path":    160,
     "department_name": 140,
     "batch":           90,
-    "status":          100,
+    "status":          130,   # đủ chỗ cho nhãn dài nhất ("Fail Probation Period")
     "date_of_birth":   95,
     "applied_at":      105,
     "note":            200,
@@ -722,7 +725,7 @@ class CandidateDbTool(BaseTool):
         self.sel_dept = widgets.FilterSelect("Department")
         self.sel_status = widgets.FilterSelect("Status")
         self.sel_batch = widgets.FilterSelect("Batch")
-        self.sel_status.set_options(cv_schema.STATUS_CHOICES)
+        self.sel_status.set_options(cv_schema.CANDIDATE_STATUS_CHOICES)
         for w in (self.sel_pos, self.sel_dept, self.sel_status, self.sel_batch):
             w.changed.connect(self._reload)
             filters.addWidget(w, 1)
@@ -837,16 +840,23 @@ class CandidateDbTool(BaseTool):
         if not picks:
             return
 
-        opened, failed = 0, []
+        opened, failed, no_cv = [], [], []
         for row, pos, email, who, (start, end) in picks:
             subject, body_html = self._meeting_content(row, pos, start, end)
+            cv_path = _txt(row, "cv_file_path")
+            if cv_path and os.path.isfile(cv_path):
+                attachments = [cv_path]
+            else:
+                attachments = []
+                no_cv.append(f"{who} — " + ("CV file not found: " + cv_path
+                                            if cv_path else "no CV file on record"))
             err = self._open_meeting(email, _txt(pos, "mail_cc"), subject, body_html,
-                                     start.toPython(), end.toPython())
+                                     start.toPython(), end.toPython(), attachments)
             if err is None:
-                opened += 1
+                opened.append((row, who))
             else:
                 failed.append(f"{who} — {err}")
-        self._report_meetings(opened, failed, skipped)
+        self._report_meetings(opened, failed, skipped, no_cv)
 
     @staticmethod
     def _meeting_content(row, pos, start, end):
@@ -867,23 +877,90 @@ class CandidateDbTool(BaseTool):
         return (_fill_template(_txt(pos, "mail_subject"), mapping),
                 _fill_template(body, mapping, escape=True))
 
-    def _report_meetings(self, opened, failed, skipped):
-        """Tổng kết một lượt gửi: mở được bao nhiêu cửa sổ, ai bị bỏ qua/lỗi."""
+    def _report_meetings(self, opened, failed, skipped, no_cv=()):
+        """Kết thúc một lượt gửi: báo trước các trường hợp lỗi/bỏ qua/thiếu CV
+        (nếu có), rồi mời cập nhật trạng thái cho những ứng viên đã mở thư mời."""
         lines = []
-        if opened:
-            lines.append(f"{opened} meeting invite(s) opened in Outlook. Review each "
-                         "one, add a meeting room if you need one, then press Send.")
         if failed:
-            lines.append("Couldn't open:\n• " + "\n• ".join(failed))
+            lines.append("Couldn't open a meeting for:\n• " + "\n• ".join(failed))
         if skipped:
             lines.append("Not invited:\n• " + "\n• ".join(skipped))
-        message = "\n\n".join(lines)
-        if failed:
-            dialogs.error(self._root, "Some invites failed", message)
-        elif skipped:
-            dialogs.warning(self._root, "Meetings ready", message)
-        else:
-            dialogs.success(self._root, "Meetings ready", message)
+        if no_cv:
+            lines.append("Invite opened without a CV attached:\n• " + "\n• ".join(no_cv))
+        if lines:
+            if failed:
+                dialogs.error(self._root, "Some invites failed", "\n\n".join(lines))
+            else:
+                title = "Some candidates were left out" if skipped else "Missing CV file"
+                dialogs.warning(self._root, title, "\n\n".join(lines))
+        if opened:
+            self._ask_status_update(opened)
+
+    def _ask_status_update(self, entries):
+        """Modal cập nhật trạng thái cho các ứng viên vừa mở thư mời.
+
+        Mặc định là 'First Interview' nhưng đổi được từng người (vd hẹn vòng 2 thì
+        để 'Second Interview'). Chỉ bấm Update mới ghi xuống DB; đóng modal thì
+        trạng thái giữ nguyên như cũ. `entries` là list (row, tên hiển thị).
+        """
+        dlg, card, lay = build_dialog_shell(self._root, "Update candidate status")
+
+        note = QLabel(
+            f"{len(entries)} meeting invite(s) opened in Outlook — review each window, "
+            "add a meeting room if you need one, then press Send there.\n\n"
+            "New status for these candidates:")
+        note.setObjectName("DialogMsg")
+        note.setWordWrap(True)
+        lay.addWidget(note)
+
+        body = QWidget()
+        col = QVBoxLayout(body)
+        col.setContentsMargins(0, 0, 8, 0)
+        col.setSpacing(8)
+        selects = []
+        for row, who in entries:
+            line = QHBoxLayout()
+            line.setSpacing(10)
+            name = QLabel(who)
+            name.setObjectName("FieldLabel")
+            name.setWordWrap(True)
+            line.addWidget(name, 1)
+            combo = widgets.ComboBox(body)
+            combo.addItems(cv_schema.CANDIDATE_STATUS_CHOICES)
+            idx = combo.findText(_STATUS_AFTER_INVITE)
+            combo.setCurrentIndex(max(0, idx))
+            line.addWidget(combo, 1)
+            col.addLayout(line)
+            selects.append((row["candidate_id"], combo))
+        col.addStretch(1)
+        sa = widgets.scroll_area(body)
+        sa.setMaximumHeight(dlg.modal_h)   # danh sách dài thì cuộn, ngắn thì vừa khít
+        lay.addWidget(sa, 1)
+
+        def do_update():
+            failed = []
+            for cid, combo in selects:
+                try:
+                    repo.update_candidate(cid, {"status": combo.currentText()})
+                except Exception as exc:   # noqa: BLE001 — gom lỗi báo một lần
+                    failed.append(f"#{cid} — {exc}")
+            dlg.accept()
+            self._reload()
+            if failed:
+                dialogs.error(self._root, "Update failed",
+                              "Couldn't update:\n• " + "\n• ".join(failed))
+            else:
+                dialogs.success(self._root, "Status updated",
+                                f"Updated {len(selects)} candidate(s).")
+
+        foot = QHBoxLayout()
+        foot.addWidget(widgets.button(card, "Update", variant="primary", icon="check",
+                                      command=do_update))
+        foot.addWidget(widgets.button(card, "Keep current status", variant="neutral",
+                                      icon="x", command=dlg.reject))
+        foot.addStretch(1)
+        lay.addLayout(foot)
+        dlg.exec()
 
     def _pick_datetime(self, who="", previous=None, batch=False):
         """Hộp thoại chọn NGÀY + GIỜ bắt đầu/kết thúc phỏng vấn của MỘT ứng viên.
@@ -979,8 +1056,9 @@ class CandidateDbTool(BaseTool):
         return result["val"]
 
     @staticmethod
-    def _open_meeting(to, cc, subject, body_html, start, end):
-        """Mở cửa sổ meeting của Outlook đã điền sẵn ứng viên, giờ và nội dung.
+    def _open_meeting(to, cc, subject, body_html, start, end, attachments=()):
+        """Mở cửa sổ meeting của Outlook đã điền sẵn ứng viên, giờ, nội dung và
+        file đính kèm (CV của ứng viên).
 
         Nội dung mẫu là rich text nên truyền dạng HTML để giữ định dạng; bản
         thuần chỉ dùng khi Outlook không chèn được HTML. CC của mẫu mail thành
@@ -991,7 +1069,8 @@ class CandidateDbTool(BaseTool):
         doc.setHtml(body_html)
         try:
             outlook.create_meeting(subject, start, end, to, optional=cc,
-                                   html=body_html, body=doc.toPlainText())
+                                   html=body_html, body=doc.toPlainText(),
+                                   attachments=list(attachments))
         except Exception as exc:   # noqa: BLE001 — gom lỗi lại để báo một lần
             return str(exc)
         return None
@@ -1107,7 +1186,7 @@ class CandidateDbTool(BaseTool):
             {"key": "education", "label": "Education", "kind": "text"},
             {"key": "applied_at", "label": "Applied date (yyyy-mm-dd)", "kind": "text"},
             {"key": "status", "label": "Status", "kind": "choice",
-             "choices": cv_schema.STATUS_CHOICES},
+             "choices": cv_schema.CANDIDATE_STATUS_CHOICES},
             {"key": "source", "label": "CV source", "kind": "text"},
             {"key": "batch", "label": "Batch (scan round — number)", "kind": "int"},
             {"key": "cv_file_path", "label": "CV file (local path)", "kind": "file",

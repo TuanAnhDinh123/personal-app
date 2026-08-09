@@ -39,6 +39,19 @@ def available():
         return False
 
 
+def _ol_time(value):
+    """Đổi datetime sang chuỗi 'YYYY-MM-DD HH:MM:SS' trước khi gán cho Outlook.
+
+    Gán thẳng đối tượng datetime thì pywin32 hiểu đó là giờ UTC, Outlook quy về
+    giờ máy nên sự kiện lệch đúng bằng độ lệch múi giờ (giờ Việt Nam lùi 7
+    tiếng). Gán chuỗi thì Outlook đọc đúng con số đang thấy trên màn hình —
+    9:00 chọn trong app vào lịch vẫn là 9:00.
+    """
+    if isinstance(value, datetime.datetime):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    return value
+
+
 def _to_datetime(value):
     """Đổi giá trị thời gian của Outlook (pywintypes time) sang datetime."""
     try:
@@ -214,7 +227,7 @@ def create_appointment(subject, start, duration_minutes=30, body="",
         outlook = win32com.client.Dispatch("Outlook.Application")
         appt = outlook.CreateItem(_OL_APPOINTMENT_ITEM)
         appt.Subject = subject
-        appt.Start = start
+        appt.Start = _ol_time(start)
         appt.Duration = duration_minutes
         if body:
             appt.Body = body
@@ -266,7 +279,8 @@ def _insert_html_body(appt, html):
 
 
 def create_meeting(subject, start, end, to, optional="", location="",
-                   html="", body="", resources=None, reminder_minutes=15):
+                   html="", body="", resources=None, reminder_minutes=15,
+                   attachments=None):
     """Mở cửa sổ soạn LỜI MỜI HỌP của Outlook đã điền sẵn mọi thông tin.
 
     Người dùng xem lại (thêm phòng họp nếu muốn) rồi bấm Send — Outlook lo trọn
@@ -275,7 +289,8 @@ def create_meeting(subject, start, end, to, optional="", location="",
 
     `start`/`end` là datetime. `to` / `optional` / `resources` nhận chuỗi nhiều
     địa chỉ ngăn bằng ";" (hoặc list). `html` giữ định dạng cho nội dung; không
-    chèn được thì lùi về `body` thuần.
+    chèn được thì lùi về `body` thuần. `attachments` là danh sách đường dẫn file
+    đính kèm theo thư mời.
 
     Cửa sổ mở ra KHÔNG chặn (modeless) — hàm trả về ngay, app không biết người
     dùng có thực sự bấm Send hay không.
@@ -289,8 +304,8 @@ def create_meeting(subject, start, end, to, optional="", location="",
         appt = outlook.CreateItem(_OL_APPOINTMENT_ITEM)
         appt.MeetingStatus = _OL_MEETING
         appt.Subject = subject
-        appt.Start = start
-        appt.End = end
+        appt.Start = _ol_time(start)
+        appt.End = _ol_time(end)
         if location:
             appt.Location = location
         appt.ReminderSet = True
@@ -307,6 +322,9 @@ def create_meeting(subject, start, end, to, optional="", location="",
             appt.Recipients.ResolveAll()
         except Exception:
             pass
+
+        for path in (attachments or []):
+            appt.Attachments.Add(str(path))
 
         # WordEditor chỉ dùng được khi cửa sổ đã mở → hiển thị trước, chèn sau.
         appt.Display()
@@ -406,7 +424,7 @@ def send_mail(to, subject, body, cc="", html="", account_smtp=None, attachments=
         else:
             mail.Body = body
         if deferred_until and deferred_until > datetime.datetime.now():
-            mail.DeferredDeliveryTime = deferred_until
+            mail.DeferredDeliveryTime = _ol_time(deferred_until)
         if account_smtp:
             ns = outlook.GetNamespace("MAPI")
             matched = False

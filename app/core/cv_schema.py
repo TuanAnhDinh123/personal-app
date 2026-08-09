@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS candidates (
     years_experience INT,
     education        VARCHAR,
     applied_at       DATETIME,          -- ngày nộp CV
-    status           VARCHAR,           -- Mới / Phỏng vấn / Đạt / Loại…
+    status           VARCHAR,           -- giai đoạn tuyển dụng (xem CANDIDATE_STATUS_CHOICES)
     source           VARCHAR,           -- nguồn CV
     batch            INT,               -- đợt/lô quét CV (chỉ lưu SỐ: 1, 2, 3… từ tên thư mục batch1…)
     fit_score        DECIMAL,           -- điểm phù hợp (0–100)
@@ -334,6 +334,35 @@ CREATE INDEX IF NOT EXISTS idx_levels_name         ON levels(level_name);
 MIGRATIONS: list[str] = []
 
 # =============================================================================
+#  DATA_MIGRATIONS — sửa DỮ LIỆU (không phải cấu trúc), chạy đúng MỘT LẦN cho
+#  mỗi file DB. `cv_repository._run_data_migrations()` gọi trong init_db() và
+#  ghi dấu vết vào app_meta với khóa "data:<tên lượt>" → lần mở sau bỏ qua hẳn,
+#  không quét lại bảng. Muốn chạy lại: xóa dòng đó trong app_meta.
+#
+#  Khác với MIGRATIONS ở trên (ALTER TABLE — chạy lại mỗi lần mở, vô hại vì chỉ
+#  báo lỗi "duplicate column" rồi bỏ qua).
+#
+#  Mỗi lượt là một danh sách câu SQL chạy theo thứ tự. Đặt tên kèm version để
+#  sau này cần sửa tiếp thì thêm lượt mới, KHÔNG sửa lượt cũ (DB đã chạy rồi).
+# =============================================================================
+DATA_MIGRATIONS: dict[str, list[str]] = {
+    # Đưa trạng thái ứng viên của DB cũ về bộ nhãn trong CANDIDATE_STATUS_CHOICES.
+    # So khớp bỏ qua hoa/thường & khoảng trắng thừa.
+    "candidate_status:v1": [
+        "UPDATE candidates SET status = 'New Application' "
+        "WHERE LOWER(TRIM(COALESCE(status, ''))) = 'new'",
+        "UPDATE candidates SET status = 'Screening' "
+        "WHERE LOWER(TRIM(COALESCE(status, ''))) IN ('contacted', 'on hold')",
+        "UPDATE candidates SET status = 'First Interview' "
+        "WHERE LOWER(TRIM(COALESCE(status, ''))) = 'interview'",
+        "UPDATE candidates SET status = 'Ready To Hire' "
+        "WHERE LOWER(TRIM(COALESCE(status, ''))) = 'passed'",
+        "UPDATE candidates SET status = 'Not Proceed' "
+        "WHERE LOWER(TRIM(COALESCE(status, ''))) = 'rejected'",
+    ],
+}
+
+# =============================================================================
 #  SEED — DỮ LIỆU KHỞI TẠO cho các bảng danh mục (nguồn: file Code.xlsx).
 #
 #  Cách chạy: `cv_repository._seed_master_data()` gọi trong init_db().
@@ -463,8 +492,37 @@ SEED_DATA: dict[str, dict] = {
     },
 }
 
-# Gợi ý cho các ô chọn ở giao diện (sửa tùy ý).
-STATUS_CHOICES = ["New", "Contacted", "Interview", "Passed", "Rejected", "On hold"]
+# Trạng thái ứng viên (cột candidates.status) — LƯU DẠNG TEXT đúng bằng nhãn
+# dưới đây. Danh sách xếp theo đúng luồng tuyển dụng: chỉ số trong list = thứ tự
+# giai đoạn, dùng khi cần sắp xếp/so sánh tiến độ (xem candidate_status_order).
+# "Not Proceed" là nhánh dừng: hồ sơ không đi tiếp sau khi lọc short list.
+CANDIDATE_STATUS_CHOICES = [
+    "New Application",
+    "Screening",
+    "Short List",
+    "Not Proceed",
+    "First Interview",
+    "Second Interview",
+    "Third Interview",
+    "Offer Approval",
+    "Ready To Hire",
+    "Rejected Offer",
+    "Fail Probation Period",
+]
+
+# Trạng thái mặc định của hồ sơ vừa vào DB (nhập tay hoặc quét CV bằng AI).
+CANDIDATE_STATUS_DEFAULT = CANDIDATE_STATUS_CHOICES[0]
+
+
+def candidate_status_order(status: str) -> int:
+    """Thứ tự giai đoạn của một trạng thái (-1 nếu là nhãn lạ/rỗng)."""
+    target = (status or "").strip().lower()
+    for i, label in enumerate(CANDIDATE_STATUS_CHOICES):
+        if label.lower() == target:
+            return i
+    return -1
+
+
 POSITION_STATUS_CHOICES = ["Open", "Paused", "Closed"]
 
 # Nhân viên: giới tính — dùng cho ô lọc + form nhập. Cấp bậc (level) tham chiếu
