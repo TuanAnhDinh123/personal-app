@@ -27,10 +27,16 @@ def log_path():
 def write(text):
     """Ghi một mục vào log kèm mốc thời gian; in ra console nếu đang có."""
     line = f"[{datetime.datetime.now():%Y-%m-%d %H:%M:%S}] {text}"
+    path = log_path()
+    # Xoay vòng đặt trong try RIÊNG: đổi tên file thất bại (Windows đang mở file,
+    # log mở bằng Notepad…) thì vẫn phải ghi tiếp — gộp chung một try sẽ làm
+    # log CHẾT VĨNH VIỄN từ lúc đầy 1 MB trở đi.
     try:
-        path = log_path()
-        if os.path.exists(path) and os.path.getsize(path) > _MAX_BYTES:
+        if os.path.getsize(path) > _MAX_BYTES:
             os.replace(path, path + ".1")
+    except OSError:
+        pass
+    try:
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
     except OSError:
@@ -78,9 +84,12 @@ def install():
 
     threading.excepthook = thread_hook
 
-    # faulthandler: crash tầng C (COM của Outlook, Qt) cũng để lại dấu vết.
+    # faulthandler: crash tầng C (COM của Outlook, Qt) cũng để lại dấu vết. Ghi
+    # ra file RIÊNG vì nó giữ file mở suốt phiên — chung file với debug.log thì
+    # Windows không cho đổi tên lúc xoay vòng.
     try:
         import faulthandler
-        faulthandler.enable(file=open(log_path(), "a", encoding="utf-8"))
+        crash = os.path.join(os.path.dirname(log_path()), "crash.log")
+        faulthandler.enable(file=open(crash, "a", encoding="utf-8"))
     except Exception:
         pass

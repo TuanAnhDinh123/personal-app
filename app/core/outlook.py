@@ -152,13 +152,39 @@ def _attendee_emails(item):
     return emails
 
 
-def appointments_between(start_date, end_date):
+def appointment_attendees(entry_id):
+    """Email người tham dự của MỘT sự kiện lịch, tra theo EntryID.
+
+    Tách riêng khỏi `appointments_between` vì đây là phần chậm nhất: địa chỉ của
+    người tham dự trong Exchange là dạng X.500, muốn ra email thật phải hỏi GAL
+    từng người một — mỗi người một vòng gọi qua mạng. Quét cả tháng mà tra sẵn
+    thì thành hàng nghìn vòng gọi (chờ vài phút), nên chỉ tra đúng lúc cần: khi
+    người dùng mở mail phản hồi cho một sự kiện.
+    """
+    import pythoncom
+    import win32com.client
+
+    pythoncom.CoInitialize()
+    try:
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        ns = outlook.GetNamespace("MAPI")
+        return _attendee_emails(ns.GetItemFromID(entry_id))
+    finally:
+        pythoncom.CoUninitialize()
+
+
+def appointments_between(start_date, end_date, on_progress=None,
+                         with_attendees=False):
     """Trả về các sự kiện lịch có ngày bắt đầu trong [start_date, end_date].
 
     `start_date`, `end_date` là datetime.date. Mỗi phần tử là dict giống
-    today_appointments() nhưng có thêm:
-        attendees  – list email người tham dự
-        entry_id   – ID duy nhất của sự kiện (để nhớ đã xử lý)
+    today_appointments() nhưng có thêm `entry_id` — ID duy nhất của sự kiện, để
+    nhớ đã xử lý và để tra người tham dự sau.
+
+    `with_attendees=True` mới kèm khóa `attendees`; mặc định KHÔNG lấy vì rất
+    chậm — xem `appointment_attendees()`.
+    `on_progress(số_item_đã_duyệt)` nếu có thì được gọi trong lúc duyệt để báo
+    tiến độ ra giao diện.
     """
     import pythoncom
     import win32com.client
@@ -169,54 +195,76 @@ def appointments_between(start_date, end_date):
         ns = outlook.GetNamespace("MAPI")
         calendar = ns.GetDefaultFolder(_OL_FOLDER_CALENDAR)
 
-        items = calendar.Items
-        items.Sort("[Start]")
-        items.IncludeRecurrences = True
+        def all_items():
+            # Sort PHẢI gọi TRƯỚC khi bật IncludeRecurrences, nếu không Outlook
+            # trả về thứ tự sai và vòng lặp dưới không dừng sớm được.
+            items = calendar.Items
+            items.Sort("[Start]")
+            items.IncludeRecurrences = True
+            return items
 
-        # Giới hạn theo khoảng ngày để KHÔNG phải duyệt toàn bộ lịch (nhanh hơn
-        # rất nhiều — lịch lặp có thể nở ra hàng nghìn instance). Nếu Restrict
-        # lỗi (định dạng ngày theo locale…) thì lùi về duyệt toàn bộ.
+        def collect(items):
+            result = []
+            skipped = 0
+            for n, item in enumerate(items, 1):
+                if on_progress is not None and n % 50 == 0:
+                    on_progress(n)
+                try:
+                    t_start = _to_datetime(getattr(item, "Start", None))
+                    if t_start is None:
+                        continue
+                    if t_start.date() < start_date:
+                        continue
+                    if t_start.date() > end_date:
+                        break        # đã sắp xếp tăng dần -> qua khoảng thì dừng
+                    if item.Class != _OL_APPOINTMENT:
+                        continue
+                    row = {
+                        "subject": str(getattr(item, "Subject", "") or ""),
+                        "start": t_start,
+                        "end": _to_datetime(getattr(item, "End", None)),
+                        "location": str(getattr(item, "Location", "") or ""),
+                        "organizer": str(getattr(item, "Organizer", "") or ""),
+                        "categories": str(getattr(item, "Categories", "") or ""),
+                        "entry_id": str(getattr(item, "EntryID", "") or ""),
+                    }
+                    if with_attendees:
+                        row["attendees"] = _attendee_emails(item)
+                    result.append(row)
+                except Exception:
+                    # Bỏ qua item đọc không được nhưng đếm lại: quét ra 0 sự kiện
+                    # mà skipped cao nghĩa là lỗi đọc lịch, không phải lịch trống.
+                    skipped += 1
+                    if skipped == 1:
+                        debuglog.exception("outlook: bỏ qua item lịch đọc lỗi")
+            return result, skipped
+
+        # Restrict để KHÔNG phải duyệt toàn bộ lịch — lịch lặp nở ra hàng nghìn
+        # instance nên đây là bước quyết định tốc độ. Chuỗi ngày phải đúng định
+        # dạng Outlook chấp nhận (tùy locale của máy): định dạng sai thì Outlook
+        # hoặc báo lỗi, hoặc lặng lẽ trả về rỗng — nên thử lần lượt vài định dạng
+        # và chỉ nhận kết quả khi thực sự có sự kiện.
         start_dt = datetime.datetime.combine(start_date, datetime.time.min)
         end_dt = datetime.datetime.combine(end_date, datetime.time.max)
-        fmt = "%m/%d/%Y %I:%M %p"
-        restriction = (
-            "[Start] <= '" + end_dt.strftime(fmt) + "' AND "
-            "[End] >= '" + start_dt.strftime(fmt) + "'"
-        )
-        try:
-            items = items.Restrict(restriction)
-        except Exception:
-            debuglog.exception(f"outlook.Restrict thất bại: {restriction!r}")
-
-        result = []
-        skipped = 0
-        for item in items:
+        result, skipped = [], 0
+        for fmt in ("%m/%d/%Y %I:%M %p", "%d/%m/%Y %H:%M", "%Y-%m-%d %H:%M"):
+            restriction = (
+                "[Start] <= '" + end_dt.strftime(fmt) + "' AND "
+                "[End] >= '" + start_dt.strftime(fmt) + "'"
+            )
             try:
-                t_start = _to_datetime(getattr(item, "Start", None))
-                if t_start is None:
-                    continue
-                if t_start.date() < start_date:
-                    continue
-                if t_start.date() > end_date:
-                    break            # đã sắp xếp tăng dần -> qua khỏi khoảng thì dừng
-                if item.Class != _OL_APPOINTMENT:
-                    continue
-                result.append({
-                    "subject": str(getattr(item, "Subject", "") or ""),
-                    "start": t_start,
-                    "end": _to_datetime(getattr(item, "End", None)),
-                    "location": str(getattr(item, "Location", "") or ""),
-                    "organizer": str(getattr(item, "Organizer", "") or ""),
-                    "categories": str(getattr(item, "Categories", "") or ""),
-                    "attendees": _attendee_emails(item),
-                    "entry_id": str(getattr(item, "EntryID", "") or ""),
-                })
+                items = all_items().Restrict(restriction)
             except Exception:
-                # Bỏ qua item đọc không được nhưng đếm lại: quét ra 0 sự kiện mà
-                # skipped cao nghĩa là lỗi đọc lịch, không phải lịch trống.
-                skipped += 1
-                if skipped == 1:
-                    debuglog.exception("outlook: bỏ qua item lịch đọc lỗi")
+                debuglog.write(f"outlook: Restrict lỗi với định dạng {fmt!r}")
+                continue
+            result, skipped = collect(items)
+            if result:
+                break
+            debuglog.write(f"outlook: Restrict {fmt!r} trả về 0 sự kiện")
+        if not result:
+            # Không Restrict được (hoặc lịch trống thật) -> đành duyệt tất cả.
+            debuglog.write("outlook: quét toàn bộ lịch (Restrict không dùng được)")
+            result, skipped = collect(all_items())
 
         debuglog.write(f"outlook.appointments_between({start_date}..{end_date}) "
                        f"-> {len(result)} sự kiện, {skipped} item lỗi")

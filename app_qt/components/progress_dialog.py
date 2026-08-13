@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QProgressBar, QTextEdit, QVBoxLayout,
 )
 
+from app.core import debuglog
 from app_qt import widgets
 from app_qt.components.modal import SHELL_MARGIN, dims, viewport_rect
 
@@ -58,6 +59,8 @@ class _Worker(QThread):
             result = self._job(self)
             self.signals.finished.emit(result)
         except Exception as exc:
+            # Ô nhật ký chỉ đủ chỗ cho một dòng lỗi -> traceback đầy đủ vào log.
+            debuglog.exception("luồng nền ProgressDialog lỗi", exc)
             self.signals.failed.emit(str(exc))
 
 
@@ -66,7 +69,7 @@ class ProgressDialog(QFrame):
 
     _alive = set()   # giữ tham chiếu các dialog đang chạy
 
-    def __init__(self, parent, title, total=0, subtitle=""):
+    def __init__(self, parent, title, total=0, subtitle="", busy=False):
         # dùng QFrame làm cửa sổ riêng (Tool) để bo góc + shadow như dialog khác
         super().__init__(None, Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -98,8 +101,13 @@ class ProgressDialog(QFrame):
         lay.addWidget(self._status)
 
         self._bar = QProgressBar()
-        self._bar.setMaximum(max(1, total))
-        self._bar.setValue(0)
+        if busy:
+            # Việc không biết trước tổng số bước (vd quét lịch Outlook) -> để
+            # range 0..0 cho Qt chạy thanh vô định, người dùng vẫn thấy app sống.
+            self._bar.setRange(0, 0)
+        else:
+            self._bar.setMaximum(max(1, total))
+            self._bar.setValue(0)
         self._bar.setTextVisible(False)
         self._bar.setFixedHeight(8)
         lay.addWidget(self._bar)
@@ -177,6 +185,9 @@ class ProgressDialog(QFrame):
 
     def _done(self):
         self._btn.setText("Close")
+        if self._bar.maximum() == 0:      # thanh vô định -> lấp đầy khi xong
+            self._bar.setRange(0, 1)
+            self._bar.setValue(1)
 
     def set_final_status(self, text):
         self._status.setText(text)

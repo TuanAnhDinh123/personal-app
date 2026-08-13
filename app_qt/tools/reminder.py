@@ -18,6 +18,7 @@ from app.core.reminder_logic import (
 from app_qt import dialogs, richtext, widgets
 from app_qt.base_tool import BaseTool
 from app_qt.components.dialog_base import build_dialog_shell
+from app_qt.components.progress_dialog import ProgressDialog
 
 SECTION = "reminder"
 
@@ -124,14 +125,21 @@ class ReminderTool(BaseTool):
         self._render_table()
 
     # ---------------------------------------------------------- quét lịch
-    def _fetch_interviews(self):
-        if not outlook.available():
-            return []
+    def _fetch_interviews(self, keywords, ctx=None):
+        """Quét lịch 1 tháng gần đây, trả về sự kiện khớp từ khóa & chưa xử lý.
+
+        Chạy ở LUỒNG NỀN (xem `_scan_clicked`) nên không đọc widget trong này —
+        từ khóa phải được luồng giao diện truyền vào.
+        """
         cfg = config.load(SECTION, DEFAULTS)
-        kw_raw = self.var_keywords.get() if hasattr(self, "var_keywords") else cfg["keywords"]
-        keywords = [k.strip().lower() for k in kw_raw.split(",") if k.strip()]
         today = datetime.date.today()
-        appts = outlook.appointments_between(_month_ago(today), today)
+
+        def progress(scanned):
+            if ctx is not None:
+                ctx.status(f"Scanned {scanned} calendar events…")
+
+        appts = outlook.appointments_between(_month_ago(today), today,
+                                             on_progress=progress)
         dismissed = set(cfg.get("dismissed", []))
         out = []
         for a in appts:
@@ -147,19 +155,32 @@ class ReminderTool(BaseTool):
         if not outlook.available():
             self.error("Outlook required", "This feature needs Outlook on Windows (pywin32).")
             return
-        # Hiện thẳng traceback lên dialog: quét lịch qua COM có thể lỗi vì rất
-        # nhiều lý do bên ngoài (Outlook đang khởi động, profile khóa, quyền
-        # truy cập...) mà app không có console để in ra.
-        try:
-            self._interviews = self._fetch_interviews()
-        except Exception as exc:
-            self.error("Calendar scan failed",
-                       f"Could not read the Outlook calendar.\n\n{exc}\n\n———\n"
-                       f"{debuglog.exception('reminder: scan calendar')}")
-            return
-        self._render_table()
-        if not self._interviews:
-            self.info("No events", "No interviews found in the last month.")
+        # Đọc từ khóa ở luồng giao diện TRƯỚC khi giao việc cho luồng nền: quét
+        # lịch Outlook mất từ vài giây tới cả phút (lịch dày, nhiều lịch lặp),
+        # chạy thẳng ở đây thì app đứng im — người dùng tưởng nút không ăn.
+        kw_raw = self.var_keywords.get()
+        keywords = [k.strip().lower() for k in kw_raw.split(",") if k.strip()]
+
+        dlg = ProgressDialog(self._page, "Scanning calendar…", busy=True,
+                             subtitle="Reading last month's Outlook events…")
+
+        def job(ctx):
+            ctx.log("Connecting to Outlook…")
+            found = self._fetch_interviews(keywords, ctx)
+            ctx.log(f"Found {len(found)} interview(s) needing a follow-up.")
+            return found
+
+        def done(d, found):
+            self._interviews = found
+            self._render_table()
+            d.set_final_status(f"Done — {len(found)} interview(s) found.")
+            d.close()
+            if not found:
+                self.info("No events", "No interviews found in the last month.")
+
+        # Lỗi trong job: ProgressDialog hiện lên ô nhật ký, traceback đầy đủ vào
+        # debug.log — không cần bắt ở đây (xem app/core/debuglog.py).
+        dlg.start(job, done)
 
     # ----------------------------------------------------------- bảng
     def _render_table(self):
@@ -220,10 +241,28 @@ class ReminderTool(BaseTool):
         elif r == 2:
             self._open_schedule(appt)
 
+    def _attendees(self, appt):
+        """Email người tham dự — tra Outlook lần đầu rồi nhớ lại trong appt.
+
+        Lúc quét lịch KHÔNG lấy sẵn danh sách này (xem
+        outlook.appointment_attendees): tra email thật phải hỏi GAL từng người,
+        nhân với cả tháng lịch thì mất vài phút. Ở đây chỉ tra cho đúng sự kiện
+        người dùng vừa bấm — một lần, dưới một giây.
+        """
+        if "attendees" not in appt:
+            entry_id = appt.get("entry_id")
+            try:
+                appt["attendees"] = (outlook.appointment_attendees(entry_id)
+                                     if entry_id else [])
+            except Exception:
+                debuglog.exception("reminder: đọc người tham dự")
+                appt["attendees"] = []
+        return appt["attendees"]
+
     def _eligible_recipients(self, appt):
         exclude = self.var_exclude.get().strip().lower()
         out = []
-        for e in appt.get("attendees", []):
+        for e in self._attendees(appt):
             domain = e.split("@")[-1].lower() if "@" in e else ""
             if exclude and exclude in domain:
                 continue
