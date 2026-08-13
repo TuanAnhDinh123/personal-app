@@ -7,11 +7,15 @@ import sys
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
+from app.core import debuglog
 from app_qt import theme
 from app_qt.main_window import MainWindow
 
 
 def main():
+    # Gắn hook ghi log trước khi dựng giao diện: app chạy bằng pythonw.exe
+    # (không console) nên đây là nơi duy nhất còn đọc lại được traceback.
+    debuglog.install()
     app = QApplication(sys.argv)
     # Tắt hiệu ứng "unroll" khi mở dropdown: cửa sổ chính frameless +
     # trong suốt (WA_TranslucentBackground) nên khi combobox chạy animation

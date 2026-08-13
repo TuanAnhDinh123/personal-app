@@ -11,6 +11,8 @@ Tham chiếu hằng số Outlook:
 """
 import datetime
 
+from app.core import debuglog
+
 _OL_FOLDER_CALENDAR = 9
 _OL_APPOINTMENT = 26          # Class của item lịch đã tồn tại
 _OL_APPOINTMENT_ITEM = 1      # loại item khi tạo sự kiện lịch mới (olAppointmentItem)
@@ -184,9 +186,10 @@ def appointments_between(start_date, end_date):
         try:
             items = items.Restrict(restriction)
         except Exception:
-            pass
+            debuglog.exception(f"outlook.Restrict thất bại: {restriction!r}")
 
         result = []
+        skipped = 0
         for item in items:
             try:
                 t_start = _to_datetime(getattr(item, "Start", None))
@@ -209,8 +212,14 @@ def appointments_between(start_date, end_date):
                     "entry_id": str(getattr(item, "EntryID", "") or ""),
                 })
             except Exception:
-                continue
+                # Bỏ qua item đọc không được nhưng đếm lại: quét ra 0 sự kiện mà
+                # skipped cao nghĩa là lỗi đọc lịch, không phải lịch trống.
+                skipped += 1
+                if skipped == 1:
+                    debuglog.exception("outlook: bỏ qua item lịch đọc lỗi")
 
+        debuglog.write(f"outlook.appointments_between({start_date}..{end_date}) "
+                       f"-> {len(result)} sự kiện, {skipped} item lỗi")
         return result
     finally:
         pythoncom.CoUninitialize()

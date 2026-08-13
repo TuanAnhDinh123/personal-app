@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget,
 )
 
-from app.core import config, outlook
+from app.core import config, debuglog, outlook
 from app.core.reminder_logic import (
     DEFAULTS, _extract_name, _fill_template, _month_ago,
 )
@@ -131,10 +131,7 @@ class ReminderTool(BaseTool):
         kw_raw = self.var_keywords.get() if hasattr(self, "var_keywords") else cfg["keywords"]
         keywords = [k.strip().lower() for k in kw_raw.split(",") if k.strip()]
         today = datetime.date.today()
-        try:
-            appts = outlook.appointments_between(_month_ago(today), today)
-        except Exception:
-            return []
+        appts = outlook.appointments_between(_month_ago(today), today)
         dismissed = set(cfg.get("dismissed", []))
         out = []
         for a in appts:
@@ -150,7 +147,16 @@ class ReminderTool(BaseTool):
         if not outlook.available():
             self.error("Outlook required", "This feature needs Outlook on Windows (pywin32).")
             return
-        self._interviews = self._fetch_interviews()
+        # Hiện thẳng traceback lên dialog: quét lịch qua COM có thể lỗi vì rất
+        # nhiều lý do bên ngoài (Outlook đang khởi động, profile khóa, quyền
+        # truy cập...) mà app không có console để in ra.
+        try:
+            self._interviews = self._fetch_interviews()
+        except Exception as exc:
+            self.error("Calendar scan failed",
+                       f"Could not read the Outlook calendar.\n\n{exc}\n\n———\n"
+                       f"{debuglog.exception('reminder: scan calendar')}")
+            return
         self._render_table()
         if not self._interviews:
             self.info("No events", "No interviews found in the last month.")
