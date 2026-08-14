@@ -1,9 +1,10 @@
 # Giao diện (PySide6) — chạy bằng: python main.py
 PySide6>=6.6         # Qt hiện đại (light + sidebar tối), style bằng app_qt/theme.qss
-pillow>=10.0         # dựng ảnh cho OCR (PDF → Text)
 
 # Logic nghiệp vụ (app/core/*):
 openpyxl>=3.1         # Đọc/ghi .xlsx (Tách lương, Thưởng quý, Quét CV, các tool DB)
-pymupdf>=1.24         # PDF → Text & Quét CV: trích text từ PDF
-pytesseract>=0.3.10   # OCR cho PDF scan (cần cài thêm Tesseract-OCR + gói tiếng Việt)
+pymupdf>=1.24         # PDF → Text & Quét CV: trích text, dò bảng, render trang
 pywin32>=306           # Đọc lịch & gửi mail qua Outlook (chỉ Windows)
+
+# OCR cho PDF scan đi qua Gemini (chỉ dùng urllib chuẩn) — không cần cài thêm
+# gói nào, cũng không cần quyền admin. API key đặt ở màn hình Settings.

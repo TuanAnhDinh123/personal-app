@@ -87,7 +87,16 @@ def svg_pixmap(name, color, px=18):
 
 
 def svg_icon(name, color, px=18):
-    return QIcon(svg_pixmap(name, color, px))
+    """QIcon từ icon line, kèm sẵn bản dùng khi widget bị vô hiệu.
+
+    Phải tự cấp bản Disabled: nút primary/success có icon màu TRẮNG, mà nút vô
+    hiệu lại đổ nền sáng — để Qt tự làm mờ thì icon trắng biến mất hẳn, nút trông
+    như bị vỡ. Bản Disabled tô bằng màu chữ nhạt nên luôn còn nhìn thấy.
+    """
+    icon = QIcon(svg_pixmap(name, color, px))
+    icon.addPixmap(svg_pixmap(name, theme.PALETTE["--text-faint"], px),
+                   QIcon.Disabled)
+    return icon
 
 
 def add_shadow(widget, blur=48, dy=12, alpha=70):

@@ -264,6 +264,24 @@ QPushButton[variant="neutral"] {
 }
 QPushButton[variant="neutral"]:hover { background: {{--neutral-hover}}; }
 
+/* Nút bị vô hiệu phải NHÌN RA là vô hiệu. Dòng QPushButton:disabled ở trên
+   không đủ: các dòng [variant=...] phía dưới có cùng độ ưu tiên nên dòng sau
+   thắng, làm nút primary/success vẫn sáng nguyên màu dù bấm không ăn. Phải nêu
+   đích danh từng variant kèm :disabled thì mới xám đi. */
+QPushButton[variant="primary"]:disabled,
+QPushButton[variant="success"]:disabled,
+QPushButton[variant="danger"]:disabled,
+QPushButton[variant="warning"]:disabled,
+QPushButton[variant="info"]:disabled,
+QPushButton[variant="neutral"]:disabled {
+    /* Nền xám chìm hơn thẻ (thẻ trắng) chứ không dùng {{--neutral}}: nút vô hiệu
+       nền trắng nằm trên thẻ trắng thì chỉ còn chữ nhạt để phân biệt, nhìn lướt
+       tưởng vẫn bấm được. */
+    background: {{--content-bg}};
+    color: {{--text-faint}};
+    border: 1px solid {{--border}};
+}
+
 /* Nút có dropdown (setMenu) — vd nút "Columns" chọn cột hiển thị: chừa chỗ
    bên phải rồi vẽ mũi chevron thay cho mũi tên mặc định của style. */
 QPushButton[variant="neutral"]::menu-indicator {

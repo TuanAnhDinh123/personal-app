@@ -69,7 +69,7 @@ personal-app/
     ├── quarter_bonus.py                  # Thưởng quý (Excel COM)
     ├── ai_cv_scan.py                     # Quét CV bằng Gemini
     ├── cv_scan.py                        # Chuẩn hóa tên file CV + template Excel
-    ├── pdf_text.py                       # PDF → Text (+ OCR Tesseract)
+    ├── pdf_text.py                       # PDF → Markdown (+ OCR bằng Gemini)
     └── reminder_logic.py                 # Helper nhắc phản hồi phỏng vấn
 ```
 
@@ -111,43 +111,34 @@ chạy (ví dụ "đã quét hôm nay chưa"). Xem mẫu ở `app_qt/tools/inter
 
 ## Tool: PDF → Text 📝
 
-[app_qt/tools/pdf_to_text.py](app_qt/tools/pdf_to_text.py) — trích văn bản từ PDF,
-giao diện hai cột: **ảnh trang gốc** | **văn bản trích được (sửa tay được)** để đối
-chiếu rồi *Copy* / *Save all as .txt*. Logic ở
-[app/core/pdf_text.py](app/core/pdf_text.py).
+[app_qt/tools/pdf_to_text.py](app_qt/tools/pdf_to_text.py) — đọc PDF thành văn bản
+**giữ tương đối bố cục gốc** (tiêu đề, danh sách, bảng) để copy sang chỗ khác.
+Logic ở [app/core/pdf_text.py](app/core/pdf_text.py).
 
-Trang có sẵn lớp text (PDF xuất từ Word) đọc thẳng bằng `PyMuPDF`; trang ảnh scan
-thì OCR bằng **Tesseract** (offline).
+Khung đọc chiếm trọn bề ngang, **chỉ đọc**, luôn hiển thị bản đã dựng định dạng.
+Dải nút chọn-một (nút đang bật tô đậm) đổi phạm vi **Whole document** /
+**Page by page**; ảnh trang gốc chỉ hiện khi bấm *Show original*. Nút *Copy* đặt
+lên clipboard cả bản HTML lẫn bản chữ trần nên dán vào Word giữ được bố cục, dán
+vào ô text thường vẫn sạch. Xuất ra `.md` hoặc `.txt`.
 
-### Cài Tesseract-OCR (chỉ cần cho PDF scan)
+> Không có chế độ sửa tay: tool để LẤY text ra, cho sửa mà không có chỗ lưu bản
+> sửa thì chuyển trang là mất. Trên giao diện cũng tránh chữ "Markdown" và tránh
+> kiểu một nút bấm-đổi-nhãn (nhìn nhãn không rõ đó là thứ đang xem hay thứ sắp
+> chuyển sang).
 
-Gói Python đã nằm trong `requirements.txt`, nhưng **Tesseract là chương trình
-native, phải cài riêng trên từng máy**. Cài bằng **installer GUI** để chọn được
-tiếng Việt — `winget` không truyền được lựa chọn ngôn ngữ nên cài xong sẽ thiếu
-`vie`.
+### Cách đọc
 
-1. Tải `tesseract-ocr-w64-setup-5.x.x.exe` (`w64` = Windows 64-bit) từ
-   <https://github.com/UB-Mannheim/tesseract/wiki>.
-2. Right-click file → **Run as administrator**.
-3. *Choose Users* → **Install for anyone using this computer**.
-4. **Choose Components**: bấm `+` bung nhánh `Additional language data (download)`
-   (mặc định thu gọn, không tick) → kéo xuống tick **`Vietnamese`**. Bỏ qua bước
-   này là OCR tiếng Việt báo lỗi thiếu language pack.
-5. Giữ mặc định `C:\Program Files\Tesseract-OCR` → **Install**. Không cần thêm PATH.
+| Loại trang | Cách xử lý | Cần gì |
+|---|---|---|
+| Có lớp text (PDF xuất từ Word) | `PyMuPDF` dựng lại Markdown từ toạ độ chữ: tiêu đề theo cỡ chữ, bảng qua `find_tables`, tự tách 2 cột và bỏ header/footer lặp | Không cần gì thêm, chạy offline |
+| Ảnh scan | Render trang ra PNG rồi nhờ **Gemini** đọc thành Markdown | API key Gemini ở màn hình **Settings** + mạng |
 
-Kiểm tra — phải thấy `eng` · `osd` · `vie`:
+Ô **Mode** chọn: `Auto` (chỉ OCR trang scan), `Text layer only` (không gọi AI),
+`Force OCR` (ép OCR cả trang đã có lớp text — dùng khi lớp text bị lỗi font).
 
-```powershell
-& "$env:ProgramFiles\Tesseract-OCR\tesseract.exe" --list-langs
-```
-
-Nếu thiếu `vie` (bước 4 bị bỏ qua, hoặc mạng chặn GitHub lúc cài), copy tay file
-model — PowerShell **quyền Administrator**:
-
-```powershell
-Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata/raw/main/vie.traineddata" `
-                  -OutFile "$env:ProgramFiles\Tesseract-OCR\tessdata\vie.traineddata"
-```
+> Cố ý **không dùng Tesseract**: nó là chương trình native phải cài riêng kèm gói
+> ngôn ngữ, máy không có quyền admin sẽ tắc. Cả tính năng này giờ chỉ cần
+> `pip install pymupdf` (wheel thuần) + `urllib` chuẩn.
 
 ## Tool: Mở cổng lịch phỏng vấn 🛂
 
