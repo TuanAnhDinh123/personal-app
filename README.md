@@ -109,6 +109,46 @@ Mỗi lần mở app, `MainWindow` sẽ gọi `startup()` của các tool bật 
 khi cửa sổ đã hiện). Dùng `app/core/config.py` để lưu trạng thái giữa các lần
 chạy (ví dụ "đã quét hôm nay chưa"). Xem mẫu ở `app_qt/tools/interview_gate.py`.
 
+## Tool: PDF → Text 📝
+
+[app_qt/tools/pdf_to_text.py](app_qt/tools/pdf_to_text.py) — trích văn bản từ PDF,
+giao diện hai cột: **ảnh trang gốc** | **văn bản trích được (sửa tay được)** để đối
+chiếu rồi *Copy* / *Save all as .txt*. Logic ở
+[app/core/pdf_text.py](app/core/pdf_text.py).
+
+Trang có sẵn lớp text (PDF xuất từ Word) đọc thẳng bằng `PyMuPDF`; trang ảnh scan
+thì OCR bằng **Tesseract** (offline).
+
+### Cài Tesseract-OCR (chỉ cần cho PDF scan)
+
+Gói Python đã nằm trong `requirements.txt`, nhưng **Tesseract là chương trình
+native, phải cài riêng trên từng máy**. Cài bằng **installer GUI** để chọn được
+tiếng Việt — `winget` không truyền được lựa chọn ngôn ngữ nên cài xong sẽ thiếu
+`vie`.
+
+1. Tải `tesseract-ocr-w64-setup-5.x.x.exe` (`w64` = Windows 64-bit) từ
+   <https://github.com/UB-Mannheim/tesseract/wiki>.
+2. Right-click file → **Run as administrator**.
+3. *Choose Users* → **Install for anyone using this computer**.
+4. **Choose Components**: bấm `+` bung nhánh `Additional language data (download)`
+   (mặc định thu gọn, không tick) → kéo xuống tick **`Vietnamese`**. Bỏ qua bước
+   này là OCR tiếng Việt báo lỗi thiếu language pack.
+5. Giữ mặc định `C:\Program Files\Tesseract-OCR` → **Install**. Không cần thêm PATH.
+
+Kiểm tra — phải thấy `eng` · `osd` · `vie`:
+
+```powershell
+& "$env:ProgramFiles\Tesseract-OCR\tesseract.exe" --list-langs
+```
+
+Nếu thiếu `vie` (bước 4 bị bỏ qua, hoặc mạng chặn GitHub lúc cài), copy tay file
+model — PowerShell **quyền Administrator**:
+
+```powershell
+Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata/raw/main/vie.traineddata" `
+                  -OutFile "$env:ProgramFiles\Tesseract-OCR\tessdata\vie.traineddata"
+```
+
 ## Tool: Mở cổng lịch phỏng vấn 🛂
 
 `app_qt/tools/interview_gate.py` — mỗi sáng khi mở app sẽ tự quét **lịch Outlook

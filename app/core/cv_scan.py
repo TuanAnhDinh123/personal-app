@@ -290,13 +290,18 @@ def _safe_filename(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*]+', "_", name).strip() or "Candidates"
 
 
+# Cả hai hàm mở workbook đều dùng `keep_links=False`: file template (và các file
+# đã xuất trước đó) mang theo ~90 liên kết ngoài với vài MB dữ liệu cache mà app
+# không dùng tới — openpyxl phải parse lúc mở và ghi lại lúc lưu, tốn hàng chục
+# giây. Bỏ liên kết ngoài thì mở/lưu chỉ còn dưới một giây; các sheet, style,
+# merge và độ rộng cột giữ nguyên (không công thức nào trỏ ra file ngoài).
 def _open_template_workbook():
     """Mở file template, trả về (workbook, worksheet Candidates)."""
     tpl = _template_path()
     if not tpl.exists():
         raise FileNotFoundError(
             f"Template file not found:\n{tpl}")
-    wb = openpyxl.load_workbook(tpl)
+    wb = openpyxl.load_workbook(tpl, keep_links=False)
     if CANDIDATES_SHEET not in wb.sheetnames:
         raise ValueError(
             f"Template is missing the '{CANDIDATES_SHEET}' sheet.")
@@ -305,7 +310,7 @@ def _open_template_workbook():
 
 def _open_existing_workbook(path: str):
     """Mở file Excel có sẵn để nối tiếp; báo lỗi nếu thiếu sheet Candidates."""
-    wb = openpyxl.load_workbook(path)
+    wb = openpyxl.load_workbook(path, keep_links=False)
     if CANDIDATES_SHEET not in wb.sheetnames:
         raise ValueError(
             f"This Excel file has no '{CANDIDATES_SHEET}' sheet.\n"
