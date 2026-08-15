@@ -314,6 +314,14 @@ như mỗi cột trong file có một cột tương ứng trong DB; chú thích
   nên đổi chỗ cột hay thêm cột lạ đều không làm vỡ import. Cột **trùng tên**
   ("Issued date", "Changing date") khai báo bằng *tuple* → lần xuất hiện thứ n
   lấy field thứ n.
+- **Ô "Emergency Contact Name" tự tách làm 2 cột KHI IMPORT**: file gốc gộp cả
+  tên lẫn số điện thoại trong một ô, đủ kiểu ngăn cách (`tên ⏎ số`, `tên (số)`,
+  `số - tên`) → tách sang `emergency_contact_name` (chỉ họ tên) và
+  `emergency_contact_phone` bằng `cv_repository.split_contact_name_phone`
+  (không tìm thấy số thì giữ nguyên cả ô làm tên). File nào đã có sẵn cột SĐT
+  riêng thì lấy thẳng theo tên cột, không tách nữa. Cả hai cột đều có mặt ở
+  bảng (nhóm *Contact* trong modal **Columns**) và ở form Add/Edit nhân viên.
+  Việc tách **chỉ chạy lúc import** — dữ liệu đã nằm trong DB không bị đụng tới.
 - **Trạng thái làm việc suy ra từ `termination_date`** (không có cột `status`):
   có ngày (khác rỗng) = đã nghỉ việc. Truy vấn danh sách trả thêm cột
   `work_status` ("Working"/"Resigned") để hiển thị; mặc định ẩn người đã nghỉ
@@ -327,6 +335,11 @@ như mỗi cột trong file có một cột tương ứng trong DB; chú thích
   tính lại. Các cột "Legal Entity (Company)", "Position status", "Business Unit
   (Department)", "BC/WC", "STT", "Birthday"… không lưu vì đã có nguồn khác hoặc
   chỉ là cột phụ trợ trong file (xem chú thích trong schema).
+- **Thanh nút** chỉ để lộ hai việc làm hằng ngày — *Enroll* (ghi danh khóa học)
+  và *Import application form* (nhập đơn dự tuyển). Ba việc thi thoảng mới dùng
+  — **Add · Bulk Import · Reload** — nằm trong nút **⋮** ở góc phải
+  (`_build_more_button` / `_show_more_menu`). *Bulk Import* chính là nhập hàng
+  loạt từ `Master HC file.xlsx` nói ở trên.
 - Bảng ~90 cột → giao diện chỉ hiện vài cột mặc định, bật/tắt thêm ở modal
   **Columns** — cột gom theo nhóm (Identity / Contact / Education…), lựa chọn
   được ghi nhớ. Sửa nhóm & cột mặc định ở `_EMP_COLUMN_GROUPS` /
@@ -352,7 +365,9 @@ logic ở [app/core/application_form.py](app/core/application_form.py).
   nếu HR xác nhận.
 - **Đơn có nhiều thông tin hơn DB** (kinh nghiệm làm việc, sức khỏe, lương mong
   đợi, người tham khảo…) → **chỉ lấy phần có cột trong `employees`**, khai ở
-  `_FIELDS` trong `application_form.py` (thêm/bớt field chỉ cần sửa dict này).
+  `_FIELDS` trong `application_form.py` (thêm/bớt field chỉ cần sửa dict này) —
+  gồm cả **SĐT người báo tin khẩn cấp** (`emergency_contact_phone`, đọc ở ô
+  *Tel.* mục *In case of emergency* trang 3).
   Vài chỗ suy ra thêm: họ tên tách sang `surname`/`middle_name`/`name` theo thứ
   tự tiếng Việt, `marriage_status` (Y/N) suy từ tình trạng hôn nhân, nhiều số
   điện thoại gộp bằng `"; "`, ngày chuẩn hóa về `dd/mm/yyyy`.

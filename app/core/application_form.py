@@ -76,7 +76,10 @@ _FIELDS = {
     "email":             "Personal email address",
     "permanent_address": "Permanent address (địa chỉ thường trú)",
     "temporary_address": "Temporary address (địa chỉ tạm trú)",
-    "emergency_contact_name": "Name of the person to notify in case of emergency",
+    "emergency_contact_name": "Name ONLY of the person to notify in case of "
+                         "emergency — never put their phone number here",
+    "emergency_contact_phone": "Phone number of that emergency contact, "
+                         'several numbers separated by "; "',
     "emergency_contact_relationship":
                          "Relationship of that emergency contact to the applicant",
     "education":         "Highest education level, e.g. University, College, "
@@ -227,6 +230,7 @@ _MARITAL_MAP = {
 _DATE_FORMATS = ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%d-%m-%Y", "%d.%m.%Y")
 _DATE_FIELDS = ("date_of_birth", "id_issued_date")
 _INT_FIELDS = ("children_count", "dependants")
+_PHONE_FIELDS = ("phone", "emergency_contact_phone")
 
 _PHONE_SPLIT_RE = re.compile(r"[,;/\n]+")
 _DIGITS_RE = re.compile(r"\d+")
@@ -298,8 +302,9 @@ def _clean(data: dict) -> dict:
     for key in _DATE_FIELDS:
         if key in rec:
             rec[key] = _normalize_date(rec[key])
-    if "phone" in rec:
-        rec["phone"] = _normalize_phones(rec["phone"])
+    for key in _PHONE_FIELDS:
+        if key in rec:
+            rec[key] = _normalize_phones(rec[key])
     if "gender" in rec:
         rec["gender"] = _GENDER_MAP.get(rec["gender"].lower(), "")
     if "marital_status" in rec:

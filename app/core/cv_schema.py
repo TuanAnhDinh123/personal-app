@@ -228,7 +228,11 @@ CREATE TABLE IF NOT EXISTS employees (
     country           VARCHAR,           -- Country (address)
     permanent_address VARCHAR,           -- Địa chỉ thường trú
     temporary_address VARCHAR,           -- Địa chỉ tạm trú
-    emergency_contact_name VARCHAR,      -- Emergency Contact Name
+    emergency_contact_name VARCHAR,      -- Emergency Contact Name (CHỈ họ tên)
+    emergency_contact_phone VARCHAR,     -- SĐT người báo tin khẩn cấp. File Excel gộp
+                                          -- chung ô "Emergency Contact Name" dạng
+                                          -- "tên ⏎ số ĐT" → lúc import tách sang đây
+                                          -- (cv_repository.split_contact_name_phone)
     emergency_contact_relationship VARCHAR,  -- Relationship
     -- ── Học vấn ──
     education         VARCHAR,           -- Education Level
@@ -364,6 +368,8 @@ MIGRATIONS: list[str] = [
     "ALTER TABLE positions DROP COLUMN mail_cc",
     "ALTER TABLE positions DROP COLUMN mail_subject",
     "ALTER TABLE positions DROP COLUMN mail_body",
+    # SĐT người báo tin khẩn cấp tách khỏi cột tên (xem DATA_MIGRATIONS bên dưới).
+    "ALTER TABLE employees ADD COLUMN emergency_contact_phone VARCHAR",
 ]
 
 # =============================================================================

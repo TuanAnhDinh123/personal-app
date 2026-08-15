@@ -8,6 +8,7 @@ File .db mặc định:
     ~/.config/PersonalToolbox/candidates.db      (Linux/macOS — lúc dev)
 """
 import os
+import re
 import sqlite3
 
 from app.core import cv_schema
@@ -39,7 +40,8 @@ EMPLOYEE_FIELDS = [
     # liên hệ
     "phone", "email", "company_email", "address", "city", "country",
     "permanent_address", "temporary_address",
-    "emergency_contact_name", "emergency_contact_relationship",
+    "emergency_contact_name", "emergency_contact_phone",
+    "emergency_contact_relationship",
     # học vấn
     "education", "education_field", "major", "graduation_year", "school_name",
     "qualification", "qualification_code",
@@ -137,6 +139,62 @@ def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(_db_path())
     conn.row_factory = sqlite3.Row
     return conn
+
+
+# Ô "Emergency Contact Name" trong "Master HC file.xlsx" gộp cả tên lẫn số điện
+# thoại. Dữ liệu thật có đủ kiểu ngăn cách nên KHÔNG dò theo dấu ngăn mà dò cụm
+# CHỈ GỒM chữ số + ký hiệu điện thoại (khoảng trắng, ngoặc, +, /, gạch, chấm)
+# nằm ở ĐẦU hoặc CUỐI chuỗi — bắt được cả 3 kiểu đang có trong file:
+#     "Nguyễn Văn A ⏎ 0903 991 962"  ·  "Nguyễn Văn A (0913484647)"
+#     "0367842223 - Nguyễn Văn A"
+_CONTACT_PHONE_TAIL_RE = re.compile(r"[\d(+][\d\s().+/\-]*[\d)]\s*$")
+_CONTACT_PHONE_HEAD_RE = re.compile(r"^[\d(+][\d\s().+/\-]*[\d)]")
+# Ký tự thừa còn sót ở hai đầu phần TÊN sau khi cắt SĐT ("Nguyễn Văn A-" → "…A").
+_CONTACT_SEP_CHARS = " \t\r\n-–—,;:/|"
+# Số chữ số tối thiểu để coi cụm đó là số điện thoại (số bàn ngắn nhất ~8 chữ
+# số; để 6 cho rộng). Ít hơn → coi như một phần của tên (vd ô chỉ ghi "0").
+_CONTACT_PHONE_MIN_DIGITS = 6
+
+
+def split_contact_name_phone(text) -> tuple[str, str]:
+    """Tách ô liên hệ khẩn cấp gộp "tên + số ĐT" → (tên, số ĐT).
+
+    Không thấy số điện thoại thì trả về (cả chuỗi, ""). Nhiều số ngăn bởi "/"
+    hoặc "," được gộp lại bằng "; " cho giống quy ước cột `phone`.
+    """
+    s = " ".join(str(text or "").split(" ")).strip()
+    if not s:
+        return "", ""
+    m = _CONTACT_PHONE_TAIL_RE.search(s)
+    if m and _count_digits(m.group()) >= _CONTACT_PHONE_MIN_DIGITS:
+        return _tidy_name(s[:m.start()]), _tidy_phone(m.group())
+    m = _CONTACT_PHONE_HEAD_RE.match(s)
+    if m and _count_digits(m.group()) >= _CONTACT_PHONE_MIN_DIGITS:
+        return _tidy_name(s[m.end():]), _tidy_phone(m.group())
+    return _tidy_name(s), ""
+
+
+def _count_digits(text: str) -> int:
+    return sum(c.isdigit() for c in text)
+
+
+def _tidy_name(text: str) -> str:
+    return " ".join(text.strip(_CONTACT_SEP_CHARS).split())
+
+
+def _tidy_phone(text: str) -> str:
+    """Gộp nhiều số về "a; b"; bỏ cặp ngoặc bọc cả số ("(0913484647)").
+
+    Chỉ bỏ khi ngoặc bọc TRỌN số — giữ nguyên mã vùng kiểu "(028) 3736 2323".
+    """
+    parts = []
+    for part in re.split(r"[/,;]+", text):
+        p = " ".join(part.split())
+        if p.startswith("(") and p.endswith(")") and "(" not in p[1:-1]:
+            p = p[1:-1].strip()
+        if p:
+            parts.append(p)
+    return "; ".join(parts)
 
 
 # Hậu tố đặt cho bảng cũ trong lúc di trú (migrate).

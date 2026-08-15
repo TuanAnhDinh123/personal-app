@@ -9,9 +9,9 @@ import os
 import re
 import unicodedata
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout,
+    QCheckBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMenu, QVBoxLayout,
 )
 
 from app.core import application_form, config, settings
@@ -94,7 +94,11 @@ _EXCEL_HEADER_MAP = {
     "country (address)":              "country",
     "địa chỉ thường trú":             "permanent_address",
     "địa chỉ tạm trú":                "temporary_address",
+    # Ô này trong file gộp cả tên lẫn SĐT ("tên ⏎ số ĐT") — `_read_excel` tách
+    # ra hai cột. File nào có sẵn cột SĐT riêng thì lấy thẳng theo tên cột.
     "emergency contact name":         "emergency_contact_name",
+    "emergency contact phone":        "emergency_contact_phone",
+    "emergency contact number":       "emergency_contact_phone",
     "relationship":                   "emergency_contact_relationship",
     # ── học vấn ──
     "education level":                "education",
@@ -278,6 +282,8 @@ EMP_COL_WIDTHS = {
     "cost_center_code":  95,
     "employee_type_code": 95,
     "collar":            100,
+    "emergency_contact_name": 160,
+    "emergency_contact_phone": 130,
     "children_count":    80,
     "dependants":        80,
     "age":               60,
@@ -340,6 +346,7 @@ _EMP_COLUMN_SPECS = [
     ("passport_no",         "Passport no.",       "w"),
     ("passport_issued_date", "Passport issued",   "center"),
     ("emergency_contact_name", "Emergency contact", "w"),
+    ("emergency_contact_phone", "Emergency phone", "w"),
     ("emergency_contact_relationship", "Relationship", "w"),
     ("email",               "Personal email",     "w"),
     ("company_email",       "Company email",      "w"),
@@ -419,7 +426,7 @@ _EMP_COLUMN_GROUPS = [
     ("Contact", [
         "phone", "email", "company_email", "address", "city", "country",
         "permanent_address", "temporary_address", "emergency_contact_name",
-        "emergency_contact_relationship",
+        "emergency_contact_phone", "emergency_contact_relationship",
     ]),
     ("Education", [
         "education", "education_field", "major", "graduation_year",
@@ -652,16 +659,16 @@ class EmployeeDbTool(BaseTool):
         lay.addLayout(filters)
 
     def _build_toolbar(self, lay):
+        """Thanh nút: chỉ để LỘ hai việc làm hằng ngày (ghi danh khóa học · nhập
+        đơn dự tuyển); ba việc thi thoảng mới dùng (Add · Bulk Import · Reload)
+        gom vào nút ⋮ bên phải cho thanh nút đỡ rối."""
         bar = QHBoxLayout()
         bar.setSpacing(6)
         B = widgets.button
-        bar.addWidget(B(None, "Add", variant="success", icon="plus", command=self._add))
         bar.addWidget(B(None, "Enroll", variant="info", icon="award",
                         command=self._enroll_to_course))
-        bar.addWidget(B(None, "Import from Excel", variant="primary", icon="download",
-                        command=self._batch_import))
-        bar.addWidget(B(None, "Import application form", variant="info", icon="file-text",
-                        command=self._import_forms))
+        bar.addWidget(B(None, "Import application form", variant="primary",
+                        icon="file-text", command=self._import_forms))
         bar.addStretch(1)
 
         # GLOBAL SCOPE (xem cv_repository._EXCLUDE_RESIGNED_SQL): mặc định ẨN
@@ -671,8 +678,26 @@ class EmployeeDbTool(BaseTool):
         bar.addWidget(self.chk_include_resigned, 0, Qt.AlignVCenter)
 
         bar.addWidget(self._build_column_picker())
-        bar.addWidget(B(None, "Reload", variant="neutral", icon="refresh", command=self._reload))
+        bar.addWidget(self._build_more_button())
         lay.addLayout(bar)
+
+    def _build_more_button(self):
+        """Nút ⋮ (vuông, không chữ) mở menu các thao tác ít dùng."""
+        self.btn_more = widgets.button(None, "", variant="neutral", icon="more",
+                                       command=self._show_more_menu)
+        self.btn_more.setFixedWidth(36)
+        self.btn_more.setToolTip("More actions")
+        return self.btn_more
+
+    def _show_more_menu(self):
+        """Menu ⋮ — bung ra ngay dưới nút, canh mép PHẢI (nút nằm sát mép phải)."""
+        menu = QMenu(self._root)
+        menu.addAction("Add", self._add)
+        menu.addAction("Bulk Import", self._batch_import)
+        menu.addSeparator()
+        menu.addAction("Reload", self._reload)
+        corner = self.btn_more.mapToGlobal(self.btn_more.rect().bottomRight())
+        menu.exec(corner - QPoint(menu.sizeHint().width(), -4))
 
     def _build_column_picker(self):
         """Modal tích chọn cột hiển thị; nhớ lựa chọn qua config.json."""
@@ -945,6 +970,15 @@ class EmployeeDbTool(BaseTool):
                     rec[key] = v
             if rec.get("phone"):
                 rec["phone"] = _normalize_phones(rec["phone"])
+            # Ô "Emergency Contact Name" gộp "tên ⏎ số ĐT" → tách sang 2 cột
+            # (dùng chung logic với lượt di trú dữ liệu cũ trong cv_schema).
+            if rec.get("emergency_contact_name") and not rec.get("emergency_contact_phone"):
+                name, phone = repo.split_contact_name_phone(rec["emergency_contact_name"])
+                rec["emergency_contact_name"] = name
+                if phone:
+                    rec["emergency_contact_phone"] = phone
+                if not name:
+                    rec.pop("emergency_contact_name")
             if not rec.get("full_name"):
                 parts = [rec.get("surname"), rec.get("middle_name"), rec.get("name")]
                 composed = " ".join(p for p in parts if p)
@@ -1118,6 +1152,8 @@ class EmployeeDbTool(BaseTool):
             {"key": "permanent_address", "label": "Permanent address", "kind": "text"},
             {"key": "temporary_address", "label": "Temporary address", "kind": "text"},
             {"key": "emergency_contact_name", "label": "Emergency contact name",
+             "kind": "text"},
+            {"key": "emergency_contact_phone", "label": "Emergency contact phone",
              "kind": "text"},
             {"key": "emergency_contact_relationship", "label": "Relationship",
              "kind": "text"},
