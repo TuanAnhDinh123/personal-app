@@ -821,6 +821,28 @@ def find_employees_by_codes(codes):
             list(norm_codes)).fetchall()
 
 
+def find_employees_by_identity(code=None, id_no=None, full_name=None):
+    """Tìm nhân viên ĐÃ CÓ trùng với một hồ sơ sắp thêm — dùng khi import đơn dự
+    tuyển (nhập từng người một, thường chưa có mã NV).
+
+    Khớp theo BẤT KỲ dấu hiệu định danh nào: mã NV, số CMND/CCCD, hoặc trùng cả
+    họ tên (không phân biệt hoa/thường, bỏ khoảng trắng thừa). Không truyền gì
+    thì trả về [].
+    """
+    conds, params = [], []
+    for col, value in (("code", code), ("id_no", id_no), ("full_name", full_name)):
+        text = " ".join(str(value or "").split())
+        if text:
+            conds.append(f"UPPER(TRIM({col})) = UPPER(?)")
+            params.append(text)
+    if not conds:
+        return []
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT employee_id, code, full_name, date_of_birth, id_no "
+            f"FROM employees WHERE {' OR '.join(conds)}", params).fetchall()
+
+
 # ───────────────────────── KHÓA HỌC / ĐÀO TẠO ───────────────────────────
 
 def list_courses():

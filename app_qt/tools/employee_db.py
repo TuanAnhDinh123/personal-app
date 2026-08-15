@@ -5,6 +5,7 @@ phận / giới tính / level) + bảng liệt kê đầy đủ cột (có check
 Tầng dữ liệu dùng lại app.core.cv_repository (bảng `employees`).
 """
 import datetime
+import os
 import re
 import unicodedata
 
@@ -13,7 +14,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout,
 )
 
-from app.core import config
+from app.core import application_form, config, settings
 from app.core import cv_repository as repo
 from app.core import cv_schema
 from app_qt import dialogs, theme, widgets
@@ -21,6 +22,7 @@ from app_qt.base_tool import BaseTool
 from app_qt.components.column_picker import ColumnPicker
 from app_qt.components.form_dialog import FormDialog
 from app_qt.components.modal import ModalDialog
+from app_qt.components.progress_dialog import ProgressDialog
 from app_qt.components.table import DataTable
 
 try:
@@ -658,6 +660,8 @@ class EmployeeDbTool(BaseTool):
                         command=self._enroll_to_course))
         bar.addWidget(B(None, "Import from Excel", variant="primary", icon="download",
                         command=self._batch_import))
+        bar.addWidget(B(None, "Import application form", variant="info", icon="file-text",
+                        command=self._import_forms))
         bar.addStretch(1)
 
         # GLOBAL SCOPE (xem cv_repository._EXCLUDE_RESIGNED_SQL): mặc định ẨN
@@ -951,6 +955,119 @@ class EmployeeDbTool(BaseTool):
                 rows.append(rec)
         wb.close()
         return rows, unknown
+
+    # ------------------------------------- nhập từ ĐƠN DỰ TUYỂN (AI đọc form)
+    # Nhân viên mới tự điền "DLVN Application Form": hoặc gõ thẳng vào file Excel
+    # mẫu (phần họ điền là chữ màu), hoặc in ra viết tay rồi HR scan thành PDF.
+    # Gemini đọc file → app.core.application_form trả về dict đúng cột bảng
+    # `employees`; HR xem lại/sửa trong form nhập liệu rồi mới ghi xuống DB (AI
+    # đọc chữ viết tay không phải lúc nào cũng đúng — luôn cần người duyệt).
+    def _import_forms(self):
+        gen = settings.load()
+        api_key = gen.get("api_key", "").strip()
+        model = gen.get("ai_model", "").strip() or settings.DEFAULTS["ai_model"]
+        if not api_key:
+            dialogs.error(self._root, "Missing API key",
+                          "No Gemini API key configured.\n\nOpen ⚙️ Settings "
+                          "(bottom of the sidebar) to add one.")
+            return
+
+        paths, _ = QFileDialog.getOpenFileNames(
+            self._root, "Choose the filled application form(s)", "",
+            "Application form (*.xlsx *.xlsm *.pdf);;All files (*.*)")
+        if not paths:
+            return
+        bad = [os.path.basename(p) for p in paths
+               if not p.lower().endswith(application_form.SUPPORTED_EXTS)]
+        if bad:
+            dialogs.error(self._root, "Unsupported file",
+                          "An application form must be the filled Excel file "
+                          "(.xlsx/.xlsm) or a scan of the printed form (.pdf).\n\n"
+                          + ", ".join(bad))
+            return
+
+        total = len(paths)
+
+        def job(ctx):
+            # Đọc TUẦN TỰ từng đơn; một đơn lỗi (hết hạn mức key, file hỏng) chỉ
+            # bỏ qua đơn đó rồi đọc tiếp, cuối lượt báo lại danh sách lỗi.
+            results, errors = [], []
+            for i, path in enumerate(paths, start=1):
+                if ctx.cancelled:
+                    break
+                name = os.path.basename(path)
+                ctx.status(f"({i}/{total}) {name}")
+
+                def on_retry(attempt, wait, reason, n=name):
+                    ctx.log(f"… {n}: {reason} — retry {attempt} in {wait}s")
+
+                try:
+                    rec = application_form.extract(
+                        api_key, model, path, on_retry=on_retry,
+                        should_cancel=lambda: ctx.cancelled)
+                except application_form.Cancelled:
+                    ctx.log(f"✋ Cancelled while reading {name}.")
+                    break
+                except Exception as exc:                       # noqa: BLE001
+                    errors.append(f"{name}: {exc}")
+                    ctx.log(f"⛔ {name}: {exc}")
+                    ctx.step()
+                    continue
+                results.append((name, rec))
+                ctx.log(f"✅ {name} — {rec.get('full_name') or 'no name found'} "
+                        f"({len(rec)} fields)")
+                ctx.step()
+            return results, errors
+
+        def on_finish(dlg, result):
+            results, errors = result
+            dlg.set_final_status(f"Read {len(results)}/{total} application form(s).")
+            if errors:
+                dlg.log("\n⚠ Couldn't read:\n" + "\n".join(errors))
+            if results:
+                dlg.log("\n👉 Review each employee in the form that opens next, "
+                        "then press Save to add them to the database.")
+                self._review_forms(results)
+
+        dlg = ProgressDialog(self._root, "Reading application forms with AI…",
+                             total=total, subtitle=f"Reading {total} form(s) with {model}")
+        dlg.start(job, on_finish)
+
+    def _review_forms(self, results):
+        """Mở form nhập liệu điền sẵn cho TỪNG đơn đã đọc để HR duyệt rồi lưu."""
+        added = 0
+        for i, (name, rec) in enumerate(results, start=1):
+            saved = FormDialog(
+                self._root, f"Review employee {i}/{len(results)} · {name}",
+                self._employee_form_specs(), rec, on_save=self._save_from_form,
+                size="lg").run()
+            if saved:
+                added += 1
+        self._reload()
+        dialogs.success(self._root, "Done",
+                        f"Added {added} of {len(results)} employees "
+                        "from the application forms.")
+
+    def _save_from_form(self, data):
+        """Ghi 1 nhân viên đọc từ đơn dự tuyển; cảnh báo nếu đã có người trùng.
+
+        Trả về False để FormDialog giữ form mở khi người dùng hủy ở cảnh báo trùng.
+        """
+        dups = repo.find_employees_by_identity(
+            data.get("code"), data.get("id_no"), data.get("full_name"))
+        if dups:
+            listing = "\n".join(
+                f"• #{d['employee_id']} {d['full_name'] or ''}"
+                f"{' · ' + d['code'] if d['code'] else ''}"
+                f"{' · ID ' + d['id_no'] if d['id_no'] else ''}" for d in dups[:10])
+            if not dialogs.confirm(
+                    self._root, "Employee may already exist",
+                    "The database already has someone with the same name, "
+                    f"employee code or ID number:\n\n{listing}\n\nAdd this "
+                    "employee anyway?", ok_label="Add anyway"):
+                return False
+        repo.insert_employee(data)
+        self._reload()
 
     # ------------------------------------------------------------- form specs
     def _employee_form_specs(self):

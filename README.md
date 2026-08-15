@@ -332,6 +332,35 @@ như mỗi cột trong file có một cột tương ứng trong DB; chú thích
   được ghi nhớ. Sửa nhóm & cột mặc định ở `_EMP_COLUMN_GROUPS` /
   `_EMP_DEFAULT_COLUMNS` trong `app_qt/tools/employee_db.py`.
 
+### Nhập nhân viên từ ĐƠN DỰ TUYỂN (AI đọc form) 📄
+
+Nút **Import application form** (màn hình *Employees*) đọc file
+**DLVN Application Form** do nhân viên mới tự điền rồi đổ vào form nhập liệu để
+HR duyệt trước khi ghi vào bảng `employees`. Chọn được **nhiều đơn một lượt**;
+logic ở [app/core/application_form.py](app/core/application_form.py).
+
+| Nhân viên nộp kiểu gì | App gửi gì cho AI |
+|---|---|
+| Điền thẳng vào file mẫu (`.xlsx`/`.xlsm`) — phần họ điền là **chữ màu** | Dựng lưới ô của mọi sheet thành **text** kèm tọa độ ô, giá trị chữ màu bọc trong `«…»` (Gemini không đọc được file .xlsx) |
+| In ra viết tay, HR **scan thành PDF** nhiều trang | **Rasterize từng trang thành PNG** (150 dpi) rồi gửi hết trong một request |
+
+- **Luôn có bước người duyệt**: mỗi đơn đọc xong mở một form *Review employee
+  n/N · tên file* điền sẵn — AI đọc chữ viết tay không phải lúc nào cũng đúng.
+  Bấm *Save* mới ghi xuống DB, *Cancel* là bỏ qua đơn đó.
+- **Cảnh báo trùng người** trước khi ghi: khớp **mã NV · số CMND/CCCD · họ tên**
+  (`repo.find_employees_by_identity`) → hiện danh sách người đã có, vẫn cho ghi
+  nếu HR xác nhận.
+- **Đơn có nhiều thông tin hơn DB** (kinh nghiệm làm việc, sức khỏe, lương mong
+  đợi, người tham khảo…) → **chỉ lấy phần có cột trong `employees`**, khai ở
+  `_FIELDS` trong `application_form.py` (thêm/bớt field chỉ cần sửa dict này).
+  Vài chỗ suy ra thêm: họ tên tách sang `surname`/`middle_name`/`name` theo thứ
+  tự tiếng Việt, `marriage_status` (Y/N) suy từ tình trạng hôn nhân, nhiều số
+  điện thoại gộp bằng `"; "`, ngày chuẩn hóa về `dd/mm/yyyy`.
+- Ô chọn (Gender, Marital status) chỉ nhận đúng nhãn trong danh mục — giá trị lạ
+  (vd *Separated*) để **trống** cho HR tự chọn, tránh ghi nhãn lạ vào DB.
+- Dùng chung **API key + model ở ⚙️ Settings** như các tính năng AI khác; không
+  cần cài thêm gói (đã có `openpyxl` + `pymupdf`).
+
 **Bảng danh mục (master data)** — nạp sẵn dữ liệu từ file `Code.xlsx`:
 `departments` (tên + mã viết tắt), `employee_types` (WC/WCA/IBC/IBCA/DBC/DBCA +
 nhóm Blue/White Collar), `cost_centers` (mã VN1001… + Group Function
