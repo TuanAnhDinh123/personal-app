@@ -13,6 +13,7 @@ Luồng nền chạy qua QThread trong ProgressDialog dùng chung.
 """
 import os
 import re
+from datetime import date
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -21,7 +22,7 @@ from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QWidget
 from app.core import config, cv_repository as repo, cv_schema, settings
 from app.core.ai_cv_scan import (
     _call_gemini, _Cancelled, append_rows_to_excel, done_folder_for,
-    move_to_done, read_jd_file, resolve_done_target,
+    flatten_result, move_to_done, read_jd_file, resolve_done_target,
 )
 from app_qt import theme, widgets
 from app_qt.base_tool import BaseTool
@@ -40,70 +41,202 @@ SECTION = "ai_scan_cv"
 DEFAULTS = {"folder": "", "position_id": None, "extra_prompt": ""}
 
 
-def _to_candidate_row(data, position_id):
-    """Map 1 kết quả Gemini (dict) → dict cột bảng `candidates` để ghi DB."""
+_SOURCE = "AI CV Scan"
+
+
+def _read_cv_text(path):
+    """Toàn văn CV để lưu vào DB — nguồn cho tìm kiếm & chấm lại sau này.
+
+    Trích bằng thư viện, KHÔNG tốn thêm lượt gọi AI. Đọc hỏng (PDF ảnh scan,
+    file lạ) thì trả về "" — chỉ mất tính năng tìm toàn văn, không chặn luồng.
+    """
+    try:
+        from app.core.cv_scan import _extract_cv_text
+        return _extract_cv_text(Path(path)) or ""
+    except Exception:   # noqa: BLE001 — thiếu text không phải lỗi chặn quét
+        return ""
+
+
+def _num(value):
+    """Chuỗi số/tiền do AI trả ("20,000,000 VND", "3.5 years") → float, hoặc None."""
+    text = re.sub(r"[^\d.]", "", str(value or "").replace(",", ""))
+    try:
+        return float(text) if text else None
+    except ValueError:
+        return None
+
+
+def _candidate_payload(profile, received_at):
+    """Phần `profile` của AI → dict cột bảng `candidates`.
+
+    Chỉ chứa dữ liệu TRUNG TÍNH (không dính JD nào). `experience_as_of` gắn
+    bằng ngày nhận CV để về sau còn biết con số kinh nghiệm này đúng tại thời
+    điểm nào.
+    """
+    salary_text = str(profile.get("expected_salary") or "").strip()
+    available = repo.parse_date(profile.get("available_from"))
     return {
-        "full_name": data.get("name") or "",
-        "email": data.get("email") or "",
-        "phone": data.get("phone") or "",
-        "date_of_birth": data.get("dob") or "",
-        "position_id": position_id,
-        "status": cv_schema.CANDIDATE_STATUS_DEFAULT,
-        "source": "AI CV Scan",
-        "batch": data.get("batch"),
-        "fit_score": data.get("fit_score"),
-        "fit_summary": data.get("fit_summary") or "",
-        "strengths": data.get("strengths") or "",
-        "weaknesses": data.get("weaknesses") or "",
-        "cv_file_path": data.get("cv_path") or "",
+        "full_name":        profile.get("name") or "",
+        "email":            profile.get("email") or "",
+        "phone":            profile.get("phone") or "",
+        "date_of_birth":    profile.get("dob") or "",
+        "gender":           profile.get("gender") or "",
+        "address":          profile.get("address") or "",
+        "city":             profile.get("city") or "",
+        "source":           _SOURCE,
+        "current_title":    profile.get("current_title") or "",
+        "industry":         profile.get("industry") or "",
+        "years_experience": _num(profile.get("years_experience")),
+        "experience_as_of": received_at,
+        "education":        profile.get("education") or "",
+        "major":            profile.get("major") or "",
+        "languages":        profile.get("languages") or "",
+        "skills_text":      "; ".join(profile.get("skills") or []),
+        "profile_summary":  profile.get("profile_summary") or "",
+        "expected_salary":  _num(salary_text),
+        # Giữ nguyên chữ AI đọc được ("20tr gross", "thương lượng") — con số
+        # bóc ra ở trên có thể mất ngữ cảnh.
+        "salary_note":      salary_text,
+        "available_from":   available.isoformat() if available else "",
     }
+
+
+def _experience_rows(experiences, received_at):
+    """Phần `experiences` của AI → list dict cột bảng `candidate_experiences`."""
+    rows = []
+    for i, item in enumerate(experiences or []):
+        start = repo.parse_date(item.get("start_date"))
+        if not start:
+            continue          # không có mốc bắt đầu thì không tính được thời gian
+        end = repo.parse_date(item.get("end_date"))
+        rows.append({
+            "company":     item.get("company") or "",
+            "job_title":   item.get("job_title") or "",
+            "industry":    item.get("industry") or "",
+            "start_date":  start.isoformat(),
+            "end_date":    end.isoformat() if end else "",
+            "as_of_date":  received_at,
+            "is_current":  1 if (item.get("is_current") or not end) else 0,
+            "description": item.get("description") or "",
+            "sort_order":  i,
+        })
+    return rows
+
+
+def _save_result(data, position_id, model, extra, jd_hash, candidate_id=None):
+    """Ghi MỘT kết quả quét vào DB — trả về candidate_id.
+
+    `candidate_id` có giá trị = thêm BẢN CV MỚI cho người đã có trong pool (hồ
+    sơ được cập nhật theo bản mới nhất, bản cũ vẫn giữ nguyên); None = tạo ứng
+    viên mới.
+
+    Một lượt quét chạm 6 bảng: candidates · candidate_cvs · candidate_experiences
+    · candidate_skills · applications · candidate_evaluations.
+    """
+    profile = data.get("profile") or {}
+    evaluation = data.get("evaluation") or {}
+    received_at = date.today().isoformat()
+    payload = _candidate_payload(profile, received_at)
+
+    if candidate_id:
+        # Người đã có: chỉ cập nhật những ô AI đọc được, không xóa dữ liệu cũ
+        # bằng chuỗi rỗng (bản CV mới có thể thiếu thông tin bản cũ đã có).
+        repo.update_candidate(candidate_id, {k: v for k, v in payload.items() if v})
+    else:
+        candidate_id = repo.insert_candidate(payload)
+
+    cv_id = repo.add_candidate_cv(candidate_id, {
+        "file_path":   data.get("cv_path") or "",
+        "file_hash":   data.get("file_hash") or "",
+        "received_at": received_at,
+        "batch":       data.get("batch"),
+        "source":      _SOURCE,
+        "cv_text":     data.get("cv_text") or "",
+        "scanned_at":  data.get("scanned_at"),
+        "scan_model":  model,
+        **{k: v for k, v in payload.items() if k in repo.PROFILE_SNAPSHOT_FIELDS},
+    })
+    repo.replace_candidate_experiences(
+        candidate_id, cv_id, _experience_rows(data.get("experiences"), received_at))
+    repo.replace_candidate_skills(candidate_id, cv_id, profile.get("skills") or [])
+
+    application_id = repo.ensure_application(candidate_id, position_id, {
+        "cv_id": cv_id, "origin": "Applied", "source": _SOURCE,
+        "status": cv_schema.CANDIDATE_STATUS_DEFAULT,
+    })
+    repo.insert_evaluation({
+        "candidate_id":   candidate_id,
+        "position_id":    position_id,
+        "application_id": application_id,
+        "cv_id":          cv_id,
+        "source":         "CV scan",
+        "ai_score":       evaluation.get("fit_score"),
+        "matched_skills": evaluation.get("matched_skills") or "",
+        "missing_skills": evaluation.get("missing_skills") or "",
+        "summary":        evaluation.get("fit_summary") or "",
+        "strengths":      evaluation.get("strengths") or "",
+        "weaknesses":     evaluation.get("weaknesses") or "",
+        "model":          model,
+        "jd_hash":        jd_hash,
+        "extra_prompt":   extra,
+    })
+    return candidate_id
 
 
 class _DuplicatesDialog(ModalDialog):
     """Modal xử lý ứng viên trùng sau khi quét AI (khớp email/SĐT với DB).
 
-    `duplicates` = list các tuple (candidate_row, ai_data, existing_row).
-    Trả về "overwrite" / "export" / None (hủy) qua .run().
+    `duplicates` = list các tuple (ai_data, existing_row).
+    Trả về "attach" / "separate" / "export" / None (hủy) qua .run().
     """
 
     def __init__(self, parent, duplicates):
         super().__init__(parent, "md")
         self._result = None
-        card, lay = self.build_shell(f"Duplicate candidates found · {len(duplicates)}")
+        card, lay = self.build_shell(f"Already in the pool · {len(duplicates)}")
 
-        desc = QLabel("These candidates share an email or phone with someone "
-                     "already in the database:")
+        desc = QLabel("These CVs belong to people who already share an email or "
+                      "phone with someone in the talent pool:")
         desc.setObjectName("DialogMsg")
         desc.setWordWrap(True)
         lay.addWidget(desc)
 
-        rows = [{
-            "full_name": data.get("name", ""),
-            "email": data.get("email", ""),
-            "phone": data.get("phone", ""),
-            "existing": f"#{existing['candidate_id']} {existing['full_name'] or ''}",
-        } for _row, data, existing in duplicates]
+        rows = []
+        for data, existing in duplicates:
+            flat = flatten_result(data)
+            rows.append({
+                "full_name": flat.get("name", ""),
+                "email": flat.get("email", ""),
+                "phone": flat.get("phone", ""),
+                "existing": f"#{existing['candidate_id']} {existing['full_name'] or ''}",
+            })
         table = DataTable([
-            ("full_name", "New candidate", 190),
+            ("full_name", "From this CV", 190),
             ("email", "Email", 200),
             ("phone", "Phone", 110),
-            ("existing", "Matches existing", 190),
+            ("existing", "Already in pool", 190),
         ])
         table.set_rows(rows)
         table.setMinimumHeight(min(320, self.modal_h))
         lay.addWidget(table, 1)
         self.set_grow_region(table)
 
-        hint = QLabel("Overwrite updates the existing candidates with the new AI "
-                     "result, or skip and export these to Excel instead.")
+        hint = QLabel(
+            "Adding a new CV version keeps every earlier CV, AI assessment and "
+            "contact history, and refreshes the profile from this newer CV — "
+            "that is normally what you want when someone reapplies. Create "
+            "separate candidates only if these are genuinely different people.")
         hint.setObjectName("Hint")
         hint.setWordWrap(True)
         lay.addWidget(hint)
 
         foot = QHBoxLayout()
-        foot.addWidget(widgets.button(card, "Overwrite existing", variant="success",
+        foot.addWidget(widgets.button(card, "Add as new CV version", variant="success",
                                       icon="check",
-                                      command=lambda: self._choose("overwrite")))
+                                      command=lambda: self._choose("attach")))
+        foot.addWidget(widgets.button(card, "Create separate candidates",
+                                      variant="primary", icon="plus",
+                                      command=lambda: self._choose("separate")))
         foot.addWidget(widgets.button(card, "Skip · export to Excel", variant="warning",
                                       icon="save",
                                       command=lambda: self._choose("export")))
@@ -321,6 +454,9 @@ class AiScanCvTool(BaseTool):
     def _scan(self, files, api_key, model, jd, extra, position_id, folder, pos_title=""):
         total = len(files)
         done_dir = done_folder_for(folder)
+        # Băm nội dung JD → lưu kèm mỗi lượt chấm, sau này JD sửa thì biết ngay
+        # điểm cũ đã không còn khớp bản JD hiện hành.
+        jd_hash = repo.text_hash(jd)
         # 'batch' = SỐ bóc ra từ tên thư mục chứa CV (vd "batch1" → 1). Không có
         # số trong tên → để trống.
         m = re.search(r"\d+", os.path.basename(os.path.normpath(folder)))
@@ -331,7 +467,7 @@ class AiScanCvTool(BaseTool):
             # vào danh sách trùng) + chuyển sang folder 'đã quét' NGAY, nên khi
             # gặp lỗi (giới hạn key free) có thể DỪNG mà không mất tiến độ — lần
             # sau bấm lại sẽ quét tiếp phần còn lại.
-            done, duplicates, errors = [], [], []
+            done, duplicates, errors, skipped = [], [], [], []
             stopped_at = None
             cancelled = False
             for i, p in enumerate(files, start=1):
@@ -339,6 +475,19 @@ class AiScanCvTool(BaseTool):
                     cancelled = True
                     break
                 ctx.status(f"({i}/{total}) {p.name}")
+
+                # Cùng một file CV (kể cả đã đổi tên) từng quét rồi thì bỏ qua
+                # ngay — không tốn thêm một lượt gọi AI nào.
+                digest = repo.file_hash(p)
+                if digest and repo.find_cv_by_hash(digest) is not None:
+                    ctx.log(f"⏭ {p.name} — this exact CV was already scanned.")
+                    skipped.append(p.name)
+                    try:
+                        move_to_done(p, done_dir)
+                    except Exception as exc:
+                        ctx.log(f"⚠ Couldn't move {p.name}: {exc}")
+                    ctx.step()
+                    continue
 
                 def on_retry(attempt, wait, reason, name=p.name):
                     ctx.log(f"… {name}: {reason} — retry {attempt} in {wait}s")
@@ -361,37 +510,41 @@ class AiScanCvTool(BaseTool):
 
                 data["file"] = p.name
                 data["batch"] = batch
-                # Tính TRƯỚC nơi file CV sẽ nằm sau khi quét (folder '…_da_quet')
+                data["file_hash"] = digest
+                data["scanned_at"] = repo.now_text()
+                data["cv_text"] = _read_cv_text(p)
+                # Tính TRƯỚC nơi file CV sẽ nằm sau khi quét (folder '…_scanned')
                 # để ghi luôn đường dẫn đầy đủ vào DB — lúc sau không cần hỏi lại
                 # thư mục CV nữa.
                 target = resolve_done_target(p, done_dir)
                 data["cv_path"] = str(target)
-                candidate_row = _to_candidate_row(data, position_id)
+                profile = data.get("profile") or {}
 
                 try:
-                    existing = repo.find_duplicates(candidate_row.get("email"),
-                                                    candidate_row.get("phone"))
+                    existing = repo.find_duplicates(profile.get("email"),
+                                                    profile.get("phone"))
                 except Exception as exc:
                     errors.append(f"{p.name}: {exc}")
-                    ctx.log(f"⛔ DB error while checking duplicates: {exc}")
+                    ctx.log(f"⛔ DB error while checking the pool: {exc}")
                     stopped_at = p.name
                     break
 
                 if existing:
-                    # Trùng ứng viên đã có trong DB → KHÔNG insert ngay, gom lại để
-                    # hỏi người dùng (ghi đè / xuất Excel) sau khi quét xong hết.
-                    duplicates.append((candidate_row, data, existing[0]))
-                    ctx.log(f"⚠ {p.name} — matches existing candidate "
+                    # Đã có người này trong pool → CHƯA ghi, gom lại để hỏi cuối
+                    # lượt: thêm bản CV mới cho họ, hay tạo hồ sơ riêng.
+                    duplicates.append((data, existing[0]))
+                    ctx.log(f"⚠ {p.name} — already in the pool as "
                             f"#{existing[0]['candidate_id']}")
                 else:
                     try:
-                        repo.insert_candidate(candidate_row)
+                        _save_result(data, position_id, model, extra, jd_hash)
                     except Exception as exc:
                         errors.append(f"{p.name}: {exc}")
                         ctx.log(f"⛔ DB write error: {exc}")
                         stopped_at = p.name
                         break
-                    ctx.log(f"✅ {p.name} — score {data.get('fit_score', '?')}")
+                    score = (data.get("evaluation") or {}).get("fit_score", "?")
+                    ctx.log(f"✅ {p.name} — score {score}")
 
                 try:
                     move_to_done(p, done_dir, target=target)
@@ -399,17 +552,19 @@ class AiScanCvTool(BaseTool):
                     ctx.log(f"⚠ Processed but couldn't move {p.name}: {exc}")
                 done.append(p.name)
                 ctx.step()
-            return done, duplicates, errors, stopped_at, cancelled
+            return done, duplicates, errors, stopped_at, cancelled, skipped
 
         def on_finish(dlg, result):
-            done, duplicates, errors, stopped_at, cancelled = result
+            done, duplicates, errors, stopped_at, cancelled, skipped = result
             added = len(done) - len(duplicates)
-            remaining = total - len(done)
+            remaining = total - len(done) - len(skipped)
+            if skipped:
+                dlg.log(f"\n⏭ Skipped {len(skipped)} CV(s) already scanned before.")
             if done:
                 dlg.log(f"\n✅ Imported {added} candidate(s) into the database.")
                 if duplicates:
-                    dlg.log(f"⚠ {len(duplicates)} candidate(s) matched existing "
-                            "records — you'll be asked how to handle them next.")
+                    dlg.log(f"⚠ {len(duplicates)} CV(s) belong to people already in "
+                            "the pool — you'll be asked how to handle them next.")
                 dlg.log(f"📂 Scanned CVs moved to:\n{done_dir}")
             if stopped_at:
                 dlg.set_final_status(
@@ -429,7 +584,7 @@ class AiScanCvTool(BaseTool):
             else:
                 dlg.set_final_status(f"Done — {len(done)}/{total} CVs processed.")
             if duplicates:
-                self._handle_duplicates(duplicates)
+                self._handle_duplicates(duplicates, position_id, model, extra, jd_hash)
 
         subtitle = f"Scanning {total} CVs with {model}"
         if pos_title:
@@ -439,26 +594,42 @@ class AiScanCvTool(BaseTool):
         dlg.start(job, on_finish)
 
     # -------------------------------------------- xử lý ứng viên trùng sau khi quét
-    def _handle_duplicates(self, duplicates):
+    def _handle_duplicates(self, duplicates, position_id, model, extra, jd_hash):
         choice = _DuplicatesDialog(self._page, duplicates).run()
-        if choice == "overwrite":
-            for candidate_row, _data, existing in duplicates:
-                repo.update_candidate(existing["candidate_id"], candidate_row)
-            self.info("Updated", f"Overwrote {len(duplicates)} existing candidate(s).")
+        if choice in ("attach", "separate"):
+            failed = []
+            for data, existing in duplicates:
+                cid = existing["candidate_id"] if choice == "attach" else None
+                try:
+                    _save_result(data, position_id, model, extra, jd_hash, cid)
+                except Exception as exc:   # noqa: BLE001 — gom lỗi báo một lần
+                    who = (data.get("profile") or {}).get("name") or "(no name)"
+                    failed.append(f"{who} — {exc}")
+            saved = len(duplicates) - len(failed)
+            if failed:
+                self.error("Some CVs weren't saved",
+                           f"Saved {saved}/{len(duplicates)}.\n\n• " + "\n• ".join(failed))
+            elif choice == "attach":
+                self.info("Pool updated",
+                          f"Added a new CV version to {saved} existing candidate(s). "
+                          "Their earlier CVs and assessments are unchanged.")
+            else:
+                self.info("Added", f"Created {saved} separate candidate(s).")
         elif choice == "export":
             path, _ = QFileDialog.getSaveFileName(
-                self._page, "Save duplicate candidates to Excel",
+                self._page, "Save these candidates to Excel",
                 "Duplicate_candidates.xlsx", "Excel (*.xlsx)")
             if not path:
-                self.info("Not saved", "Export cancelled — the duplicate results "
+                self.info("Not saved", "Export cancelled — these results "
                                        "weren't saved anywhere.")
                 return
             if not path.lower().endswith(".xlsx"):
                 path += ".xlsx"
             try:
-                append_rows_to_excel([data for _row, data, _existing in duplicates], path)
+                append_rows_to_excel([flatten_result(d) for d, _existing in duplicates],
+                                     path)
             except Exception as exc:
                 self.error("Excel export error", str(exc))
                 return
             self.info("Exported",
-                      f"Saved {len(duplicates)} duplicate candidate(s) to:\n{path}")
+                      f"Saved {len(duplicates)} candidate(s) to:\n{path}")

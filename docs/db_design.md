@@ -2,7 +2,7 @@
 
 SQLite · không dùng `FOREIGN KEY` (cột `*_id` là tham chiếu mềm) · mọi cột cho phép NULL trừ khóa chính · mọi bảng có `created_at` + `updated_at` · danh sách nhiều giá trị trong một ô ngăn bởi `;`.
 
-**Mục lục:** [Sơ đồ tổng thể](#sơ-đồ-tổng-thể) · [Bốn bài toán](#bốn-bài-toán-và-lời-giải) · [A. Tuyển dụng](#a--tuyển-dụng) · [B. Danh mục](#b--danh-mục-dùng-chung) · [C. Nhân sự](#c--nhân-sự--đào-tạo) · [Xuất Excel](#xuất-excel-từ-màn-hình-candidates) · [Giá trị cố định](#giá-trị-cố-định)
+**Mục lục:** [Sơ đồ tổng thể](#sơ-đồ-tổng-thể) · [Bốn bài toán](#bốn-bài-toán-và-lời-giải) · [A. Tuyển dụng](#a--tuyển-dụng) · [B. Danh mục](#b--danh-mục-dùng-chung) · [C. Nhân sự](#c--nhân-sự--đào-tạo) · [Giá trị cố định](#giá-trị-cố-định)
 
 ---
 
@@ -18,7 +18,6 @@ flowchart LR
         costcenters["cost_centers<br/><small>trung tâm chi phí</small>"]
         skills["skills<br/><small>kỹ năng chuẩn</small>"]
         mailtpl["mail_templates<br/><small>mẫu mail</small>"]
-        interviewers["interviewers<br/><small>người phỏng vấn</small>"]
     end
 
     subgraph RECRUIT ["TUYỂN DỤNG"]
@@ -63,7 +62,7 @@ flowchart LR
     apps --> acts
     apps --> intv
     intv --> fb
-    interviewers --> fb
+    employees -- "người phỏng vấn" --> fb
     cvs -- "chấm trên bản nào" --> evals
     candidates -. "đồng bộ" .-> fts
     skills --> candskills
@@ -76,7 +75,7 @@ flowchart LR
     classDef recruit fill:#FAE3CE,stroke:#B0702A,stroke-width:1px,color:#452B0E
     classDef core    fill:#F3C892,stroke:#9A5B18,stroke-width:2px,color:#3A2109
     classDef hr      fill:#DFEADA,stroke:#4C7743,stroke-width:1px,color:#1C2F17
-    class departments,levels,emptypes,costcenters,skills,mailtpl,interviewers master
+    class departments,levels,emptypes,costcenters,skills,mailtpl master
     class positions,posreq,cvs,exps,candskills,apps,evals,acts,intv,fb,fts recruit
     class candidates core
     class employees,courses,courseemp hr
@@ -95,7 +94,7 @@ Mũi tên = chiều tham chiếu: bảng ở đầu mũi tên chứa cột `*_id
 | Bài toán | Giải bằng | Nguyên tắc |
 |---|---|---|
 | AI chấm một ứng viên **nhiều lần** (nhiều vị trí, nhiều thời điểm) | `candidate_evaluations` | **Chỉ ghi thêm, không ghi đè.** Không có chỉ mục duy nhất. Mỗi lượt chấm giữ lại `evaluated_at` + `model` + bản CV đã dùng. |
-| Ghi **kết quả từng vòng phỏng vấn**: nhận xét của HR và của từng người PV | `interviews` + `interview_feedbacks` | Một vòng = một dòng `interviews` (có `hr_note`); mỗi người phỏng vấn = một dòng `interview_feedbacks` với điểm và nhận xét riêng. |
+| Ghi **kết quả từng vòng phỏng vấn**: nhận xét của HR và của từng người PV | `interviews` + `interview_feedbacks` | Một vòng = một dòng `interviews` (`note` = nhận xét của HR); mỗi người phỏng vấn = một dòng `interview_feedbacks` với điểm và nhận xét riêng. |
 | Xem detail ứng viên phải thấy **đã liên hệ những gì** | `candidate_activities` | Mọi mail đã gửi, lịch phỏng vấn, đổi trạng thái, ghi chú đều thành một dòng có mốc thời gian. |
 | CV nhận năm 2023, quét lại năm 2026 → **kinh nghiệm đã khác** | `candidate_cvs` + `candidate_experiences` | Mỗi bản CV là một ảnh chụp có `received_at`. Kinh nghiệm lưu thành **dòng thời gian công việc** (ngày vào – ngày ra) nên tính lại được số năm ở bất kỳ thời điểm nào. |
 
@@ -131,7 +130,7 @@ erDiagram
     applications  ||--o{ candidate_activities  : "phát sinh sự kiện"
     applications  ||--o{ interviews            : "3 vòng phỏng vấn"
     interviews    ||--o{ interview_feedbacks   : "nhận xét từng người PV"
-    interviewers  ||--o{ interview_feedbacks   : "ai nhận xét"
+    employees     ||--o{ interview_feedbacks   : "ai là người phỏng vấn"
     candidate_cvs ||--o{ candidate_evaluations : "chấm trên bản CV nào"
     skills        ||--o{ candidate_skills      : "chuẩn hóa tên"
 ```
@@ -157,7 +156,7 @@ Danh tính + **ảnh chụp mới nhất** để lọc cho nhanh. Dữ liệu g�
 
 | Cột | Kiểu | Mô tả |
 |---|---|---|
-| `pool_status` | VARCHAR | `Active` · `Hired` · `Do Not Contact` · `Archived` |
+| `pool_status` | VARCHAR | `Active` · `Hired` · `Do Not Contact` · `Inactive` |
 | `first_seen_at` | DATETIME | Lần đầu vào pool. |
 | `last_contacted_at` | DATETIME | Chép từ `candidate_activities` mới nhất — trả lời ngay "đã liên hệ chưa". |
 | `latest_cv_id` | INT | → `candidate_cvs.cv_id`, bản CV mới nhất. |
@@ -300,15 +299,14 @@ Trạng thái tuyển dụng nằm ở đây, **không** nằm ở `candidates`.
 | `position_id` | INT | → `positions.position_id` |
 | `cv_id` | INT | Nộp bằng bản CV nào. |
 | `origin` | VARCHAR | `Applied` (tự nộp) · `Pool search` (kéo từ pool) · `Referral` |
-| `source` | VARCHAR | *(Excel: SOURCE)* Itviec · LinkedIn · Referral · HH- PSK… |
-| `status` | VARCHAR | *(Excel: STATUS)* Giai đoạn đang ở — xem [Giá trị cố định](#trạng-thái-đơn-ứng-tuyển). |
-| `final_status` | VARCHAR | *(Excel: Final status)* Kết cục: `Pass` · `Fail` · `Considering` · `Withdraw` · `Ongoing` · `Could not contact` · `Not proceed` |
-| `phone_screen_date` | DATE | *(Excel: PHONE SCREEN DATE)* Ngày sàng lọc qua điện thoại. |
+| `source` | VARCHAR | Nguồn của lần ứng tuyển này: Itviec · LinkedIn · Referral · HH- PSK… |
+| `status` | VARCHAR | Giai đoạn đang ở — xem [Giá trị cố định](#trạng-thái-đơn-ứng-tuyển). |
+| `final_status` | VARCHAR | Kết cục: `Pass` · `Fail` · `Considering` · `Withdraw` · `Ongoing` · `Could not contact` · `Not proceed` |
+| `phone_screen_date` | DATE | Ngày sàng lọc qua điện thoại. |
 | `applied_at` | DATETIME | Ngày nộp / ngày kéo từ pool vào. |
 | `status_changed_at` | DATETIME | Lần đổi trạng thái gần nhất. |
 | `closed_at` | DATETIME | Khi vào nhánh dừng. |
-| `hr_note` | TEXT | Nhận xét chung của HR về đơn này. |
-| `note` | TEXT | |
+| `note` | TEXT | Nhận xét của HR về đơn này. |
 
 Không đặt chỉ mục duy nhất `(candidate_id, position_id)` — cho phép ứng tuyển lại cùng vị trí ở đợt sau.
 
@@ -324,9 +322,9 @@ CREATE INDEX idx_app_status    ON applications(status);
 
 ### `interviews` — Buổi phỏng vấn từng vòng
 
-Một dòng = **một vòng** của một đơn ứng tuyển. Trong file Excel đây là 3 khối cột lặp (`L:O`, `P:S`, `T:W`); ở DB gộp thành 3 dòng nên thêm vòng 4 cũng không phải sửa cấu trúc.
+Một dòng = **một vòng** của một đơn ứng tuyển. Mỗi vòng một dòng nên thêm vòng 4, vòng 5 không phải sửa cấu trúc.
 
-Nhận xét của **HR** nằm ở đây (`hr_note`); nhận xét của **từng người phỏng vấn** nằm ở `interview_feedbacks`.
+Nhận xét của **HR** nằm ở đây (`note`); nhận xét của **từng người phỏng vấn** nằm ở `interview_feedbacks`.
 
 | Cột | Kiểu | Mô tả |
 |---|---|---|
@@ -334,12 +332,12 @@ Nhận xét của **HR** nằm ở đây (`hr_note`); nhận xét của **từng
 | `application_id` | INT | → `applications.application_id` |
 | `candidate_id` | INT | Chép lại để truy vấn nhanh theo ứng viên. |
 | `round` | INT | `1` · `2` · `3`… |
-| `interview_date` | DATETIME | *(Excel: INTERVIEW DATE)* |
+| `interview_date` | DATETIME | Ngày giờ phỏng vấn. |
 | `duration_minutes` | INT | |
 | `mode` | VARCHAR | `Onsite` · `Online` · `Phone` |
 | `location` | VARCHAR | Phòng họp hoặc link online. |
-| `overall_score` | VARCHAR | *(Excel: INTERVIEW SCORE)* `Pass` · `Fail` · `Consideration` |
-| `hr_note` | TEXT | **Nhận xét của HR** về buổi này. |
+| `overall_score` | VARCHAR | Kết luận chung của vòng: `Pass` · `Fail` · `Consideration` |
+| `note` | TEXT | **Nhận xét của HR** về buổi này. |
 | `summary` | TEXT | Tổng hợp ý kiến cả hội đồng. |
 | `next_step` | VARCHAR | Kết luận: đi tiếp vòng nào / dừng. |
 | `status` | VARCHAR | `Scheduled` · `Completed` · `Cancelled` · `No show` |
@@ -355,25 +353,29 @@ CREATE INDEX        idx_intv_date      ON interviews(interview_date);
 
 ### `interview_feedbacks` — Nhận xét của từng người phỏng vấn
 
-Trong Excel, cột `ASSIGNED INTERVIEWER` đôi khi chứa nhiều tên trong một ô (`Ly Nguyen/Hai Nguyen`) và chỉ có **một** ô feedback chung. Tách ra đây thì mỗi người có điểm và nhận xét riêng.
+Một vòng có thể nhiều người phỏng vấn, mỗi người một dòng với điểm và nhận xét riêng.
+
+Người phỏng vấn là **nhân viên công ty** → trỏ thẳng vào `employees`, không có danh mục riêng.
 
 | Cột | Kiểu | Mô tả |
 |---|---|---|
 | `feedback_id` | INTEGER **PK** | Tự tăng. |
 | `interview_id` | INT | → `interviews.interview_id` |
-| `interviewer_id` | INT | → `interviewers.interviewer_id`. Rỗng = người ngoài danh mục. |
-| `interviewer_name` | VARCHAR | *(Excel: ASSIGNED INTERVIEWER)* Tên tự do khi không tra được vào danh mục. |
+| `employee_id` | INT | → `employees.employee_id` — người phỏng vấn. |
+| `interviewer_name` | VARCHAR | Tên tự do, dùng khi người phỏng vấn là khách mời ngoài công ty hoặc chưa có trong `employees`. |
 | `role` | VARCHAR | `Hiring Manager` · `Technical` · `HR` · `Observer` |
-| `score` | VARCHAR | *(Excel: INTERVIEW SCORE)* `Pass` · `Fail` · `Consideration` |
+| `score` | VARCHAR | `Pass` · `Fail` · `Consideration` |
 | `rating` | DECIMAL | Điểm số 1–5, nếu muốn chấm định lượng. |
-| `feedback` | TEXT | *(Excel: INTERVIEWER FEEDBACK)* Nhận xét chi tiết. |
+| `feedback` | TEXT | Nhận xét chi tiết. |
 | `strengths` · `weaknesses` | TEXT | Tách riêng nếu người PV muốn ghi rõ. |
 | `submitted_at` | DATETIME | Lúc gửi nhận xét. |
 
 ```sql
-CREATE INDEX idx_fb_interview   ON interview_feedbacks(interview_id);
-CREATE INDEX idx_fb_interviewer ON interview_feedbacks(interviewer_id);
+CREATE INDEX idx_fb_interview ON interview_feedbacks(interview_id);
+CREATE INDEX idx_fb_employee  ON interview_feedbacks(employee_id);
 ```
+
+Lịch rảnh của người phỏng vấn tra qua `employees` (phòng ban, chức danh) — không nhân bản dữ liệu nhân viên sang bảng khác.
 
 ---
 
@@ -456,20 +458,20 @@ CREATE INDEX idx_act_type      ON candidate_activities(type);
 
 ### `positions` — Vị trí tuyển dụng
 
-Mỗi vị trí có đúng một JD → đường dẫn file nằm thẳng trong bảng. Các cột đánh dấu *(Excel)* lấy từ sheet **Openings** của `template_cv.xlsx`.
+Mỗi vị trí có đúng một JD → đường dẫn file nằm thẳng trong bảng.
 
 | Cột | Kiểu | Mô tả |
 |---|---|---|
 | `position_id` | INTEGER **PK** | Tự tăng. |
 | `department_id` | INT | → `departments.department_id` |
 | `position_code` | VARCHAR | Mã vị trí. |
-| `jrf_code` | VARCHAR | *(Excel: JRF)* Mã yêu cầu tuyển dụng. |
-| `position_title` | VARCHAR | *(Excel: JOB OPENING)* Tên vị trí — dùng luôn làm tiêu đề JD. |
-| `description` | TEXT | *(Excel: DESCRIPTION)* |
-| `required_experience` | VARCHAR | *(Excel: REQUIRED EXPERIENCE)* |
-| `salary_level` | VARCHAR | *(Excel: SALARY LEVEL)* Dải lương duyệt cho vị trí. |
-| `starting_date` | DATE | *(Excel: Starting time)* Ngày cần người vào làm. |
-| `notes` | TEXT | *(Excel: NOTES)* |
+| `jrf_code` | VARCHAR | Mã yêu cầu tuyển dụng (Job Requisition Form). |
+| `position_title` | VARCHAR | Tên vị trí — dùng luôn làm tiêu đề JD. |
+| `description` | TEXT | Mô tả ngắn về vị trí. |
+| `required_experience` | VARCHAR | Yêu cầu kinh nghiệm dạng chữ. |
+| `salary_level` | VARCHAR | Dải lương đã duyệt cho vị trí. |
+| `starting_date` | DATE | Ngày cần người vào làm. |
+| `note` | TEXT | Ghi chú của HR. |
 | `level` | VARCHAR | Junior · Senior · Lead… |
 | `headcount` | INT | Số lượng cần tuyển. |
 | `status` | VARCHAR | `Open` · `Paused` · `Closed` |
@@ -581,27 +583,6 @@ Gán cho nhân viên để gom nhóm tính chi phí vận hành của từng tea
 CREATE INDEX idx_skill_name ON skills(name);
 ```
 
-### `interviewers` — Người phỏng vấn
-
-Lấy từ sheet **Interviewers** của `template_cv.xlsx`.
-
-| Cột | Kiểu | Mô tả |
-|---|---|---|
-| `interviewer_id` | INTEGER **PK** | |
-| `full_name` | VARCHAR | *(Excel: NAME)* |
-| `department_id` | INT | *(Excel: DEPARTMENT)* → `departments.short_name` |
-| `job_title` | VARCHAR | *(Excel: POSITION)* |
-| `email` | VARCHAR | Để CC tự động vào thư mời. |
-| `availability` | VARCHAR | *(Excel: AVAILABILITY)* Lịch rảnh — `SW on every Wed` |
-| `employee_id` | INT | → `employees.employee_id` nếu là nhân viên trong hệ thống. |
-| `is_active` | INT | `1` = còn tham gia phỏng vấn. |
-| `note` | TEXT | *(Excel: NOTES)* |
-
-```sql
-CREATE INDEX idx_interviewer_name ON interviewers(full_name);
-CREATE INDEX idx_interviewer_dept ON interviewers(department_id);
-```
-
 ### `mail_templates` — Mẫu mail
 
 Nội dung hỗ trợ placeholder `{name}` `{position}` `{date}` `{time_start}` `{time_end}`, điền lúc gửi.
@@ -670,7 +651,8 @@ Trạng thái làm việc **suy ra** từ `termination_date`: có ngày = đã n
 | `email` · `company_email` | VARCHAR | Personal Email · Company email |
 | `address` · `city` · `country` | VARCHAR | Street · City · Country |
 | `permanent_address` · `temporary_address` | VARCHAR | Thường trú · Tạm trú |
-| `emergency_contact_name` | VARCHAR | Emergency Contact Name |
+| `emergency_contact_name` | VARCHAR | Emergency Contact Name — chỉ HỌ TÊN |
+| `emergency_contact_phone` | VARCHAR | SĐT người báo tin khẩn: ô Excel gộp "tên + số ĐT", import tự tách sang đây |
 | `emergency_contact_relationship` | VARCHAR | Relationship |
 
 **Học vấn**
@@ -711,6 +693,7 @@ Trạng thái làm việc **suy ra** từ `termination_date`: có ngày = đã n
 | `working_hours_per_week` | VARCHAR | Working hour/week |
 | `smart_working_eligible` | VARCHAR | Smart Working Policy Eligible |
 | `er_jrf` | VARCHAR | #ER/ JRF |
+| `is_interviewer` | INT | `1` = có phỏng vấn ứng viên → lọc sẵn danh sách khi nhập kết quả PV |
 
 **Hợp đồng & thời gian làm việc**
 
@@ -775,37 +758,9 @@ CREATE INDEX        idx_ce_employee ON course_employees(employee_id);
 
 ---
 
-## Xuất Excel từ màn hình Candidates
-
-Nút **Export** dựng lại đúng sheet **Candidates** của `template_cv.xlsx` — 23 cột, dữ liệu lấy từ nhiều bảng ghép lại. Một dòng = **một đơn ứng tuyển** (không phải một ứng viên), vì một người ứng tuyển 2 vị trí thì file Excel gốc cũng có 2 dòng.
-
-| Cột Excel | Lấy từ |
-|---|---|
-| A · Batch | `candidate_cvs.batch` |
-| B · ID | `candidates.candidate_id` |
-| C · NAME | `candidates.full_name` |
-| D · APPLYING FOR | `positions.position_title` |
-| E · STATUS | `applications.status` → đổi nhãn theo [bảng ánh xạ](#ánh-xạ-trạng-thái-khi-xuất-excel) |
-| F · SOURCE | `applications.source` |
-| G · EMAIL ADDRESS | `candidates.email` |
-| H · PHONE | `candidates.phone` |
-| I · Final status | `applications.final_status` |
-| J · PHONE SCREEN DATE | `applications.phone_screen_date` |
-| K · *(bỏ trống)* | Cột `Column1` trong file gốc không dùng. |
-| L · INTERVIEW DATE | `interviews.interview_date` **vòng 1** |
-| M · ASSIGNED INTERVIEWER | Nối tên từ `interview_feedbacks` vòng 1, ngăn `; ` |
-| N · INTERVIEW SCORE | `interviews.overall_score` vòng 1 |
-| O · INTERVIEWER FEEDBACK | Nối `interview_feedbacks.feedback` vòng 1, kèm tên người nhận xét |
-| P–S · …2 | Như L–O nhưng **vòng 2** |
-| T–W · …3 | Như L–O nhưng **vòng 3** |
-
-Vòng 4 trở đi không có chỗ trong file Excel gốc → dồn vào cột O/S/W của vòng cuối kèm ghi chú, hoặc bỏ qua. Nhận xét chung của HR (`interviews.hr_note`, `applications.hr_note`) cũng nối vào cột feedback tương ứng.
-
----
-
 ## Giá trị cố định
 
-Khai báo trong `app/core/cv_schema.py`. Các bộ đánh dấu *(Excel)* lấy nguyên từ sheet **Code** của `template_cv.xlsx`.
+Khai báo trong `app/core/cv_schema.py`.
 
 ### Trạng thái đơn ứng tuyển
 
@@ -822,37 +777,21 @@ Khai báo trong `app/core/cv_schema.py`. Các bộ đánh dấu *(Excel)* lấy 
 
 **⊗** = nhánh dừng, không có bước kế tiếp mặc định.
 
-### Ánh xạ trạng thái khi xuất Excel
-
-Hệ thống dùng bộ nhãn riêng (đã có dữ liệu cũ theo bộ này), file Excel dùng bộ nhãn của quy trình thủ công. Lúc xuất thì đổi nhãn:
-
-| Trong hệ thống | Trong Excel |
-|---|---|
-| New Application | CV screen |
-| Screening | Phone screen |
-| Short List | *(giữ nguyên — Excel không có)* |
-| Technical Test | Under technical test |
-| First / Second / Third Interview | Interview R1 / R2 / R3 |
-| Offer Approval | Offering step |
-| Ready To Hire | Hired |
-| Not Proceed | Not proceed |
-| Rejected Offer · Fail Probation Period | *(giữ nguyên — Excel không có)* |
-
 ### Kết cục đơn ứng tuyển
 
-`applications.final_status` *(Excel: Final Result)* — khác `status` ở chỗ `status` là **đang ở đâu**, `final_status` là **kết cục ra sao**.
+`applications.final_status` — khác `status` ở chỗ `status` là **đang ở đâu**, `final_status` là **kết cục ra sao**.
 
 `Pass` · `Fail` · `Considering` · `Withdraw` · `Ongoing` · `Could not contact` · `Not proceed`
 
 ### Nguồn ứng viên
 
-`applications.source` *(Excel: SOURCE)* — nạp sẵn qua `SEED_DATA`, người dùng thêm được:
+`applications.source` — nạp sẵn qua `SEED_DATA`, người dùng thêm được:
 
 `Itviec` · `LinkedIn` · `Referral` · `HH- PSK` · `HH- Adecco` · `University` · `Internal Sourced`
 
 ### Điểm phỏng vấn
 
-`interviews.overall_score` và `interview_feedbacks.score` *(Excel: INTERVIEW SCORE)*:
+`interviews.overall_score` và `interview_feedbacks.score`:
 
 `Pass` · `Fail` · `Consideration`
 
@@ -876,7 +815,7 @@ Hệ thống dùng bộ nhãn riêng (đã có dữ liệu cũ theo bộ này), 
 
 | Cột | Giá trị |
 |---|---|
-| `candidates.pool_status` | `Active` · `Hired` · `Do Not Contact` · `Archived` |
+| `candidates.pool_status` | `Active` · `Hired` · `Do Not Contact` · `Inactive` |
 | `candidates.gender` · `employees.gender` | `Male` · `Female` · `Other` |
 | `candidates.willing_to_relocate` | `Yes` · `No` · `Negotiable` |
 | `candidate_skills.level` | `Basic` · `Intermediate` · `Advanced` · `Expert` |

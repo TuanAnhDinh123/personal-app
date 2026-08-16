@@ -55,39 +55,62 @@ _NO_STATUS = "(no status yet)"
 CAND_COL_WIDTHS = {
     "candidate_id":    56,   # vừa đủ 4 ký tự (kể cả padding 8px 2 bên)
     "full_name":       180,
+    "current_title":   170,
+    "years_experience": 60,
     "email":           210,
     "phone":           120,
-    "position_title":  100,
-    "fit_score":       60,
-    "cv_file_path":    160,
-    "department_name": 140,
-    "batch":           90,
+    "position_title":  120,
+    "ai_score":        60,
+    "cv_file_path":    150,
+    "department_name": 130,
+    "batch":           70,
     "status":          130,   # đủ chỗ cho nhãn dài nhất ("Fail Probation Period")
-    "date_of_birth":   95,
+    "final_status":    120,
+    "pool_status":     110,
     "applied_at":      105,
-    "note":            200,
+    "note":            180,
 }
 
 _W = CAND_COL_WIDTHS
 
+
+def _short(value, limit=60):
+    """Rút gọn về một dòng cho ô bảng (rỗng → chuỗi rỗng)."""
+    s = str(value or "").replace("\n", " ").strip()
+    return (s[:limit] + "…") if len(s) > limit else s
+
+
+def _years_cell(value):
+    """Số năm kinh nghiệm TẠI THỜI ĐIỂM CV — con số hôm nay xem ở màn hình chi tiết."""
+    try:
+        return f"{float(value):.1f}"
+    except (TypeError, ValueError):
+        return ""
+
+
 # Cột bảng ỨNG VIÊN: (khóa, tiêu đề, rộng, canh lề[, formatter]).
+# `status` / `position_title` / `ai_score` lấy từ ĐƠN ỨNG TUYỂN MỚI NHẤT và
+# lượt AI chấm mới nhất của đơn đó (xem cv_repository._CANDIDATE_SELECT).
 _CAND_COLUMNS = [
-    ("candidate_id",    "ID",            _W["candidate_id"],    "center"),
-    ("full_name",       "Full name",     _W["full_name"],       "w"),
-    ("email",           "Email",         _W["email"],           "w"),
-    ("phone",           "Phone",         _W["phone"],           "w"),
-    ("position_title",  "Position",      _W["position_title"],  "w"),
-    ("fit_score",       "Score",         _W["fit_score"],       "center"),
-    ("cv_file_path",    "CV",            _W["cv_file_path"],    "w",
+    ("candidate_id",     "ID",            _W["candidate_id"],     "center"),
+    ("full_name",        "Full name",     _W["full_name"],        "w"),
+    ("current_title",    "Current title", _W["current_title"],    "w"),
+    ("years_experience", "Yrs",           _W["years_experience"], "center", _years_cell),
+    ("email",            "Email",         _W["email"],            "w"),
+    ("phone",            "Phone",         _W["phone"],            "w"),
+    ("position_title",   "Applied for",   _W["position_title"],   "w"),
+    ("status",           "Status",        _W["status"],           "center"),
+    ("final_status",     "Result",        _W["final_status"],     "center"),
+    ("ai_score",         "Score",         _W["ai_score"],         "center",
+     lambda v: "" if v in (None, "") else str(int(float(v)))),
+    ("cv_file_path",     "CV",            _W["cv_file_path"],     "w",
      lambda v: os.path.basename(str(v)) if v else ""),
-    ("department_name", "Department",    _W["department_name"], "w"),
-    ("batch",           "Batch",         _W["batch"],           "center"),
-    ("status",          "Status",        _W["status"],          "center"),
-    ("date_of_birth",   "Date of birth", _W["date_of_birth"],   "center"),
-    ("applied_at",      "Applied",       _W["applied_at"],      "center"),
-    ("note",            "Note",          _W["note"],            "w",
-     lambda v: (str(v).replace("\n", " ")[:60] + "…")
-     if v and len(str(v)) > 60 else (str(v).replace("\n", " ") if v else "")),
+    ("department_name",  "Department",    _W["department_name"],  "w"),
+    ("pool_status",      "Pool",          _W["pool_status"],      "center"),
+    ("batch",            "Batch",         _W["batch"],            "center"),
+    ("applied_at",       "Applied",       _W["applied_at"],       "center",
+     lambda v: str(v)[:10] if v else ""),
+    ("note",             "Note",          _W["note"],             "w", _short),
 ]
 
 
@@ -296,6 +319,74 @@ def _chip(parent, text, color):
     return lbl
 
 
+def _int_str(value):
+    """Điểm số về dạng số nguyên để hiển thị ('82.0' → '82')."""
+    try:
+        return str(int(float(value)))
+    except (TypeError, ValueError):
+        return str(value or "")
+
+
+def _result_color(value):
+    """Màu cho kết luận Pass / Fail / Consideration."""
+    return {"pass": theme.PALETTE["--success"],
+            "fail": theme.PALETTE["--danger"],
+            "consideration": theme.PALETTE["--warning"]}.get(
+        str(value or "").strip().lower(), theme.PALETTE["--text-muted"])
+
+
+def _experience_label(years):
+    """Kinh nghiệm hiển thị HAI con số (xem cv_repository.experience_years).
+
+    Con số thứ nhất chắc chắn đúng vì CV nói vậy; con số thứ hai chỉ là ước
+    tính đến hôm nay nên có dấu ≈. Bằng nhau (CV vừa nhận) thì chỉ hiện một.
+    """
+    at_cv, today = years["at_cv"], years["today"]
+    as_of = years["as_of"][:7]
+    text = f"{at_cv:.1f} yrs"
+    if as_of:
+        text += f" (CV {as_of})"
+    if abs(today - at_cv) >= 0.1:
+        text += f"  ·  ≈ {today:.1f} yrs today"
+    return text
+
+
+def _section_box(parent, title, icon):
+    """Khung con trong thẻ chi tiết: tiêu đề + icon. Trả về (khung, layout)."""
+    box = QFrame(parent)
+    box.setObjectName("AIBox")
+    v = QVBoxLayout(box)
+    v.setContentsMargins(14, 12, 14, 12)
+    v.setSpacing(6)
+    head = QHBoxLayout()
+    head.setSpacing(6)
+    ico = QLabel(box)
+    ico.setPixmap(widgets.svg_pixmap(icon, theme.PALETTE["--accent"], 16))
+    head.addWidget(ico, 0, Qt.AlignVCenter)
+    lbl = QLabel(title, box)
+    lbl.setObjectName("AIHeader")
+    head.addWidget(lbl, 1)
+    v.addLayout(head)
+    return box, v
+
+
+def _muted(parent, text):
+    """Dòng chữ nhỏ, màu nhạt (dùng cho lịch sử & chú thích)."""
+    lbl = QLabel(text, parent)
+    lbl.setObjectName("AIEmpty")
+    lbl.setWordWrap(True)
+    lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    return lbl
+
+
+def _divider(parent):
+    """Đường kẻ ngang mảnh ngăn các mục trong cùng một khung."""
+    line = QFrame(parent)
+    line.setFrameShape(QFrame.HLine)
+    line.setStyleSheet(f"color: {theme.PALETTE['--border']}; max-height: 1px;")
+    return line
+
+
 def _launch_file(parent, path):
     """Mở file bằng ứng dụng mặc định của hệ điều hành."""
     try:
@@ -393,11 +484,14 @@ def _master_specs():
             "columns": [
                 ("position_id", "ID", 50),
                 ("position_code", "Code", 90),
+                ("jrf_code", "JRF", 80),
                 ("position_title", "Position", 190),
                 ("department_name", "Department", 140),
                 ("level", "Level", 80),
                 ("headcount", "Qty", 50),
                 ("status", "Status", 105),
+                ("starting_date", "Start by", 100),
+                ("salary_level", "Salary level", 120),
                 # Ô rỗng (không phải "—") khi chưa gắn JD: cột này là link nên
                 # chỉ ô có chữ mới được tô màu/gạch chân & bấm được.
                 ("jd_file_path", "JD file", 160, "w",
@@ -413,12 +507,20 @@ def _master_specs():
                 {"key": "department_id", "label": "Department", "kind": "dropdown",
                  "options": _dept_options},
                 {"key": "position_code", "label": "Position code", "kind": "text"},
+                {"key": "jrf_code", "label": "JRF code (job requisition)", "kind": "text"},
                 {"key": "position_title", "label": "Position title (*)",
                  "kind": "text", "required": True},
                 {"key": "level", "label": "Level", "kind": "text"},
                 {"key": "headcount", "label": "Headcount", "kind": "int"},
                 {"key": "status", "label": "Status", "kind": "choice",
                  "choices": cv_schema.POSITION_STATUS_CHOICES, "allow_empty": True},
+                {"key": "starting_date", "label": "Needed by (yyyy-mm-dd)", "kind": "text"},
+                {"key": "salary_level", "label": "Approved salary level", "kind": "text"},
+                {"key": "required_experience", "label": "Required experience",
+                 "kind": "text"},
+                {"key": "description", "label": "Description", "kind": "textarea",
+                 "height": 3},
+                {"key": "note", "label": "Note", "kind": "textarea", "height": 3},
                 # Mỗi vị trí chỉ có 1 JD → nhập ngay tại form vị trí (không còn
                 # trang master "Mô tả công việc (JD)" riêng).
                 {"kind": "section", "label": "Job description (JD)"},
@@ -521,6 +623,31 @@ def _master_specs():
                  "kind": "text", "required": True},
                 {"key": "sort_order", "label": "Display order (smaller = higher)",
                  "kind": "int"},
+                {"key": "description", "label": "Description",
+                 "kind": "textarea", "height": 3},
+            ],
+        },
+        # Danh mục kỹ năng chuẩn hóa: `aliases` là chỗ gom các cách viết khác
+        # nhau để CV ghi "JS" vẫn khớp với JD đòi "JavaScript".
+        "skill": {
+            "title": "skill", "pk": "skill_id",
+            "list_fn": repo.list_skills,
+            "get": repo.get_skill, "insert": repo.insert_skill,
+            "update": repo.update_skill, "delete": repo.delete_skill,
+            "columns": [
+                ("skill_id", "ID", 50),
+                ("name", "Skill", 180),
+                ("category", "Category", 120),
+                ("aliases", "Also written as", 260),
+                ("description", "Description", 240),
+            ],
+            "form": [
+                {"key": "name", "label": "Skill name (*) — e.g. JavaScript",
+                 "kind": "text", "required": True},
+                {"key": "category", "label": "Category", "kind": "choice",
+                 "choices": cv_schema.SKILL_CATEGORY_CHOICES, "allow_empty": True},
+                {"key": "aliases", "label": "Also written as (separate with ;) — "
+                 "e.g. JS; ECMAScript", "kind": "text"},
                 {"key": "description", "label": "Description",
                  "kind": "textarea", "height": 3},
             ],
@@ -630,6 +757,15 @@ class MailTemplateTool(_MasterPageTool):
     spec_key = "mail_template"
 
 
+class SkillTool(_MasterPageTool):
+    name = "Skills"
+    description = ("Standardised skill list — aliases let a CV that says \"JS\" "
+                   "match a JD that asks for \"JavaScript\".")
+    icon = "🧩"
+    order = 24
+    spec_key = "skill"
+
+
 class CourseTool(_MasterPageTool):
     name = "Courses"
     description = "Training / course directory."
@@ -640,10 +776,11 @@ class CourseTool(_MasterPageTool):
 
 # ═════════════════════ MODAL XEM CHI TIẾT ỨNG VIÊN ══════════════════════
 class _CandidateDetailDialog(ModalDialog):
-    """Modal lớn xem chi tiết toàn bộ ứng viên trong danh sách hiện tại.
+    """Modal lớn xem chi tiết các ứng viên đang tick.
 
-    Mỗi ứng viên là một thẻ; phần nổi bật nhất là NHẬN XÉT CỦA AI
-    (điểm phù hợp, nhận xét, ưu điểm, nhược điểm) từ bước quét CV.
+    Mỗi ứng viên là một thẻ gồm 5 khối, đọc từ trên xuống là đủ hiểu hồ sơ:
+        hồ sơ nghề nghiệp → LỊCH SỬ AI CHẤM (mọi lượt, không chỉ lượt cuối)
+        → các vòng phỏng vấn kèm nhận xét → lịch sử liên hệ → các đơn ứng tuyển.
     """
 
     def __init__(self, parent, rows):
@@ -673,32 +810,35 @@ class _CandidateDetailDialog(ModalDialog):
 
     # ------------------------------------------------------------- thẻ 1 ứng viên
     def _candidate_card(self, parent, row):
+        cid = row["candidate_id"]
         box = QFrame(parent)
         box.setObjectName("DetailCard")
         v = QVBoxLayout(box)
         v.setContentsMargins(16, 14, 16, 14)
         v.setSpacing(8)
 
-        # Hàng tiêu đề: tên + chip điểm/trạng thái
+        # Hàng tiêu đề: tên + chip điểm / trạng thái / tình trạng trong pool
         head = QHBoxLayout()
         head.setSpacing(8)
-        cid = _txt(row, "candidate_id")
         name = QLabel(f"#{cid}  {_txt(row, 'full_name') or '(no name)'}", box)
         name.setObjectName("DetailName")
         head.addWidget(name, 1)
-        score = _txt(row, "fit_score")
+        score = _txt(row, "ai_score")
         if score:
-            head.addWidget(_chip(box, f"Score {score}", _score_color(score)))
-        status = _txt(row, "status")
-        if status:
-            head.addWidget(_chip(box, status, theme.PALETTE["--info"]))
+            head.addWidget(_chip(box, f"Score {_int_str(score)}", _score_color(score)))
+        for key, color in (("status", "--info"), ("final_status", "--accent"),
+                           ("pool_status", "--text-muted")):
+            value = _txt(row, key)
+            if value:
+                head.addWidget(_chip(box, value, theme.PALETTE[color]))
         v.addLayout(head)
 
         # Hàng thông tin phụ (bôi-chọn được để copy tay nếu cần)
         meta = " · ".join(p for p in (
+            _txt(row, "current_title"), _txt(row, "industry"),
             _txt(row, "position_title"), _txt(row, "department_name"),
             (f"DOB: {_txt(row, 'date_of_birth')}" if _txt(row, "date_of_birth") else ""),
-            (f"Applied: {_txt(row, 'applied_at')}" if _txt(row, "applied_at") else ""),
+            (f"Applied: {_txt(row, 'applied_at')[:10]}" if _txt(row, "applied_at") else ""),
         ) if p)
         if meta:
             lbl = QLabel(meta, box)
@@ -719,49 +859,169 @@ class _CandidateDetailDialog(ModalDialog):
             chips.addStretch(1)
             v.addLayout(chips)
 
-        v.addWidget(self._ai_box(box, row))
+        v.addWidget(self._profile_box(box, row))
+        v.addWidget(self._ai_box(box, cid))
+        v.addWidget(self._interview_box(box, cid))
+        v.addWidget(self._history_box(box, cid))
 
         note = _txt(row, "note")
         if note:
             v.addLayout(self._para(box, "Note", note))
         return box
 
-    # ----------------------------------------------------- hộp nhận xét của AI
-    def _ai_box(self, parent, row):
-        box = QFrame(parent)
-        box.setObjectName("AIBox")
-        v = QVBoxLayout(box)
-        v.setContentsMargins(14, 12, 14, 12)
-        v.setSpacing(6)
+    # ------------------------------------------------------- hồ sơ nghề nghiệp
+    def _profile_box(self, parent, row):
+        """Kinh nghiệm (hai con số), kỹ năng, tóm tắt — phần KHÔNG dính JD nào."""
+        cid = row["candidate_id"]
+        box, v = _section_box(parent, "Profile", "idcard")
 
-        header = QHBoxLayout()
-        header.setSpacing(6)
-        ico = QLabel(box)
-        ico.setPixmap(widgets.svg_pixmap("sparkles", theme.PALETTE["--accent"], 16))
-        header.addWidget(ico, 0, Qt.AlignVCenter)
-        h = QLabel("AI assessment", box)
-        h.setObjectName("AIHeader")
-        header.addWidget(h, 1)
-        v.addLayout(header)
+        years = repo.experience_years(cid, row)
+        line = QHBoxLayout()
+        line.setSpacing(8)
+        line.addWidget(_chip(box, _experience_label(years), theme.PALETTE["--accent"]))
+        if years["stale"]:
+            line.addWidget(_chip(box, "Stale profile", theme.PALETTE["--warning"]))
+        line.addStretch(1)
+        v.addLayout(line)
 
-        summary = _txt(row, "fit_summary")
-        strengths = _txt(row, "strengths")
-        weaknesses = _txt(row, "weaknesses")
+        facts = " · ".join(p for p in (
+            _txt(row, "education"), _txt(row, "major"), _txt(row, "languages"),
+            _txt(row, "city"),
+            (f"Expects {_txt(row, 'salary_note')}" if _txt(row, "salary_note") else ""),
+            (f"Available {_txt(row, 'available_from')}"
+             if _txt(row, "available_from") else ""),
+        ) if p)
+        if facts:
+            v.addLayout(self._para(box, "Details", facts))
+        if _txt(row, "profile_summary"):
+            v.addLayout(self._para(box, "Summary", _txt(row, "profile_summary")))
+        if _txt(row, "skills_text"):
+            v.addLayout(self._para(box, "Skills", _txt(row, "skills_text")))
 
-        if not any((summary, strengths, weaknesses)):
-            empty = QLabel("No AI assessment for this candidate yet.", box)
-            empty.setObjectName("AIEmpty")
-            v.addWidget(empty)
+        jobs = repo.list_candidate_experiences(cid)
+        if jobs:
+            lines = []
+            for j in jobs:
+                span = f"{_txt(j, 'start_date')} → {_txt(j, 'end_date') or 'now'}"
+                lines.append(f"• {_txt(j, 'job_title') or '(role)'} — "
+                             f"{_txt(j, 'company') or '(company)'}  ({span})")
+            v.addLayout(self._para(box, "Work history", "\n".join(lines)))
+        return box
+
+    # ----------------------------------------------------- lịch sử AI chấm điểm
+    def _ai_box(self, parent, candidate_id):
+        """MỌI lượt AI đã chấm, mới nhất trước — không ghi đè nên xem được cả quá trình."""
+        box, v = _section_box(parent, "AI assessments", "sparkles")
+        rows = repo.list_evaluations(candidate_id)
+        if not rows:
+            v.addWidget(_muted(box, "No AI assessment for this candidate yet."))
             return box
 
-        if summary:
-            v.addLayout(self._para(box, "Fit summary", summary))
-        if strengths or weaknesses:
-            two = QHBoxLayout()
-            two.setSpacing(12)
-            two.addLayout(self._para(box, "Strengths", strengths or "—"), 1)
-            two.addLayout(self._para(box, "Weaknesses", weaknesses or "—"), 1)
-            v.addLayout(two)
+        for i, ev in enumerate(rows):
+            if i:
+                v.addWidget(_divider(box))
+            head = QHBoxLayout()
+            head.setSpacing(8)
+            title = " · ".join(p for p in (
+                _txt(ev, "position_title") or "(no position)",
+                _txt(ev, "source"),
+                _txt(ev, "evaluated_at")[:16],
+            ) if p)
+            lbl = QLabel(title, box)
+            lbl.setObjectName("AILabel")
+            head.addWidget(lbl, 1)
+            score = _txt(ev, "ai_score")
+            if score:
+                head.addWidget(_chip(box, _int_str(score), _score_color(score)))
+            v.addLayout(head)
+
+            sub = " · ".join(p for p in (
+                (f"model {_txt(ev, 'model')}" if _txt(ev, "model") else ""),
+                (f"CV of {_txt(ev, 'cv_received_at')}"
+                 if _txt(ev, "cv_received_at") else ""),
+            ) if p)
+            if sub:
+                v.addWidget(_muted(box, sub))
+            if _txt(ev, "summary"):
+                v.addLayout(self._para(box, "Fit summary", _txt(ev, "summary")))
+            if _txt(ev, "matched_skills") or _txt(ev, "missing_skills"):
+                two = QHBoxLayout()
+                two.setSpacing(12)
+                two.addLayout(self._para(box, "Matched skills",
+                                         _txt(ev, "matched_skills") or "—"), 1)
+                two.addLayout(self._para(box, "Missing skills",
+                                         _txt(ev, "missing_skills") or "—"), 1)
+                v.addLayout(two)
+            if _txt(ev, "strengths") or _txt(ev, "weaknesses"):
+                two = QHBoxLayout()
+                two.setSpacing(12)
+                two.addLayout(self._para(box, "Strengths", _txt(ev, "strengths") or "—"), 1)
+                two.addLayout(self._para(box, "Weaknesses", _txt(ev, "weaknesses") or "—"), 1)
+                v.addLayout(two)
+        return box
+
+    # ------------------------------------------------------- các vòng phỏng vấn
+    def _interview_box(self, parent, candidate_id):
+        """Từng vòng: kết luận + nhận xét của HR + nhận xét của từng người PV."""
+        box, v = _section_box(parent, "Interviews", "users")
+        rows = repo.list_interviews(candidate_id=candidate_id)
+        if not rows:
+            v.addWidget(_muted(box, "No interview recorded yet."))
+            return box
+
+        for i, iv in enumerate(rows):
+            if i:
+                v.addWidget(_divider(box))
+            head = QHBoxLayout()
+            head.setSpacing(8)
+            title = f"Round {_txt(iv, 'round') or '?'}"
+            when = _txt(iv, "interview_date")[:16]
+            if when:
+                title += f" · {when}"
+            for extra in (_txt(iv, "mode"), _txt(iv, "position_title")):
+                if extra:
+                    title += f" · {extra}"
+            lbl = QLabel(title, box)
+            lbl.setObjectName("AILabel")
+            head.addWidget(lbl, 1)
+            for value, color in ((_txt(iv, "overall_score"), _result_color(_txt(iv, "overall_score"))),
+                                 (_txt(iv, "status"), theme.PALETTE["--text-muted"])):
+                if value:
+                    head.addWidget(_chip(box, value, color))
+            v.addLayout(head)
+
+            if _txt(iv, "note"):
+                v.addLayout(self._para(box, "HR note", _txt(iv, "note")))
+            if _txt(iv, "summary"):
+                v.addLayout(self._para(box, "Panel summary", _txt(iv, "summary")))
+            for fb in repo.list_interview_feedbacks(iv["interview_id"]):
+                who = _txt(fb, "display_name") or "(interviewer)"
+                bits = [b for b in (_txt(fb, "role"), _txt(fb, "job_title"),
+                                    _txt(fb, "score")) if b]
+                label = who + (f"  ({' · '.join(bits)})" if bits else "")
+                v.addLayout(self._para(box, label, _txt(fb, "feedback") or "—"))
+        return box
+
+    # ---------------------------------------------------------- lịch sử liên hệ
+    def _history_box(self, parent, candidate_id):
+        """Mail đã gửi, cuộc gọi, đổi trạng thái, ghi chú — mỗi thứ một dòng."""
+        box, v = _section_box(parent, "Contact history", "calendar")
+        rows = repo.list_activities(candidate_id=candidate_id, limit=30)
+        if not rows:
+            v.addWidget(_muted(box, "This candidate has never been contacted."))
+            return box
+
+        for ac in rows:
+            when = _txt(ac, "occurred_at")[:16]
+            kind = _txt(ac, "type")
+            if kind == "Status change":
+                what = (f"{_txt(ac, 'from_status') or '(none)'} → "
+                        f"{_txt(ac, 'to_status') or '(none)'}")
+            else:
+                what = _txt(ac, "subject") or _short(_txt(ac, "content"), 80) or "—"
+            extra = _txt(ac, "position_title")
+            line = f"{when}  ·  {kind}  ·  {what}" + (f"  ·  {extra}" if extra else "")
+            v.addWidget(_muted(box, line))
         return box
 
     @staticmethod
@@ -833,9 +1093,12 @@ class CandidateDbTool(BaseTool):
         self.sel_pos = widgets.FilterSelect("Position")
         self.sel_dept = widgets.FilterSelect("Department")
         self.sel_status = widgets.FilterSelect("Status")
+        self.sel_pool = widgets.FilterSelect("Pool")
         self.sel_batch = widgets.FilterSelect("Batch")
         self.sel_status.set_options(cv_schema.CANDIDATE_STATUS_CHOICES)
-        for w in (self.sel_pos, self.sel_dept, self.sel_status, self.sel_batch):
+        self.sel_pool.set_options(cv_schema.POOL_STATUS_CHOICES)
+        for w in (self.sel_pos, self.sel_dept, self.sel_status, self.sel_pool,
+                  self.sel_batch):
             w.changed.connect(self._reload)
             filters.addWidget(w, 1)
         filters.addWidget(widgets.button(None, "Reset", variant="neutral",
@@ -878,7 +1141,8 @@ class CandidateDbTool(BaseTool):
 
         rows = repo.search_candidates(
             self.ent_kw.text(), pos_id, self.sel_status.value(),
-            department_id=dept_id, batch=self.sel_batch.value())
+            department_id=dept_id, batch=self.sel_batch.value(),
+            pool_status=self.sel_pool.value())
         self._rows = rows
         self.table.set_rows(rows)
         self.count_lbl.setText(
@@ -886,9 +1150,33 @@ class CandidateDbTool(BaseTool):
 
     def _clear_filters(self):
         self.ent_kw.clear()
-        for w in (self.sel_pos, self.sel_dept, self.sel_status, self.sel_batch):
+        for w in (self.sel_pos, self.sel_dept, self.sel_status, self.sel_pool,
+                  self.sel_batch):
             w.clear()
         self._reload()
+
+    # Trạng thái tuyển dụng nằm ở ĐƠN ỨNG TUYỂN, không nằm ở ứng viên — nên mọi
+    # thao tác đổi trạng thái / gửi thư mời đều cần application_id. Ứng viên mới
+    # nhập tay mà chưa gắn vị trí thì chưa có đơn nào.
+    @staticmethod
+    def _app_id(row):
+        try:
+            return row["application_id"]
+        except (KeyError, IndexError):
+            return None
+
+    def _rows_with_application(self, rows, what):
+        """Lọc ra các dòng đã có đơn ứng tuyển; báo tên những dòng chưa có."""
+        ok = [r for r in rows if self._app_id(r)]
+        missing = [_txt(r, "full_name") or f"#{r['candidate_id']}"
+                   for r in rows if not self._app_id(r)]
+        if missing:
+            dialogs.warning(
+                self._root, "No application yet",
+                f"{what} needs an application (candidate + position). These "
+                "candidates aren't linked to any position yet — edit them and "
+                "pick a position first:\n\n• " + "\n• ".join(missing))
+        return ok
 
     def _selected_id(self):
         cid = self.table.selected_id()
@@ -933,6 +1221,9 @@ class CandidateDbTool(BaseTool):
         if not rows:
             dialogs.info(self._root, "Nothing selected",
                          "Tick at least one candidate in the table to update status.")
+            return
+        rows = self._rows_with_application(rows, "Updating status")
+        if not rows:
             return
 
         current = self._common_status(rows, "A bulk update")
@@ -982,7 +1273,9 @@ class CandidateDbTool(BaseTool):
             for row in rows:
                 cid = row["candidate_id"]
                 try:
-                    repo.update_candidate(cid, {"status": status})
+                    # Ghi vào ĐƠN, đồng thời tự lưu một dòng lịch sử
+                    # "Status change" cho ứng viên (xem repo.set_application_status).
+                    repo.set_application_status(self._app_id(row), status)
                 except Exception as exc:   # noqa: BLE001 — gom lỗi báo một lần
                     failed.append(f"#{cid} — {exc}")
             dlg.accept()
@@ -1023,6 +1316,20 @@ class CandidateDbTool(BaseTool):
             dialogs.warning(
                 self._root, "Nothing selected",
                 "Tick at least one candidate in the table to send an email.")
+            return
+
+        # "Do Not Contact" là hàng rào CỨNG — chặn ngay tại đây, không chỉ ẩn
+        # khỏi danh sách tìm kiếm.
+        blocked = [_txt(r, "full_name") or f"#{r['candidate_id']}"
+                   for r in rows if _txt(r, "pool_status") == "Do Not Contact"]
+        if blocked:
+            dialogs.error(
+                self._root, "Marked as do not contact",
+                "These candidates are marked \"Do Not Contact\" and must not be "
+                "emailed. Untick them first:\n\n• " + "\n• ".join(blocked))
+            return
+        rows = self._rows_with_application(rows, "Sending emails")
+        if not rows:
             return
 
         # Cùng một lượt gửi thì các hồ sơ phải đang ở CÙNG trạng thái — trạng thái
@@ -1095,9 +1402,45 @@ class CandidateDbTool(BaseTool):
                                      start.toPython(), end.toPython(), attachments)
             if err is None:
                 opened.append((row, who))
+                self._record_invite(row, tpl, value + 1, subject, body_html,
+                                    email, start, end)
             else:
                 failed.append(f"{who} — {err}")
         self._report_meetings(opened, failed, skipped, no_cv, after_status)
+
+    def _record_invite(self, row, tpl, round_no, subject, body_html, email,
+                       start, end):
+        """Ghi lại việc đã mời phỏng vấn: 1 dòng lịch sử liên hệ + 1 buổi PV.
+
+        Buổi phỏng vấn được tạo ở trạng thái `Scheduled` với đúng giờ đã hẹn —
+        sau khi phỏng vấn xong, HR mở màn hình chi tiết để nhập kết quả và nhận
+        xét cho vòng đó.
+        """
+        application_id = self._app_id(row)
+        try:
+            activity_id = repo.log_activity({
+                "candidate_id":     row["candidate_id"],
+                "application_id":   application_id,
+                "type":             "Email",
+                "round":            round_no,
+                "scheduled_at":     start.toPython().strftime("%Y-%m-%d %H:%M:%S"),
+                "subject":          subject,
+                "content":          body_html,
+                "mail_template_id": tpl["mail_template_id"],
+                "mail_to":          email,
+                "mail_cc":          _txt(tpl, "mail_cc"),
+                "result":           "Pending",
+            })
+            minutes = max(0, start.secsTo(end) // 60)
+            repo.save_interview(application_id, round_no, {
+                "interview_date":   start.toPython().strftime("%Y-%m-%d %H:%M:%S"),
+                "duration_minutes": minutes,
+                "status":           "Scheduled",
+                "mail_activity_id": activity_id,
+            })
+        except Exception as exc:   # noqa: BLE001 — mail đã mở rồi, đừng chặn luồng
+            dialogs.warning(self._root, "History not saved",
+                            f"The invite was opened but couldn't be logged:\n{exc}")
 
     def _pick_mail_kind(self, count, current=""):
         """Hỏi loại mail muốn gửi: 3 vòng phỏng vấn, hoặc thư cảm ơn đã ứng tuyển.
@@ -1210,6 +1553,16 @@ class CandidateDbTool(BaseTool):
             except Exception as exc:   # noqa: BLE001 — gom lỗi báo một lần
                 failed.append(f"{who} — {exc}")
                 continue
+            repo.log_activity({
+                "candidate_id":     row["candidate_id"],
+                "application_id":   self._app_id(row),
+                "type":             "Email",
+                "subject":          subject,
+                "content":          body_html,
+                "mail_template_id": tpl["mail_template_id"],
+                "mail_to":          email,
+                "mail_cc":          _txt(tpl, "mail_cc"),
+            })
             opened.append(who)
 
         lines = []
@@ -1318,7 +1671,7 @@ class CandidateDbTool(BaseTool):
             combo.setCurrentIndex(max(0, combo.findText(after_status)))
             line.addWidget(combo, 1)
             col.addLayout(line)
-            selects.append((row["candidate_id"], combo))
+            selects.append((row, combo))
         col.addStretch(1)
         sa = widgets.scroll_area(body)
         sa.setMaximumHeight(dlg.modal_h)   # danh sách dài thì cuộn, ngắn thì vừa khít
@@ -1326,9 +1679,10 @@ class CandidateDbTool(BaseTool):
 
         def do_update():
             failed = []
-            for cid, combo in selects:
+            for row, combo in selects:
+                cid = row["candidate_id"]
                 try:
-                    repo.update_candidate(cid, {"status": combo.currentText()})
+                    repo.set_application_status(self._app_id(row), combo.currentText())
                 except Exception as exc:   # noqa: BLE001 — gom lỗi báo một lần
                     failed.append(f"#{cid} — {exc}")
             dlg.accept()
@@ -1558,6 +1912,11 @@ class CandidateDbTool(BaseTool):
         return rec
 
     # ------------------------------------------------------------- form specs
+    # Form nhập tay gộp HAI bảng: phần hồ sơ con người (`candidates`) và phần
+    # đơn ứng tuyển (`applications`). `_split_form_data` tách lại lúc lưu.
+    _APPLICATION_KEYS = ("position_id", "status", "final_status", "applied_at",
+                         "phone_screen_date")
+
     def _candidate_form_specs(self):
         return [
             {"kind": "section", "label": "Personal info"},
@@ -1565,33 +1924,70 @@ class CandidateDbTool(BaseTool):
             {"key": "email", "label": "Email", "kind": "text"},
             {"key": "phone", "label": "Phone", "kind": "text"},
             {"key": "date_of_birth", "label": "Date of birth (dd/mm/yyyy)", "kind": "text"},
+            {"key": "gender", "label": "Gender", "kind": "choice",
+             "choices": cv_schema.GENDER_CHOICES, "allow_empty": True},
             {"key": "address", "label": "Address", "kind": "text"},
+            {"key": "city", "label": "City / province", "kind": "text"},
+
+            {"kind": "section", "label": "Professional profile"},
+            {"key": "current_title", "label": "Current job title", "kind": "text"},
+            {"key": "industry", "label": "Industry", "kind": "text"},
+            {"key": "years_experience", "label": "Years of experience (at CV date)",
+             "kind": "decimal"},
+            {"key": "experience_as_of", "label": "…as of date (yyyy-mm-dd)", "kind": "text"},
+            {"key": "education", "label": "Education", "kind": "text"},
+            {"key": "major", "label": "Major", "kind": "text"},
+            {"key": "languages", "label": "Languages (separate with ;)", "kind": "text"},
+            {"key": "skills_text", "label": "Skills (separate with ;)",
+             "kind": "textarea", "height": 3},
+            {"key": "profile_summary", "label": "Profile summary",
+             "kind": "textarea", "height": 3},
+
+            {"kind": "section", "label": "Expectations"},
+            {"key": "expected_salary", "label": "Expected salary (number)", "kind": "decimal"},
+            {"key": "salary_note", "label": "Salary note (gross/net, range…)", "kind": "text"},
+            {"key": "available_from", "label": "Available from (yyyy-mm-dd)", "kind": "text"},
+            {"key": "willing_to_relocate", "label": "Willing to relocate",
+             "kind": "choice", "choices": cv_schema.RELOCATE_CHOICES, "allow_empty": True},
+            {"key": "preferred_location", "label": "Preferred location", "kind": "text"},
+
             {"kind": "section", "label": "Application"},
             {"key": "position_id", "label": "Position applied for", "kind": "dropdown",
              "options": _position_options},
-            {"key": "years_experience", "label": "Years of experience", "kind": "int"},
-            {"key": "education", "label": "Education", "kind": "text"},
-            {"key": "applied_at", "label": "Applied date (yyyy-mm-dd)", "kind": "text"},
             {"key": "status", "label": "Status", "kind": "choice",
-             "choices": cv_schema.CANDIDATE_STATUS_CHOICES},
-            {"key": "source", "label": "CV source", "kind": "text"},
-            {"key": "batch", "label": "Batch (scan round — number)", "kind": "int"},
-            {"key": "cv_file_path", "label": "CV file (local path)", "kind": "file",
-             "filetypes": [("PDF/Word", "*.pdf *.doc *.docx"), ("All files", "*.*")]},
-            {"kind": "section", "label": "Assessment (from CV scan)"},
-            {"key": "fit_score", "label": "Fit score (0-100)", "kind": "decimal"},
-            {"key": "fit_summary", "label": "Fit summary", "kind": "textarea", "height": 3},
-            {"key": "strengths", "label": "Strengths", "kind": "textarea", "height": 3},
-            {"key": "weaknesses", "label": "Weaknesses", "kind": "textarea", "height": 3},
+             "choices": cv_schema.CANDIDATE_STATUS_CHOICES, "allow_empty": True},
+            {"key": "final_status", "label": "Result", "kind": "choice",
+             "choices": cv_schema.FINAL_STATUS_CHOICES, "allow_empty": True},
+            {"key": "applied_at", "label": "Applied date (yyyy-mm-dd)", "kind": "text"},
+            {"key": "phone_screen_date", "label": "Phone screen date (yyyy-mm-dd)",
+             "kind": "text"},
+
+            {"kind": "section", "label": "Talent pool"},
+            {"key": "pool_status", "label": "Pool status", "kind": "choice",
+             "choices": cv_schema.POOL_STATUS_CHOICES, "allow_empty": True},
+            {"key": "source", "label": "Source", "kind": "text"},
             {"key": "note", "label": "Note", "kind": "textarea", "height": 3},
         ]
+
+    @classmethod
+    def _split_form_data(cls, data):
+        """Dict từ form → (phần ứng viên, phần đơn ứng tuyển)."""
+        app = {k: data[k] for k in cls._APPLICATION_KEYS if k in data}
+        candidate = {k: v for k, v in data.items() if k not in cls._APPLICATION_KEYS}
+        return candidate, app
 
     def _add(self):
         def _save(data):
             dups = repo.find_duplicates(data.get("email"), data.get("phone"))
             if dups and not self._confirm_duplicate(dups):
                 return False
-            repo.insert_candidate(data)
+            candidate, app = self._split_form_data(data)
+            cid = repo.insert_candidate(candidate)
+            # Có chọn vị trí thì mở luôn một đơn ứng tuyển — trạng thái tuyển
+            # dụng chỉ tồn tại trên đơn, không nằm ở hồ sơ ứng viên.
+            if app.get("position_id"):
+                app["candidate_id"] = cid
+                repo.insert_application(app)
             self._reload()
 
         FormDialog(self._root, "Add candidate",
@@ -1602,13 +1998,26 @@ class CandidateDbTool(BaseTool):
             cid = self._selected_id()
         if cid is None:
             return
-        current = repo.get_candidate(cid)
+        # Bản ghi đầy đủ = hồ sơ ứng viên + đơn mới nhất, để form điền sẵn cả hai.
+        current = repo.get_candidate_full(cid)
 
         def _save(data):
             dups = repo.find_duplicates(data.get("email"), data.get("phone"), exclude_id=cid)
             if dups and not self._confirm_duplicate(dups):
                 return False
-            repo.update_candidate(cid, data)
+            candidate, app = self._split_form_data(data)
+            repo.update_candidate(cid, candidate)
+            existing = repo.latest_application(cid)
+            if existing is not None:
+                # Đổi trạng thái qua set_application_status để lịch sử ghi lại
+                # được bước chuyển; các ô còn lại cập nhật thẳng.
+                status = app.pop("status", None)
+                repo.update_application(existing["application_id"], app)
+                if status and status != (existing["status"] or ""):
+                    repo.set_application_status(existing["application_id"], status)
+            elif app.get("position_id"):
+                app["candidate_id"] = cid
+                repo.insert_application(app)
             self._reload()
 
         FormDialog(self._root, "Edit candidate",
@@ -1646,8 +2055,7 @@ class CandidateDbTool(BaseTool):
             self._open_cv(cid)
 
     def _open_cv(self, cid):
-        row = repo.get_candidate(cid)
-        path = (row["cv_file_path"] or "").strip() if row else ""
+        path = repo.candidate_cv_path(cid)
         if path and os.path.isfile(path):
             self._launch(path)
             return

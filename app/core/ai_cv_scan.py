@@ -1,16 +1,23 @@
-"""Quét CV bằng AI (Google Gemini) → xuất bảng đánh giá ứng viên ra Excel.
+"""Quét CV bằng AI (Google Gemini) → hồ sơ có cấu trúc + điểm phù hợp với JD.
 
-Khác với tool "Quét CV" (chỉ dùng regex để tách Email/SĐT), tool này gửi
-NGUYÊN file PDF cho mô hình Gemini để đọc hiểu và trả về:
-    • Họ tên, ngày sinh, email, số điện thoại
-    • Mức độ phù hợp với JD (điểm 0–100 + nhận xét)
-    • Ưu điểm / nhược điểm của ứng viên
+Một lần gọi API trả về BA phần tách bạch (xem `_RESPONSE_SCHEMA`):
+
+    profile     — mô tả CON NGƯỜI, TRUNG TÍNH với mọi JD: họ tên, liên hệ, chức
+                  danh gần nhất, ngành, học vấn, kỹ năng, nguyện vọng… Đây là
+                  phần dùng lại được mãi: có yêu cầu tuyển dụng mới thì tìm
+                  trong pool bằng chính dữ liệu này, không phải đọc lại PDF.
+    experiences — DÒNG THỜI GIAN công việc (ngày vào – ngày ra) để tính lại số
+                  năm kinh nghiệm ở bất kỳ thời điểm nào về sau.
+    evaluation  — mức độ phù hợp với ĐÚNG JD của lần quét này (điểm 0–100,
+                  nhận xét, kỹ năng khớp/thiếu). Phần này gắn chặt với JD nên
+                  lưu vào bảng lịch sử `candidate_evaluations`, không lưu vào
+                  hồ sơ ứng viên.
 
 Cách hoạt động:
     1. Đọc từng file PDF trong thư mục → mã hóa base64.
-    2. Gọi Gemini REST API (generateContent) kèm JD làm ngữ cảnh, yêu cầu
-       trả về JSON có cấu trúc (responseSchema).
-    3. Gom kết quả tất cả CV → ghi ra một file Excel (openpyxl).
+    2. Gọi Gemini REST API (generateContent) kèm JD làm ngữ cảnh, yêu cầu trả
+       về JSON có cấu trúc (responseSchema).
+    3. Ghi kết quả vào DB (xem app_qt/tools/ai_scan_cv.py).
 
 Chỉ dùng thư viện chuẩn để gọi API (urllib) nên KHÔNG cần cài thêm gói.
 Cần: một API key Gemini (https://aistudio.google.com/apikey) và kết nối mạng.
@@ -55,26 +62,89 @@ _API_URL = (
 # Schema JSON mà Gemini phải tuân theo khi trả kết quả cho mỗi CV. Mọi mô tả
 # đều viết tiếng Anh vì đây là phần "prompt" gửi thẳng lên API — thống nhất
 # ngôn ngữ với phần yêu cầu ở _build_prompt (respond entirely in English).
+#
+# CHIA BA PHẦN có chủ đích: `profile` + `experiences` mô tả con người (dùng lại
+# được cho mọi vị trí về sau), `evaluation` chỉ đúng với JD của lần quét này.
+_PROFILE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "name":  {"type": "STRING", "description": "Candidate's full name"},
+        "dob":   {"type": "STRING", "description": "Date of birth (dd/mm/yyyy if available)"},
+        "email": {"type": "STRING"},
+        "phone": {"type": "STRING", "description": "Phone number"},
+        "gender": {"type": "STRING", "description": "Male / Female / Other"},
+        "address": {"type": "STRING"},
+        "city":  {"type": "STRING", "description": "Province or city they live in"},
+        "current_title": {"type": "STRING", "description": "Most recent job title"},
+        "industry": {"type": "STRING", "description": "Industry they have worked in"},
+        "years_experience": {"type": "NUMBER",
+                             "description": "Total years of work experience as stated in the CV"},
+        "education": {"type": "STRING", "description": "Highest education level"},
+        "major": {"type": "STRING", "description": "Field of study"},
+        "languages": {"type": "STRING",
+                      "description": "Languages with level, separated by ';'"},
+        "skills": {"type": "ARRAY", "items": {"type": "STRING"},
+                   "description": "Skills exactly as written in the CV, one per item"},
+        "profile_summary": {"type": "STRING",
+                            "description": "2-3 neutral sentences describing the candidate. "
+                                           "Never mention the job description."},
+        "expected_salary": {"type": "STRING",
+                            "description": "Expected salary if the CV states one"},
+        "available_from": {"type": "STRING",
+                           "description": "Earliest start date if the CV states one"},
+    },
+    "required": ["name", "dob", "email", "phone", "current_title",
+                 "years_experience", "skills", "profile_summary"],
+}
+
+_EXPERIENCE_SCHEMA = {
+    "type": "ARRAY",
+    "description": "Every job in the CV, most recent first",
+    "items": {
+        "type": "OBJECT",
+        "properties": {
+            "company":   {"type": "STRING"},
+            "job_title": {"type": "STRING"},
+            "industry":  {"type": "STRING"},
+            "start_date": {"type": "STRING",
+                           "description": "yyyy-mm-dd; use the 1st when only month/year is given"},
+            "end_date":  {"type": "STRING",
+                          "description": "yyyy-mm-dd; leave empty if this is the current job"},
+            "is_current": {"type": "BOOLEAN",
+                           "description": "true if the candidate still worked here when writing the CV"},
+            "description": {"type": "STRING", "description": "What they did there, one or two lines"},
+        },
+        "required": ["company", "job_title", "start_date"],
+    },
+}
+
+_EVALUATION_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "fit_score":   {"type": "INTEGER", "description": "How well the candidate fits the JD, 0-100"},
+        "fit_summary": {"type": "STRING", "description": "Short remark on why they fit / don't fit"},
+        "strengths":   {"type": "STRING", "description": "Key strengths (short bullet points)"},
+        "weaknesses":  {"type": "STRING", "description": "Weaknesses / gaps compared to the JD"},
+        "matched_skills": {"type": "STRING",
+                           "description": "Skills the JD asks for AND the candidate has, separated by ';'"},
+        "missing_skills": {"type": "STRING",
+                           "description": "Skills the JD asks for but the candidate lacks, separated by ';'"},
+    },
+    "required": ["fit_score", "fit_summary", "strengths", "weaknesses"],
+}
+
 _RESPONSE_SCHEMA = {
     "type": "OBJECT",
     "properties": {
-        "name":       {"type": "STRING", "description": "Candidate's full name"},
-        "dob":        {"type": "STRING", "description": "Date of birth (dd/mm/yyyy if available)"},
-        "email":      {"type": "STRING"},
-        "phone":      {"type": "STRING", "description": "Phone number"},
-        "fit_score":  {"type": "INTEGER", "description": "How well the candidate fits the JD, 0-100"},
-        "fit_summary": {"type": "STRING", "description": "Short remark on why they fit / don't fit"},
-        "strengths":  {"type": "STRING", "description": "Key strengths (short bullet points)"},
-        "weaknesses": {"type": "STRING", "description": "Weaknesses / gaps compared to the JD"},
+        "profile":     _PROFILE_SCHEMA,
+        "experiences": _EXPERIENCE_SCHEMA,
+        "evaluation":  _EVALUATION_SCHEMA,
     },
-    "required": [
-        "name", "dob", "email", "phone",
-        "fit_score", "fit_summary", "strengths", "weaknesses",
-    ],
+    "required": ["profile", "experiences", "evaluation"],
 }
 
-# Cột xuất ra Excel: (khóa trong JSON, tiêu đề hiển thị, độ rộng cột).
-# 'batch' = tên thư mục chứa CV (batch1, batch2…), do tool gán vào mỗi dòng.
+# Cột xuất ra Excel khi bỏ qua ứng viên trùng: (khóa sau khi làm phẳng bằng
+# `flatten_result`, tiêu đề hiển thị, độ rộng cột).
 _COLUMNS = [
     ("batch",       "Batch",         14),
     ("file",        "File name",     28),
@@ -83,11 +153,35 @@ _COLUMNS = [
     ("dob",         "Date of birth", 14),
     ("email",       "Email",         28),
     ("phone",       "Phone",         16),
+    ("current_title", "Current title", 24),
+    ("years_experience", "Years",    10),
+    ("skills",      "Skills",        46),
     ("fit_score",   "Fit score",     13),
     ("fit_summary", "Fit summary",   46),
     ("strengths",   "Strengths",     46),
     ("weaknesses",  "Weaknesses",    46),
 ]
+
+
+def flatten_result(data: dict) -> dict:
+    """Kết quả 3 tầng của Gemini → dict phẳng cho bảng Excel / hiển thị nhanh."""
+    profile = data.get("profile") or {}
+    evaluation = data.get("evaluation") or {}
+    flat = {k: data.get(k, "") for k in ("batch", "file", "cv_path")}
+    flat.update({
+        "name":  profile.get("name", ""),
+        "dob":   profile.get("dob", ""),
+        "email": profile.get("email", ""),
+        "phone": profile.get("phone", ""),
+        "current_title": profile.get("current_title", ""),
+        "years_experience": profile.get("years_experience", ""),
+        "skills": "; ".join(profile.get("skills") or []),
+        "fit_score":   evaluation.get("fit_score", ""),
+        "fit_summary": evaluation.get("fit_summary", ""),
+        "strengths":   evaluation.get("strengths", ""),
+        "weaknesses":  evaluation.get("weaknesses", ""),
+    })
+    return flat
 
 
 def read_jd_file(path: str) -> str:
@@ -122,17 +216,29 @@ def _build_prompt(jd: str, extra: str = "") -> str:
             "=== END OF ADDITIONAL INSTRUCTIONS ===\n"
         )
     return (
-        "You are a recruiter. Read the CV in the attached PDF carefully, extract "
-        "the candidate's information, and assess how well they fit the job "
-        "description (JD) below.\n\n"
+        "You are a recruiter. Read the CV in the attached PDF carefully and "
+        "return three separate things.\n\n"
+        "1. 'profile' — a description of the PERSON. This is stored in a talent "
+        "pool and reused for future openings, so it must be written as if no job "
+        "description existed. Never compare the candidate to the JD here.\n"
+        "2. 'experiences' — every job in the CV as a timeline with start and end "
+        "dates, so their years of experience can be recomputed at any later date.\n"
+        "3. 'evaluation' — how well they fit the job description below.\n\n"
         "=== JOB DESCRIPTION (JD) ===\n"
         f"{jd}\n"
         "=== END OF JD ===\n"
         f"{extra_block}\n"
         "Requirements:\n"
         "- Respond entirely in English.\n"
+        "- Leave a field as an empty string if it is not found in the CV; never "
+        "invent information.\n"
+        "- Dates use yyyy-mm-dd. When only a month and year are given, use the "
+        "1st of that month. Leave 'end_date' empty for the current job and set "
+        "'is_current' to true.\n"
+        "- 'skills' lists each skill exactly as written in the CV, one per item — "
+        "no grouping, no explanation.\n"
+        "- 'years_experience' is the total the CV itself supports, as a number.\n"
         "- 'fit_score' is an integer 0-100 for how well the CV matches the JD.\n"
-        "- Leave a field as an empty string if not found in the CV.\n"
         "- Write 'strengths' and 'weaknesses' as short one-line bullet points.\n"
         "Return only the JSON object matching the given schema."
     )
@@ -251,8 +357,15 @@ def _call_gemini_once(api_key: str, model: str, jd: str, pdf_bytes: bytes,
         data = json.loads(text)
     except ValueError:
         raise RuntimeError("The model returned invalid JSON.")
-    if isinstance(data, dict) and data.get("name"):
-        data["name"] = normalize_name(data["name"])
+    if not isinstance(data, dict):
+        raise RuntimeError("The model returned an unexpected JSON shape.")
+    # Chuẩn hóa ngay tại đây để mọi nơi dùng kết quả đều thấy dữ liệu sạch.
+    data.setdefault("profile", {})
+    data.setdefault("experiences", [])
+    data.setdefault("evaluation", {})
+    profile = data["profile"]
+    if isinstance(profile, dict) and profile.get("name"):
+        profile["name"] = normalize_name(profile["name"])
     return data
 
 

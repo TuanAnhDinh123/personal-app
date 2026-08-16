@@ -385,6 +385,7 @@ _EMP_COLUMN_SPECS = [
     ("by_group",            "By group",           "w"),
     ("labor_type",          "Type of labor",      "w"),
     ("smart_working_eligible", "Smart working",   "center"),
+    ("is_interviewer",      "Interviewer",        "center"),
     ("changing_notes",      "Changing notes",     "w"),
     ("changing_dates",      "Changing dates",     "w"),
     ("updated_changing_date", "Updated changing", "center"),
@@ -444,6 +445,7 @@ _EMP_COLUMN_GROUPS = [
         "facility_country", "facility_town", "local_function", "by_group",
         "labor_type", "production_line", "operator_skill", "driving_forklift",
         "working_hours_per_week", "smart_working_eligible", "er_jrf",
+        "is_interviewer",
     ]),
     ("Contract & working time", [
         "date_of_employment", "seniority_date", "contract_permanency",
@@ -1210,6 +1212,10 @@ class EmployeeDbTool(BaseTool):
             {"key": "smart_working_eligible",
              "label": "Smart working policy eligible", "kind": "text"},
             {"key": "er_jrf", "label": "#ER/JRF", "kind": "text"},
+            # Đánh dấu để lọc sẵn danh sách người phỏng vấn khi nhập kết quả
+            # phỏng vấn ứng viên (xem cv_repository.list_interviewers).
+            {"key": "is_interviewer", "label": "Interviews candidates",
+             "kind": "choice", "choices": ["1", "0"], "allow_empty": True},
 
             {"kind": "section", "label": "Contract & working time"},
             {"key": "date_of_employment", "label": "Date of employment (dd/mm/yyyy)",
