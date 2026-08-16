@@ -41,7 +41,9 @@ SECTION = "ai_scan_cv"
 DEFAULTS = {"folder": "", "position_id": None, "extra_prompt": ""}
 
 
-_SOURCE = "AI CV Scan"
+# Dấu "hồ sơ vào app bằng đường quét tự động" — không phải sàn cung cấp CV
+# (xem cv_schema.CANDIDATE_SOURCE_AUTO).
+_SOURCE = cv_schema.CANDIDATE_SOURCE_AUTO
 
 
 def _read_cv_text(path):

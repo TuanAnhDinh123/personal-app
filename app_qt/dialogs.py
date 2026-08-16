@@ -110,6 +110,18 @@ def error(parent, title, message):
     return AppDialog(parent, title, message, "error").run()
 
 
+def choose(parent, title, message, options, kind="question", cancel_label="Cancel"):
+    """Hộp thoại NHIỀU lựa chọn — `options` = [(nhãn, variant, giá trị)].
+
+    Trả về giá trị của nút được bấm; bấm Cancel hoặc đóng bằng ✕/Esc trả về ""
+    (nên đừng dùng "" làm giá trị cho lựa chọn nào). Dùng khi câu hỏi có hơn hai
+    lối đi, chỗ mà `confirm` (chỉ có/không) diễn đạt không đủ.
+    """
+    d = AppDialog(parent, title, message, kind,
+                  buttons=[(cancel_label, "neutral", ""), *options])
+    return d.run() or ""
+
+
 def confirm(parent, title, message, ok_label="OK", cancel_label="Cancel"):
     """Trả về True nếu người dùng bấm nút đồng ý."""
     d = AppDialog(parent, title, message, "question", buttons=[

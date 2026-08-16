@@ -37,7 +37,7 @@ Giao diện dựng bằng **PySide6 (Qt)** — phong cách dashboard sáng, side
   Python** (openpyxl / Excel COM / Gemini / SQLite / Outlook / OCR) nằm ở
   `app/core/` — hoàn toàn không phụ thuộc giao diện. Tool Qt chỉ là lớp vỏ gọi
   vào `app/core`.
-- **Component dùng chung** ở `app_qt/components/`: `table` (bảng), `form_dialog`
+- **Component dùng chung** ở `app_qt/components/`: `table` (bảng, có menu chuột phải tùy biến), `form_dialog`
   (form nhập liệu), `crud_panel` (CRUD master data), `progress_dialog` &
   `task` (chạy nền QThread), `dialog_base` (khung hộp thoại).
 
@@ -68,7 +68,8 @@ personal-app/
     ├── payroll_split.py                  # Tách bảng lương (Excel COM)
     ├── quarter_bonus.py                  # Thưởng quý (Excel COM)
     ├── ai_cv_scan.py                     # Quét CV bằng Gemini
-    ├── cv_scan.py                        # Chuẩn hóa tên file CV + template Excel
+    ├── cv_scan.py                        # Chuẩn hóa tên file CV + trích text CV
+    ├── candidate_export.py               # Xuất sheet "Candidates" ra Excel
     ├── pdf_text.py                       # PDF → Markdown (+ OCR bằng Gemini)
     └── reminder_logic.py                 # Helper nhắc phản hồi phỏng vấn
 ```
@@ -200,9 +201,26 @@ Department · Status · Batch*, **bảng kết quả** có cột tick chọn, v�
 | **View details** | có (1 hoặc nhiều) | mở modal xem chi tiết từng hồ sơ |
 | **Update status** | có | đổi trạng thái hàng loạt (xem bên dưới) |
 | **Send email** | có | mời phỏng vấn / gửi thư cảm ơn qua Outlook (xem bên dưới) |
-| **Export to Excel** | có | xuất các hồ sơ đã tick ra `.xlsx` (file đã có thì **ghi nối thêm**) |
+| **Export to Excel** | có | xuất các hồ sơ đã tick ra `.xlsx` (tên file trùng thì **hỏi nối thêm hay ghi đè**) |
 | **Add** | không | thêm hồ sơ nhập tay |
 | **Reload** | không | tải lại bảng |
+
+**Chuột phải trên bảng** có thêm **Update source…** (ngoài *Copy* / *Copy row*
+dùng chung): mở popup nhỏ, chọn **sàn cung cấp CV** rồi ghi một lượt cho **mọi hồ
+sơ đang tick**. Ô chọn **gõ tay được** nên sàn mới chưa có trong
+`cv_schema.CANDIDATE_SOURCE_CHOICES` vẫn điền thẳng; các hồ sơ đang cùng một
+nguồn thì popup điền sẵn nguồn đó.
+
+> **Vì sao phải điền tay**: tool *AI CV Scan* quét cả thư mục nên **không thể
+> biết từng file CV lấy từ sàn nào** — nó chỉ đóng dấu
+> `cv_schema.CANDIDATE_SOURCE_AUTO` (`"AI CV Scan"`, nghĩa là *hồ sơ vào app bằng
+> đường quét tự động*). Cột **Source** của bảng hiện **trống** ở những dòng còn
+> mang dấu đó, nên nhìn là biết ngay hồ sơ nào chưa gán sàn.
+>
+> Cột `source` có ở **ba bảng** — `candidates` (biết đến từ đâu) · `applications`
+> (đơn này từ đâu) · `candidate_cvs` (bản CV này lấy ở đâu) — nên
+> `repo.set_candidate_source()` ghi **cả ba** trong một lượt (đơn đang hiển thị
+> trên dòng + bản CV `latest_cv_id`), tránh mỗi màn hình đọc ra một giá trị khác.
 
 *Add* nằm ở **cụm bên phải cạnh Reload**, tông neutral: toolbar chia hai vùng —
 trái là thao tác trên **các hồ sơ đang tick**, phải là thao tác **cấp trang**.
@@ -212,6 +230,56 @@ bấm *Delete* trong đó — cả hai không có nút riêng trên toolbar.
 
 - **Chống trùng**: khi thêm mới (hoặc sửa) ứng viên, nếu **trùng email hoặc SĐT**
   với người đã có, tool cảnh báo và cho quyết định vẫn lưu hay không.
+### Xuất Excel (nút *Export to Excel*)
+
+Sheet **Candidates** được **dựng thẳng bằng code**
+([app/core/candidate_export.py](app/core/candidate_export.py)), **không đọc file
+`.xlsx` mẫu nào** — trước đây phải mở file mẫu mang theo ~90 liên kết ngoài với
+15 MB XML cache, riêng bước mở đã mất ~9 giây; giờ xuất 166 hồ sơ hết dưới 1
+giây và file kết quả chỉ ~56 KB. Mọi ô là **chữ / số / ngày thuần** — không công
+thức, không liên kết ngoài.
+
+25 cột `A→Y`, lấy dữ liệu từ **đơn ứng tuyển mới nhất** của mỗi ứng viên:
+
+| Cột | Nguồn |
+|-----|-------|
+| `A` Batch · `B` ID · `C` NAME | `candidate_cvs.batch` · mã bóc từ tên file CV (không có thì `candidate_id`) · `full_name` |
+| `D` APPLYING FOR · `E` SOURCE | `positions.position_title` (chưa gắn vị trí → tên bộ phận) · **nơi cung cấp CV** — nguồn của đơn, thiếu thì nguồn của ứng viên |
+| `F` EMAIL · `G` PHONE | `email` · `phone` (định dạng text, giữ số 0 đầu) |
+| `H` Score · `I` AI Evaluation | `ai_score` · **tóm tắt độ phù hợp** của lượt AI chấm mới nhất (chỉ `summary`, không kèm Strengths/Weaknesses) |
+| `J` STATUS · `K` Results | `applications.status` · `applications.final_status` |
+| `L` `M` PHONE SCREEN | `phone_screen_date` · ghi chú của HR trên đơn |
+| `N…Y` — 3 vòng phỏng vấn | mỗi vòng 4 cột: **ngày · người phỏng vấn · nhận xét · kết luận** |
+
+**Nhiều người phỏng vấn trong một vòng thì gộp vào MỘT ô**: cột *ASSIGNED
+INTERVIEWER* nối tên bằng dấu phẩy, cột *INTERVIEW EVALUATION* xếp mỗi người một
+đoạn `Tên (vai trò · kết luận): nhận xét` (kèm Strengths/Weaknesses nếu có), cách
+nhau một dòng trống, phía trên là *HR note* và *Panel summary* của buổi đó.
+
+> **SOURCE là SÀN cung cấp CV** (Itviec · VietnamWorks · LinkedIn · TopCV ·
+> Referral · headhunt…), không phải cách hồ sơ vào app. Hồ sơ do tool *AI CV
+> Scan* nạp mang dấu `cv_schema.CANDIDATE_SOURCE_AUTO` (`"AI CV Scan"`) ở cột
+> `source` — quét cả thư mục thì chưa biết CV lấy từ sàn nào — nên khi xuất
+> Excel ô này **để trống** cho HR chọn lại từ dropdown. Thêm sàn mới: sửa
+> `cv_schema.CANDIDATE_SOURCE_CHOICES`.
+
+Sheet còn có sẵn **ô chọn** cho các cột APPLYING FOR / SOURCE / STATUS / Results
+/ người phỏng vấn / kết luận từng vòng (danh sách nằm ở sheet ẩn `_Lists`, lấy từ
+DB và `cv_schema`; vẫn gõ tay được giá trị ngoài danh sách), **tô màu** trạng
+thái & kết luận, và **bôi đỏ email trùng**.
+
+**Trùng tên file thì được hỏi**, không âm thầm nối thêm nữa:
+
+| Nút | Việc |
+|-----|------|
+| **Append** | ghi tiếp phía dưới các dòng đã có; vùng ô chọn/tô màu tự nới theo |
+| **Overwrite** | thay hẳn file bằng đúng các hồ sơ vừa tick — **mất sạch nội dung cũ** |
+| **Cancel** | không đụng tới file |
+
+Hộp thoại của Windows chỉ hỏi được có/không nên tool truyền
+`DontConfirmOverwrite` rồi tự hỏi bằng `dialogs.choose()` — helper nhiều lựa chọn
+dùng chung, đóng bằng ✕/Esc coi như Cancel.
+
 - **Master data** tách thành nhóm **Master Data** riêng ở sidebar, gồm 7 trang:
   **Departments · Employee types · Levels · Cost centers · Positions ·
   Mail templates · Courses** — mỗi trang là một bảng + thanh

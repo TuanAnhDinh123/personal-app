@@ -803,11 +803,17 @@ FINAL_STATUS_DEFAULT = "Ongoing"
 # Đơn này từ đâu ra.
 APPLICATION_ORIGIN_CHOICES = ["Applied", "Pool search", "Referral"]
 
-# Nguồn ứng viên — nạp sẵn nhưng người dùng gõ thêm được.
+# NƠI CUNG CẤP CV: sàn tuyển dụng, headhunt, người giới thiệu… — nạp sẵn nhưng
+# người dùng gõ thêm được. Thêm sàn mới thì sửa thẳng list này.
 CANDIDATE_SOURCE_CHOICES = [
-    "Itviec", "LinkedIn", "Referral", "HH- PSK", "HH- Adecco",
-    "University", "Internal Sourced", "AI CV Scan",
+    "Itviec", "VietnamWorks", "LinkedIn", "TopCV", "Referral", "HH- PSK",
+    "HH- Adecco", "University", "Internal Sourced",
 ]
+
+# Tool "AI CV Scan" đóng dấu này vào cột `source` khi quét cả thư mục CV. Nó chỉ
+# nói hồ sơ vào app bằng ĐƯỜNG NÀO, chứ chưa biết CV lấy từ sàn nào — nên KHÔNG
+# phải nguồn thật và không nằm trong CANDIDATE_SOURCE_CHOICES.
+CANDIDATE_SOURCE_AUTO = "AI CV Scan"
 
 # ── Ứng viên trong pool (candidates.pool_status) ─────────────────────────
 # Chỉ `Active` mới lọt vào kết quả tìm kiếm mặc định. `Do Not Contact` là hàng

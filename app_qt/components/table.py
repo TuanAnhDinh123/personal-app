@@ -297,9 +297,12 @@ class DataTable(QTableView):
 
     def __init__(self, columns, pk=None, stretch_key=None, on_double=None,
                  link_keys=None, on_link=None, checkable=False, check_width=None,
-                 copy_keys=None, parent=None):
+                 copy_keys=None, menu_actions=None, parent=None):
         super().__init__(parent)
         self.hover_row = -1
+        # menu_actions: [(nhãn, hàm chạy)] — thao tác riêng của từng tool, hiện
+        # ở ĐẦU menu chuột phải, phía trên nhóm Copy dùng chung.
+        self._menu_actions = list(menu_actions) if menu_actions else []
         # copy_keys: thứ tự cột CỐ ĐỊNH khi copy cả dòng (xem _copy_columns).
         self._copy_keys = list(copy_keys) if copy_keys else None
         # checkable → chèn cột checkbox ở đầu (cần pk để nhớ dòng nào được tick).
@@ -543,6 +546,10 @@ class DataTable(QTableView):
         if not idx.isValid():
             return
         menu = QMenu(self)
+        for label, callback in self._menu_actions:
+            menu.addAction(label, callback)
+        if self._menu_actions:
+            menu.addSeparator()
         act = menu.addAction("Copy", lambda: self._copy(self._model._text(idx)))
         act.setShortcut(QKeySequence.Copy)
         rows = self._rows_to_copy(idx)

@@ -804,6 +804,38 @@ def update_candidate(candidate_id, data: dict) -> None:
         _sync_fts(conn, candidate_id)
 
 
+def set_candidate_source(candidate_id, source: str, application_id=None) -> None:
+    """Ghi NƠI CUNG CẤP CV (Itviec, VietnamWorks…) cho một ứng viên.
+
+    Cột `source` có ở ba bảng và mô tả cùng một sự việc dưới ba góc: ứng viên
+    biết đến từ đâu · đơn này đến từ đâu · bản CV này lấy ở đâu. Chúng phải khớp
+    nhau, nếu không mỗi màn hình lại đọc ra một giá trị khác — nên ghi cả ba
+    trong một lượt:
+
+      • `candidates.source`
+      • `applications.source` của đơn `application_id` (đơn đang hiển thị trên
+        bảng); bỏ trống thì không đụng tới đơn nào
+      • `candidate_cvs.source` của bản CV mới nhất (`candidates.latest_cv_id`)
+
+    AI quét CV không suy ra được thông tin này (quét cả thư mục thì không biết
+    file lấy từ sàn nào) nên đây là chỗ duy nhất điền — bằng tay.
+    """
+    source = (source or "").strip()
+    now = _now()
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE candidates SET source = ?, updated_at = ? WHERE candidate_id = ?",
+            (source, now, candidate_id))
+        if application_id:
+            conn.execute(
+                "UPDATE applications SET source = ?, updated_at = ? "
+                "WHERE application_id = ?", (source, now, application_id))
+        conn.execute(
+            "UPDATE candidate_cvs SET source = ?, updated_at = ? WHERE cv_id = "
+            "(SELECT latest_cv_id FROM candidates WHERE candidate_id = ?)",
+            (source, now, candidate_id))
+
+
 def delete_candidate(candidate_id) -> None:
     """Xóa ứng viên và MỌI dữ liệu con (CV, kinh nghiệm, đơn, phỏng vấn, lịch sử).
 
@@ -1362,6 +1394,50 @@ def list_interview_feedbacks(interview_id):
             "LEFT JOIN departments d ON d.department_id = e.department_id "
             "WHERE f.interview_id = ? "
             "ORDER BY f.feedback_id", (interview_id,)).fetchall()
+
+
+# Hai hàm dưới đây là bản "cả nhóm" của list_interviews / list_interview_feedbacks,
+# dùng khi xuất Excel hàng loạt: hỏi một lần cho mọi ứng viên đang chọn thay vì
+# lặp N lần. Chia mẻ vì SQLite giới hạn số tham số của một câu lệnh.
+_SQL_VAR_LIMIT = 500
+
+
+def _chunks(values, size=_SQL_VAR_LIMIT):
+    seq = list(values)
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+
+def list_interviews_by_candidates(candidate_ids):
+    """Mọi buổi phỏng vấn của một NHÓM ứng viên, mỗi vòng MỚI NHẤT trước."""
+    rows = []
+    with get_connection() as conn:
+        for chunk in _chunks(candidate_ids):
+            marks = ",".join("?" * len(chunk))
+            rows += conn.execute(
+                "SELECT i.* FROM interviews i "
+                f"WHERE i.candidate_id IN ({marks}) "
+                "ORDER BY i.candidate_id, i.round, "
+                "         COALESCE(i.interview_date, '') DESC, i.interview_id DESC",
+                list(chunk)).fetchall()
+    return rows
+
+
+def list_feedbacks_by_interviews(interview_ids):
+    """Nhận xét của MỌI buổi phỏng vấn trong danh sách, kèm tên người phỏng vấn."""
+    rows = []
+    with get_connection() as conn:
+        for chunk in _chunks(interview_ids):
+            marks = ",".join("?" * len(chunk))
+            rows += conn.execute(
+                "SELECT f.*, "
+                "  COALESCE(NULLIF(TRIM(e.full_name), ''), f.interviewer_name) AS display_name, "
+                "  e.job_title "
+                "FROM interview_feedbacks f "
+                "LEFT JOIN employees e ON e.employee_id = f.employee_id "
+                f"WHERE f.interview_id IN ({marks}) "
+                "ORDER BY f.interview_id, f.feedback_id", list(chunk)).fetchall()
+    return rows
 
 
 def get_interview_feedback(feedback_id):

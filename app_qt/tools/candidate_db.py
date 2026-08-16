@@ -15,7 +15,6 @@ trí chỉ TRỎ tới 3 mẫu, tương ứng 3 vòng phỏng vấn (cv_schema.I
 import os
 import re
 import unicodedata
-from pathlib import Path
 
 from PySide6.QtCore import QDate, QDateTime, QTime, Qt
 from PySide6.QtGui import QCursor, QTextDocument
@@ -24,13 +23,10 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QToolTip, QVBoxLayout, QWidget,
 )
 
+from app.core import candidate_export
 from app.core import cv_repository as repo
 from app.core import cv_schema
 from app.core import outlook
-from app.core.cv_scan import (
-    _open_existing_workbook, _open_template_workbook, _split_id_name,
-    _write_candidates,
-)
 from app_qt import dialogs, theme, widgets
 from app_qt.base_tool import BaseTool
 from app_qt.components.crud_panel import CrudTablePanel
@@ -62,6 +58,7 @@ CAND_COL_WIDTHS = {
     "position_title":  120,
     "ai_score":        60,
     "cv_file_path":    150,
+    "source":          110,
     "department_name": 130,
     "batch":           70,
     "status":          130,   # đủ chỗ cho nhãn dài nhất ("Fail Probation Period")
@@ -78,6 +75,15 @@ def _short(value, limit=60):
     """Rút gọn về một dòng cho ô bảng (rỗng → chuỗi rỗng)."""
     s = str(value or "").replace("\n", " ").strip()
     return (s[:limit] + "…") if len(s) > limit else s
+
+
+def _source_cell(value):
+    """Cột Source = SÀN cung cấp CV. Hồ sơ do tool quét AI nạp vào mang dấu
+    `CANDIDATE_SOURCE_AUTO` — đó là đường vào app chứ chưa phải sàn, nên hiện
+    dấu gạch để thấy ngay dòng nào còn phải điền tay (chuột phải → Update source).
+    """
+    text = str(value or "").strip()
+    return "" if not text or text == cv_schema.CANDIDATE_SOURCE_AUTO else text
 
 
 def _years_cell(value):
@@ -105,6 +111,7 @@ _CAND_COLUMNS = [
      lambda v: "" if v in (None, "") else str(int(float(v)))),
     ("cv_file_path",     "CV",            _W["cv_file_path"],     "w",
      lambda v: os.path.basename(str(v)) if v else ""),
+    ("source",           "Source",        _W["source"],           "w", _source_cell),
     ("department_name",  "Department",    _W["department_name"],  "w"),
     ("pool_status",      "Pool",          _W["pool_status"],      "center"),
     ("batch",            "Batch",         _W["batch"],            "center"),
@@ -1062,7 +1069,8 @@ class CandidateDbTool(BaseTool):
         self.table = DataTable(_CAND_COLUMNS, pk="candidate_id",
                                stretch_key="email", on_double=self._edit,
                                link_keys={"cv_file_path"}, on_link=self._on_file_link,
-                               checkable=True)
+                               checkable=True,
+                               menu_actions=[("Update source…", self._bulk_source)])
         lay.addWidget(self.table, 1)
 
         self.count_lbl = QLabel("")
@@ -1287,6 +1295,86 @@ class CandidateDbTool(BaseTool):
                 dialogs.success(
                     self._root, "Status updated",
                     f"Moved {len(rows)} candidate(s) to \"{status}\".")
+
+        foot = QHBoxLayout()
+        foot.addWidget(widgets.button(card, "OK", variant="primary", icon="check",
+                                      command=do_update))
+        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
+                                      command=dlg.reject))
+        foot.addStretch(1)
+        lay.addLayout(foot)
+        dlg.exec()
+
+    # ------------------------------------------ đổi NGUỒN CV hàng loạt
+    # Nguồn = SÀN cung cấp CV (Itviec · VietnamWorks · LinkedIn…). Tool quét CV
+    # bằng AI không suy ra được thông tin này — nó đọc cả thư mục nên không biết
+    # từng file lấy ở đâu — nên đây là chỗ điền tay duy nhất. Vào bằng CHUỘT PHẢI
+    # trên bảng (xem menu_actions của DataTable), không chiếm chỗ trên toolbar.
+    def _bulk_source(self):
+        rows = self.table.checked_rows()
+        if not rows:
+            dialogs.info(self._root, "Nothing selected",
+                         "Tick at least one candidate in the table to update source.")
+            return
+        self._ask_bulk_source(rows)
+
+    def _ask_bulk_source(self, rows):
+        """Popup nhỏ: chọn sàn cung cấp CV rồi ghi cho MỌI hồ sơ đang tick.
+
+        Ô chọn nhập tay được — sàn mới chưa có trong `cv_schema` vẫn điền thẳng.
+        Các hồ sơ đang cùng một nguồn thật thì điền sẵn nguồn đó.
+        """
+        dlg, card, lay = build_dialog_shell(
+            self._root, f"Update source — {len(rows)} candidate(s)")
+
+        hint = QLabel("Where did these CVs come from? Pick a job board / "
+                      "headhunter, or type a new one.")
+        hint.setObjectName("Hint")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+
+        combo = widgets.ComboBox(card)
+        combo.setEditable(True)
+        combo.addItems(cv_schema.CANDIDATE_SOURCE_CHOICES)
+        # Dấu "AI CV Scan" là đường hồ sơ vào app, không phải sàn → coi như chưa
+        # có nguồn, để ô trống thay vì điền sẵn một giá trị sai.
+        current = {s for s in (_txt(r, "source") for r in rows)
+                   if s and s != cv_schema.CANDIDATE_SOURCE_AUTO}
+        combo.setCurrentText(current.pop() if len(current) == 1 else "")
+        lay.addWidget(combo)
+
+        names = QLabel("• " + "\n• ".join(
+            _txt(r, "full_name") or f"#{r['candidate_id']}" for r in rows))
+        names.setObjectName("Hint")
+        names.setWordWrap(True)
+        sa = widgets.scroll_area(names)
+        sa.setMaximumHeight(dlg.modal_h)   # danh sách dài thì cuộn, ngắn thì vừa khít
+        lay.addWidget(sa, 1)
+
+        def do_update():
+            source = combo.currentText().strip()
+            if not source:
+                dialogs.warning(dlg, "No source",
+                                "Pick a source from the list or type one in.")
+                return
+            failed = []
+            for row in rows:
+                cid = row["candidate_id"]
+                try:
+                    # Ghi cả 3 cột `source` (ứng viên · đơn đang hiện trên bảng ·
+                    # bản CV mới nhất) để mọi màn hình đọc ra cùng một giá trị.
+                    repo.set_candidate_source(cid, source, self._app_id(row))
+                except Exception as exc:   # noqa: BLE001 — gom lỗi báo một lần
+                    failed.append(f"#{cid} — {exc}")
+            dlg.accept()
+            self._reload()
+            if failed:
+                dialogs.error(self._root, "Update failed",
+                              "Couldn't update:\n• " + "\n• ".join(failed))
+            else:
+                dialogs.success(
+                    self._root, "Source updated",
+                    f"Set {len(rows)} candidate(s) to \"{source}\".")
 
         foot = QHBoxLayout()
         foot.addWidget(widgets.button(card, "OK", variant="primary", icon="check",
@@ -1817,9 +1905,9 @@ class CandidateDbTool(BaseTool):
         return None
 
     # --------------------------------------------------- xuất Excel (các dòng đã tick)
-    # Dùng lại đúng logic "Quét CV → Trích xuất Excel": ghi vào template có sẵn
-    # (sheet "Candidates"). Chọn file MỚI → tạo theo template; chọn file CÓ SẴN
-    # đúng mẫu → ghi nối tiếp. (Tương lai gỡ tool "Quét CV", tính năng nằm ở đây.)
+    # Sheet "Candidates" được dựng thẳng bằng code (app.core.candidate_export),
+    # không đọc file .xlsx mẫu nào. Tên file MỚI → tạo mới; tên file ĐÃ CÓ → hỏi
+    # ghi nối tiếp hay ghi đè (xem _ask_overwrite).
     def _export_excel(self):
         if not _OPENPYXL_OK:
             dialogs.error(self._root, "Missing library",
@@ -1830,6 +1918,8 @@ class CandidateDbTool(BaseTool):
             dialogs.info(self._root, "Nothing selected",
                          "Tick at least one candidate in the table to export.")
             return
+        # DontConfirmOverwrite: hộp thoại của Windows chỉ hỏi được có/không, mà ở
+        # đây có tới ba lối đi (nối tiếp · ghi đè · hủy) nên tự hỏi lấy.
         path, _ = QFileDialog.getSaveFileName(
             self._root, "Export selected candidates to Excel", "Candidates.xlsx",
             "Excel (*.xlsx)", "", QFileDialog.Option.DontConfirmOverwrite)
@@ -1838,17 +1928,18 @@ class CandidateDbTool(BaseTool):
         if not path.lower().endswith(".xlsx"):
             path += ".xlsx"
 
-        export_rows = [self._to_export_row(r) for r in rows]
+        append = False
+        if os.path.isfile(path):
+            append = self._ask_overwrite(path)
+            if append is None:
+                return
+
         self._set_export_loading(True)
         try:
-            if os.path.isfile(path):
-                wb, ws = _open_existing_workbook(path)
-                mode = "appended"
-            else:
-                wb, ws = _open_template_workbook()
-                mode = "new"
-            _write_candidates(ws, export_rows)
-            wb.save(path)
+            export_rows = candidate_export.rows_from_candidates(rows)
+            candidate_export.export(
+                path, export_rows,
+                dropdowns=candidate_export.dropdown_sources(), append=append)
         except PermissionError:
             dialogs.error(self._root, "Can't write file",
                           f"Is the Excel file open? Close it and retry:\n{path}")
@@ -1859,11 +1950,32 @@ class CandidateDbTool(BaseTool):
         finally:
             self._set_export_loading(False)
 
+        mode = "appended" if append else "new file"
         if dialogs.confirm(
                 self._root, "Done",
                 f"Exported {len(export_rows)} candidates ({mode}) to:\n{path}\n\nOpen now?",
                 ok_label="Open", cancel_label="Close"):
             self._launch(path)
+
+    def _ask_overwrite(self, path):
+        """File trùng tên → hỏi ghi nối tiếp hay ghi đè.
+
+        Trả về True (nối tiếp) / False (ghi đè) / None (hủy). Nối tiếp là lựa
+        chọn chính vì đó là cách dùng thường ngày — gom nhiều đợt lọc vào cùng
+        một bảng; ghi đè để tông cảnh báo vì nó XÓA dữ liệu cũ trong file.
+        """
+        name = os.path.basename(path)
+        choice = dialogs.choose(
+            self._root, "File already exists",
+            f'"{name}" already exists. What should we do?\n\n'
+            "• Append — add these candidates below the rows already in the file\n"
+            "• Overwrite — replace the file with only these candidates "
+            "(everything currently in it is lost)",
+            [("Append", "primary", "append"),
+             ("Overwrite", "warning", "overwrite")])
+        if not choice:
+            return None
+        return choice == "append"
 
     def _set_export_loading(self, loading):
         """Bật/tắt trạng thái 'đang xuất' cho nút Xuất Excel (khóa nút + đổi chữ).
@@ -1880,36 +1992,6 @@ class CandidateDbTool(BaseTool):
             btn.setText(getattr(self, "_export_label", "Export to Excel"))
             btn.setEnabled(True)
         QApplication.processEvents()
-
-    @staticmethod
-    def _to_export_row(row):
-        """Map 1 dòng ứng viên (DB) → dict theo template Candidates của cv_scan.
-
-        Cột template: batch · id · name · apply (bộ phận) · email · phone.
-        `id` (mã CV) bóc từ tên file CV nếu có dạng '<số>_<tên>'.
-        """
-        rec = {}
-        batch = _txt(row, "batch")
-        if batch:
-            rec["batch"] = int(batch) if batch.isdigit() else batch
-        name = _txt(row, "full_name")
-        if name:
-            rec["name"] = name
-        cv_path = _txt(row, "cv_file_path")
-        if cv_path:
-            cv_id, _ = _split_id_name(Path(cv_path).stem, [])
-            if cv_id:
-                rec["id"] = cv_id
-        dept = _txt(row, "department_name")
-        if dept:
-            rec["apply"] = dept
-        email = _txt(row, "email")
-        if email:
-            rec["email"] = email
-        phone = _txt(row, "phone")
-        if phone:
-            rec["phone"] = phone
-        return rec
 
     # ------------------------------------------------------------- form specs
     # Form nhập tay gộp HAI bảng: phần hồ sơ con người (`candidates`) và phần

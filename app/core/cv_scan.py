@@ -10,34 +10,21 @@ Tính năng đổi tên:
 Tính năng trích xuất:
   • Đọc nội dung từng file CV (PDF / DOCX)
   • Tách ID (mã CV) và Tên ứng viên từ tên file, dùng regex tìm Email/SĐT
-  • Xuất theo template Excel có sẵn (sheet "Candidates"):
-      – Chọn THƯ MỤC  → tạo file Excel mới theo template
-      – Chọn FILE .xlsx → nối tiếp dữ liệu vào sheet "Candidates"
-        (báo lỗi nếu file không có sheet này)
+
+Việc ghi ra Excel nằm ở `app.core.candidate_export`.
 """
-import datetime
 import html
 import os
 import re
-import sys
 import unicodedata
 import zipfile
 from pathlib import Path
-
-
-from app.core import config
 
 try:
     import fitz  # PyMuPDF — đọc text từ PDF
     _FITZ_OK = True
 except ImportError:
     _FITZ_OK = False
-
-try:
-    import openpyxl
-    _OPENPYXL_OK = True
-except ImportError:
-    _OPENPYXL_OK = False
 
 _CV_EXTENSIONS = {".pdf", ".doc", ".docx"}
 
@@ -60,17 +47,8 @@ DEFAULTS = {
 
 _NOISE_NUMBER = re.compile(r"^(?:20\d{2}|\d+)$")
 
-# ----- Template Excel (sheet "Candidates") -----
-_TEMPLATE_NAME = "template_cv.xlsx"
-CANDIDATES_SHEET = "Candidates"
-DATA_START_ROW = 12          # dòng dữ liệu đầu tiên (tiêu đề ở dòng 11)
-# Cột (1-based) trong sheet Candidates
-COL_BATCH = 1   # A  — Batch
-COL_ID    = 2   # B  — ID
-COL_NAME  = 3   # C  — NAME
-COL_APPLY = 4   # D  — APPLYING FOR (phòng ban)
-COL_EMAIL = 7   # G  — EMAIL ADDRESS
-COL_PHONE = 8   # H  — PHONE
+# Bố cục sheet "Candidates" và toàn bộ việc ghi Excel nằm ở
+# app/core/candidate_export.py — dựng thẳng bằng code, không còn file .xlsx mẫu.
 
 # Tên thư mục CV thường đặt là "batch 1", "batch 2"… → lấy số batch.
 _BATCH_RE = re.compile(r"batch[\s_\-]*0*(\d+)", re.IGNORECASE)
@@ -81,16 +59,6 @@ def _batch_from_folder(folder: str):
     name = os.path.basename(os.path.normpath(folder))
     m = _BATCH_RE.search(name)
     return int(m.group(1)) if m else None
-
-
-def _template_path() -> Path:
-    """Đường dẫn tới file template Excel, đúng cả khi chạy dev lẫn bản .exe."""
-    base = getattr(sys, "_MEIPASS", None)
-    if base:
-        p = Path(base) / "app" / _TEMPLATE_NAME
-        if p.exists():
-            return p
-    return Path(__file__).resolve().parent.parent / _TEMPLATE_NAME
 
 
 def _ascii_fold(s: str) -> str:
@@ -241,78 +209,6 @@ def _split_id_name(stem: str, noise_list: list[str]) -> tuple[str, str]:
     return "", _extract_name(norm, noise_list)
 
 
-def _next_empty_row(ws) -> int:
-    """Dòng trống đầu tiên (từ DATA_START_ROW) trong vùng dữ liệu ứng viên."""
-    row = DATA_START_ROW
-    while any(
-        ws.cell(row=row, column=c).value not in (None, "")
-        for c in (COL_ID, COL_NAME, COL_APPLY, COL_EMAIL, COL_PHONE)
-    ):
-        row += 1
-    return row
-
-
-def _write_candidates(ws, rows: list[dict]) -> None:
-    """Ghi danh sách ứng viên vào sheet Candidates, nối tiếp sau dữ liệu cũ.
-
-    Mọi ô được ghi đều chuẩn hóa về cùng một font: Aptos Display, cỡ 12,
-    căn trái.
-    """
-    from openpyxl.styles import Alignment, Border, Font, Side
-
-    cell_font   = Font(name="Aptos Display", size=12)
-    cell_align  = Alignment(horizontal="left")
-    _thin       = Side(style="thin", color="000000")
-    cell_border = Border(left=_thin, right=_thin, top=_thin, bottom=_thin)
-
-    start = _next_empty_row(ws)
-    # Kẻ khung cho toàn bộ cột từ A (1) đến W (23) của mỗi dòng được thêm.
-    border_cols = range(1, 24)
-    field_col = {
-        "batch": COL_BATCH, "id": COL_ID, "name": COL_NAME, "apply": COL_APPLY,
-        "email": COL_EMAIL, "phone": COL_PHONE,
-    }
-    for i, r in enumerate(rows):
-        row_no = start + i
-        # Kẻ border cho toàn bộ ô của dòng được thêm (kể cả ô để trống).
-        for col in border_cols:
-            ws.cell(row=row_no, column=col).border = cell_border
-        for field, col in field_col.items():
-            value = r.get(field, "")
-            if value:
-                cell = ws.cell(row=row_no, column=col, value=value)
-                cell.font = cell_font
-                cell.alignment = cell_align
-
-
 def _safe_filename(name: str) -> str:
     """Bỏ các ký tự không hợp lệ trong tên file Windows."""
     return re.sub(r'[<>:"/\\|?*]+', "_", name).strip() or "Candidates"
-
-
-# Cả hai hàm mở workbook đều dùng `keep_links=False`: file template (và các file
-# đã xuất trước đó) mang theo ~90 liên kết ngoài với vài MB dữ liệu cache mà app
-# không dùng tới — openpyxl phải parse lúc mở và ghi lại lúc lưu, tốn hàng chục
-# giây. Bỏ liên kết ngoài thì mở/lưu chỉ còn dưới một giây; các sheet, style,
-# merge và độ rộng cột giữ nguyên (không công thức nào trỏ ra file ngoài).
-def _open_template_workbook():
-    """Mở file template, trả về (workbook, worksheet Candidates)."""
-    tpl = _template_path()
-    if not tpl.exists():
-        raise FileNotFoundError(
-            f"Template file not found:\n{tpl}")
-    wb = openpyxl.load_workbook(tpl, keep_links=False)
-    if CANDIDATES_SHEET not in wb.sheetnames:
-        raise ValueError(
-            f"Template is missing the '{CANDIDATES_SHEET}' sheet.")
-    return wb, wb[CANDIDATES_SHEET]
-
-
-def _open_existing_workbook(path: str):
-    """Mở file Excel có sẵn để nối tiếp; báo lỗi nếu thiếu sheet Candidates."""
-    wb = openpyxl.load_workbook(path, keep_links=False)
-    if CANDIDATES_SHEET not in wb.sheetnames:
-        raise ValueError(
-            f"This Excel file has no '{CANDIDATES_SHEET}' sheet.\n"
-            "Choose a file that matches the template, or pick a folder to create a new one.")
-    return wb, wb[CANDIDATES_SHEET]
