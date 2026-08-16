@@ -5,11 +5,11 @@ Mỗi dòng là sqlite3.Row hoặc dict; cột khai báo bằng list (key, title
 """
 from PySide6.QtCore import QAbstractTableModel, QPointF, QRectF, Qt
 from PySide6.QtGui import (
-    QColor, QFont, QKeySequence, QPainter, QPainterPath, QPen, QRegion,
+    QColor, QCursor, QFont, QKeySequence, QPainter, QPainterPath, QPen, QRegion,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QHeaderView, QMenu, QStyle,
-    QStyledItemDelegate, QTableView,
+    QStyledItemDelegate, QTableView, QToolTip,
 )
 
 from app_qt import theme
@@ -88,6 +88,20 @@ def _is_number(s):
         return True
     except (TypeError, ValueError):
         return False
+
+
+def _tsv_cell(value):
+    """Đổi 1 giá trị → ô TSV để dán sang Excel.
+
+    Excel dán text thuần theo quy ước: TAB tách cột, xuống dòng tách dòng. Ô nào
+    tự nó chứa tab/xuống dòng (vd cột ghi chú) sẽ làm vỡ cả dòng sang ô/dòng
+    khác → bọc trong nháy kép (nháy kép bên trong nhân đôi). Excel hiểu quy ước
+    này khi dán nên nội dung giữ nguyên, không bị cắt.
+    """
+    s = "" if value is None else str(value)
+    if any(c in s for c in ("\t", "\n", "\r", '"')):
+        return '"' + s.replace('"', '""') + '"'
+    return s
 
 
 class DictTableModel(QAbstractTableModel):
@@ -283,9 +297,11 @@ class DataTable(QTableView):
 
     def __init__(self, columns, pk=None, stretch_key=None, on_double=None,
                  link_keys=None, on_link=None, checkable=False, check_width=None,
-                 parent=None):
+                 copy_keys=None, parent=None):
         super().__init__(parent)
         self.hover_row = -1
+        # copy_keys: thứ tự cột CỐ ĐỊNH khi copy cả dòng (xem _copy_columns).
+        self._copy_keys = list(copy_keys) if copy_keys else None
         # checkable → chèn cột checkbox ở đầu (cần pk để nhớ dòng nào được tick).
         self._checkable = bool(checkable)
         self._check_col = 0 if self._checkable else -1
@@ -475,7 +491,46 @@ class DataTable(QTableView):
     def _copy(value):
         QApplication.clipboard().setText(str(value))
 
+    def _copy_columns(self):
+        """Khóa các cột lấy khi copy CẢ DÒNG.
+
+        Tool có khai báo `copy_keys` → dùng đúng danh sách đó: số cột & thứ tự
+        CỐ ĐỊNH, không đổi theo việc người dùng ẩn/hiện cột trên UI (bên nhận là
+        file Excel có bố cục cố định). Không khai báo → lấy các cột đang hiện.
+        """
+        return self._copy_keys if self._copy_keys is not None else self.visible_keys()
+
+    def _rows_to_copy(self, index):
+        """Dòng nào được copy: các dòng ĐANG TICK (giữ nguyên thứ tự trong
+        bảng); chưa tick dòng nào thì lấy dòng đang trỏ tới."""
+        rows = self._model.checked_rows()
+        if rows:
+            return rows
+        row = self._model.row_at(index.row())
+        return [row] if row is not None else []
+
+    def _copy_rows(self, rows):
+        """Đưa `rows` lên clipboard dạng TSV — dán vào Excel là trải đúng ô.
+
+        Giá trị lấy THẲNG TỪ DỮ LIỆU DÒNG (kết quả truy vấn), không qua
+        formatter hiển thị của bảng. Khóa `None` trong `copy_keys` → ô trống,
+        dùng để chừa chỗ cho cột công thức bên file Excel đích.
+        """
+        keys = self._copy_columns()
+        text = "\n".join(
+            "\t".join(_tsv_cell(_cell(row, key) if key else "") for key in keys)
+            for row in rows)
+        QApplication.clipboard().setText(text)
+        QToolTip.showText(QCursor.pos(),
+                          f"Copied {len(rows)} row{'s' if len(rows) > 1 else ''}",
+                          self)
+
     def keyPressEvent(self, e):
+        if e.key() == Qt.Key_C and e.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier):
+            idx = self.currentIndex()
+            if idx.isValid():
+                self._copy_rows(self._rows_to_copy(idx))
+            return
         if e.matches(QKeySequence.Copy):
             idx = self.currentIndex()
             if idx.isValid():
@@ -490,6 +545,11 @@ class DataTable(QTableView):
         menu = QMenu(self)
         act = menu.addAction("Copy", lambda: self._copy(self._model._text(idx)))
         act.setShortcut(QKeySequence.Copy)
+        rows = self._rows_to_copy(idx)
+        if rows:
+            label = "Copy row" if len(rows) == 1 else f"Copy {len(rows)} rows"
+            act = menu.addAction(label, lambda: self._copy_rows(rows))
+            act.setShortcut(QKeySequence("Ctrl+Shift+C"))
         menu.exec(self.viewport().mapToGlobal(pos))
 
     def mouseMoveEvent(self, e):

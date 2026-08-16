@@ -66,6 +66,22 @@ def _num(value):
         return None
 
 
+def _dedupe_skills(names):
+    """Bỏ kỹ năng trùng, giữ cách viết xuất hiện trước ("AutoCAD" + "autocad" → 1).
+
+    Chỉ dọn phần chữ hiển thị; bảng `candidate_skills` còn gộp sâu hơn nữa nhờ
+    tra qua danh mục `skills` và các bí danh của nó.
+    """
+    seen, out = set(), []
+    for name in names or []:
+        text = " ".join(str(name).split())
+        key = text.lower()
+        if text and key not in seen:
+            seen.add(key)
+            out.append(text)
+    return out
+
+
 def _candidate_payload(profile, received_at):
     """Phần `profile` của AI → dict cột bảng `candidates`.
 
@@ -91,7 +107,7 @@ def _candidate_payload(profile, received_at):
         "education":        profile.get("education") or "",
         "major":            profile.get("major") or "",
         "languages":        profile.get("languages") or "",
-        "skills_text":      "; ".join(profile.get("skills") or []),
+        "skills_text":      "; ".join(_dedupe_skills(profile.get("skills"))),
         "profile_summary":  profile.get("profile_summary") or "",
         "expected_salary":  _num(salary_text),
         # Giữ nguyên chữ AI đọc được ("20tr gross", "thương lượng") — con số
@@ -158,7 +174,10 @@ def _save_result(data, position_id, model, extra, jd_hash, candidate_id=None):
     })
     repo.replace_candidate_experiences(
         candidate_id, cv_id, _experience_rows(data.get("experiences"), received_at))
-    repo.replace_candidate_skills(candidate_id, cv_id, profile.get("skills") or [])
+    # Chốt lại số năm kinh nghiệm theo dòng thời gian vừa ghi — con số AI tự
+    # ước lượng chỉ dùng khi CV không nêu được mốc thời gian nào.
+    repo.sync_experience_years(candidate_id, cv_id)
+    repo.replace_candidate_skills(candidate_id, cv_id, _dedupe_skills(profile.get("skills")))
 
     application_id = repo.ensure_application(candidate_id, position_id, {
         "cv_id": cv_id, "origin": "Applied", "source": _SOURCE,

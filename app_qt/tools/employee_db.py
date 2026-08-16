@@ -399,6 +399,68 @@ _EMP_COLUMN_SPECS = [
 _EMP_COLUMNS = [(key, title, _W.get(key, EMP_COL_WIDTH_DEFAULT), align)
                 for key, title, align in _EMP_COLUMN_SPECS]
 
+# ─────────────────────────────────────────────────────────────────────────
+#  THỨ TỰ CỘT KHI COPY DÒNG (chuột phải → Copy row) — chỉnh tùy ý ở đây.
+#
+#  Đây là danh sách ĐỘC LẬP với cột hiển thị: dữ liệu lấy thẳng từ kết quả
+#  truy vấn (repo.search_employees), nên người dùng ẩn/hiện cột trên UI KHÔNG
+#  làm đổi số cột hay thứ tự cột được copy — dán sang "Master HC file.xlsx"
+#  luôn khớp bố cục cố định của file.
+#
+#  Mỗi phần tử là KHÓA cột trong dòng dữ liệu: field của bảng `employees`, hoặc
+#  cột nối bảng/suy ra (department_name · level_name · cost_center_code ·
+#  cost_center_group · employee_type_code · collar · work_status).
+#  Dùng `None` để chừa MỘT Ô TRỐNG — cần cho các cột file Excel tự tính bằng
+#  công thức (STT, Birthday, Position status…) hoặc cột file có mà DB không
+#  lưu: có ô trống giữ chỗ thì các cột phía sau mới dán đúng vị trí.
+#
+#  Thứ tự dưới đây theo _EMP_COLUMN_SPECS (đã xếp theo cột của Master HC file),
+#  BỎ `employee_id` vì đó là id nội bộ của SQLite, file Excel không có cột này.
+# ─────────────────────────────────────────────────────────────────────────
+_EMP_COPY_COLUMNS = [
+    # định danh + họ tên
+    "none",
+    "code", "global_code", "full_name", "surname", "name", "middle_name",
+    # cá nhân · địa chỉ · liên hệ
+    "date_of_birth", "gender", "education", "address", "city", "country", "phone",
+    # tổ chức
+    "manager_name", "department_name", "cost_center_code", "cost_center_group",
+    "date_of_employment", "job_title", "facility_country", "facility_town",
+    # hợp đồng & thời gian làm việc
+    "contract_permanency", "work_time_type", "working_time_pct", "direct_indirect",
+    # nghỉ việc
+    "termination_date", "work_status", "leaving_reason",
+    # học vấn
+    "major", "graduation_year", "school_name",
+    # giấy tờ · ngân hàng · thuế · bảo hiểm
+    "place_of_birth", "id_no", "id_issued_date", "id_issued_place", "native_place",
+    "bank_account_no", "bank_address", "tax_code", "dependants",
+    "insurance_book_no", "passport_no", "passport_issued_date",
+    # liên hệ khẩn cấp · email · địa chỉ
+    "emergency_contact_name", "emergency_contact_phone",
+    "emergency_contact_relationship", "email", "company_email",
+    "permanent_address", "temporary_address",
+    # gia đình
+    "marriage_status", "children_count", "children_names", "children_birthdays",
+    "religion",
+    # trình độ · cấp bậc · công việc
+    "qualification", "qualification_code", "level_name", "operator_skill",
+    "driving_forklift", "working_hours_per_week", "production_line", "er_jrf",
+    # hợp đồng
+    "contract_type", "contract_start_date", "contract_end_date", "changing_date",
+    # hôn nhân · quốc tịch
+    "marital_status", "spouse_name", "spouse_dob", "nationality",
+    # số liệu file Excel tự tính (để trống nếu file đích có công thức sẵn)
+    "years_of_service", "education_field", "birth_year", "collar",
+    "employee_type_code", "age", "age_range", "length_of_service",
+    # phân loại khác
+    "local_function", "by_group", "labor_type", "smart_working_eligible",
+    "is_interviewer",
+    # ghi chú
+    "changing_notes", "changing_dates", "updated_changing_date", "note",
+    "seniority_date", "time_in_position", "current_position",
+]
+
 # Bảng có ~90 cột → UI KHÔNG hiện hết. Đây là các cột hiện MẶC ĐỊNH; người dùng
 # bật/tắt thêm ở modal "Columns" (lựa chọn được lưu lại).
 _EMP_DEFAULT_COLUMNS = [
@@ -602,7 +664,7 @@ class EmployeeDbTool(BaseTool):
         # nhưng thêm vào layout SAU để thứ tự hiển thị vẫn là: nút → bảng.
         self.table = DataTable(_EMP_COLUMNS, pk="employee_id",
                                stretch_key="email", on_double=self._edit,
-                               checkable=True)
+                               checkable=True, copy_keys=_EMP_COPY_COLUMNS)
         self._build_toolbar(lay)
         lay.addWidget(self.table, 1)
 

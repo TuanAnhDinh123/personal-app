@@ -1030,6 +1030,29 @@ def parse_date(value):
         return None
 
 
+def sync_experience_years(candidate_id, cv_id=None) -> dict:
+    """Tính lại số năm kinh nghiệm TỪ DÒNG THỜI GIAN rồi ghi đè ảnh chụp.
+
+    Con số AI tự ước lượng trong CV thường lệch với tổng các khoảng thời gian
+    thật (bỏ quên thực tập, cộng nhầm giai đoạn chồng nhau). Dòng thời gian có
+    ngày tháng cụ thể nên đáng tin hơn — lấy nó làm chuẩn để bảng danh sách và
+    màn hình chi tiết luôn hiện cùng một con số.
+
+    Không có dòng kinh nghiệm nào thì giữ nguyên con số AI đưa.
+    """
+    years = experience_years(candidate_id)
+    if not years["at_cv"]:
+        return years
+    data = {"years_experience": years["at_cv"]}
+    if years["as_of"]:
+        data["experience_as_of"] = years["as_of"]
+    update_candidate(candidate_id, data)
+    if cv_id:
+        with get_connection() as conn:
+            _update_conn(conn, "candidate_cvs", CANDIDATE_CV_FIELDS, cv_id, data)
+    return years
+
+
 def _merge_spans(spans):
     """Gộp các khoảng thời gian chồng nhau → tổng số ngày làm việc thực tế.
 
