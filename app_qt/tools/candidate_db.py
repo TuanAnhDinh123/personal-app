@@ -206,45 +206,6 @@ def _fmt_time_en(dt):
     return f"{hour12:02d}:{dt.minute:02d} {suffix}"
 
 
-def _picker_qss():
-    """QSS riêng cho lịch + ô giờ trong hộp chọn ngày giờ.
-
-    QSS toàn cục cho QTableView/::item bị QCalendarWidget kế thừa (khiến ô ngày
-    bị bo góc, đệm sai, header ngày/tuần co lại thành '…'). Ghi đè tại đây bằng
-    selector cụ thể hơn để lịch hiển thị gọn gàng, đúng tông màu app.
-    """
-    P = theme.PALETTE
-    return f"""
-    QCalendarWidget QWidget {{ alternate-background-color: {P['--input-bg']};
-        color: {P['--text']}; }}
-    QCalendarWidget QAbstractItemView {{
-        background: {P['--input-bg']}; color: {P['--text']};
-        selection-background-color: {P['--accent']}; selection-color: #ffffff;
-        outline: none; border: none; border-radius: 0;
-        gridline-color: transparent; padding: 2px;
-    }}
-    QCalendarWidget QAbstractItemView::item {{
-        border: none; border-radius: 8px; padding: 2px; }}
-    QCalendarWidget QAbstractItemView:disabled {{ color: {P['--text-faint']}; }}
-    QCalendarWidget QHeaderView::section {{
-        background: transparent; color: {P['--text-muted']};
-        border: none; padding: 4px 0; font-weight: 600; }}
-    QCalendarWidget #qt_calendar_navigationbar {{
-        background: {P['--card-bg']};
-        border-top-left-radius: 10px; border-top-right-radius: 10px; }}
-    QCalendarWidget QToolButton {{
-        color: {P['--text']}; background: transparent; font-size: 13px;
-        font-weight: 600; padding: 5px 12px; border-radius: 8px; margin: 3px; }}
-    QCalendarWidget QToolButton:hover {{ background: {P['--accent-soft']}; }}
-    QCalendarWidget QToolButton::menu-indicator {{ image: none; }}
-    QCalendarWidget QMenu {{ background: {P['--card-bg']}; color: {P['--text']};
-        border: 1px solid {P['--border-strong']}; border-radius: 8px; }}
-    QCalendarWidget QSpinBox {{ background: {P['--input-bg']}; color: {P['--text']};
-        border: 1px solid {P['--border-strong']}; border-radius: 8px;
-        padding: 2px 6px; }}
-    """
-
-
 def _dept_options():
     return {d["department_name"] or f"#{d['department_id']}": d["department_id"]
             for d in repo.list_departments()}
@@ -295,7 +256,13 @@ def _text_preview(value, limit=60):
 
 
 def _txt(row, key):
-    """Đọc row[key] an toàn (sqlite3.Row/dict) → chuỗi đã strip, None → ''."""
+    """Đọc row[key] an toàn → chuỗi đã strip. Cả `row` lẫn giá trị None đều ra ''.
+
+    Nhận cả `row=None` để form nhập dùng chung một đường cho bản ghi đã có và
+    bản ghi chưa tồn tại (vòng phỏng vấn chưa diễn ra → mọi ô rỗng).
+    """
+    if row is None:
+        return ""
     try:
         v = row[key]
     except (KeyError, IndexError):
@@ -969,7 +936,7 @@ class _CandidateDetailDialog(ModalDialog):
 
     # ------------------------------------------------------- các vòng phỏng vấn
     def _interview_box(self, parent, candidate_id):
-        """Từng vòng: kết luận + nhận xét của HR + nhận xét của từng người PV."""
+        """Từng vòng: kết luận chung + nhận xét của từng người phỏng vấn."""
         box, v = _section_box(parent, "Interviews", "users")
         rows = repo.list_interviews(candidate_id=candidate_id)
         if not rows:
@@ -997,10 +964,6 @@ class _CandidateDetailDialog(ModalDialog):
                     head.addWidget(_chip(box, value, color))
             v.addLayout(head)
 
-            if _txt(iv, "note"):
-                v.addLayout(self._para(box, "HR note", _txt(iv, "note")))
-            if _txt(iv, "summary"):
-                v.addLayout(self._para(box, "Panel summary", _txt(iv, "summary")))
             for fb in repo.list_interview_feedbacks(iv["interview_id"]):
                 who = _txt(fb, "display_name") or "(interviewer)"
                 bits = [b for b in (_txt(fb, "role"), _txt(fb, "job_title"),
@@ -1047,6 +1010,291 @@ class _CandidateDetailDialog(ModalDialog):
         return col
 
 
+# ═════════════ NHẬP NHANH (đúng các cột của file Excel xuất ra) ═════════
+# Form sửa hồ sơ đầy đủ có ~30 ô (thông tin cá nhân · hồ sơ nghề nghiệp · nguyện
+# vọng · đơn ứng tuyển) — quá dài cho việc thường xuyên nhất sau mỗi buổi phỏng
+# vấn: gõ lại nhận xét mà người phỏng vấn vừa gửi về. Hộp này chỉ giữ đúng những
+# ô có mặt trong file Excel (xem app/core/candidate_export.py) và bỏ các cột do
+# máy sinh ra: Batch · ID (bóc từ tên file CV) · Score & AI Evaluation (AI chấm,
+# sửa tay là hỏng lịch sử đánh giá).
+_ROUND_TITLES = ["1st interview", "2nd interview", "3rd interview"]
+
+
+class _FeedbackRow(QFrame):
+    """Một người phỏng vấn + nhận xét của họ, trong một vòng.
+
+    Ứng với MỘT dòng `interview_feedbacks`. Cột "INTERVIEW EVALUATION" của file
+    Excel là các dòng này nối lại, nên nhập tách từng người ở đây thì lúc xuất
+    mới ghép đúng tên với nhận xét tương ứng.
+
+    Chỉ chọn NGƯỜI, không nhập vai trò: người phỏng vấn lấy từ `employees` nên
+    chức danh và phòng ban đã có sẵn ở đó, hỏi lại là chép dữ liệu thừa.
+    """
+
+    def __init__(self, parent, interviewers, data=None):
+        super().__init__(parent)
+        self.setObjectName("AIBox")
+        self.feedback_id = _get_val(data, "feedback_id")
+        self._people = interviewers          # tên hiển thị → employee_id
+
+        col = QVBoxLayout(self)
+        col.setContentsMargins(12, 10, 12, 10)
+        col.setSpacing(6)
+
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        self.name = widgets.ComboBox(self)
+        self.name.addItems([""] + list(interviewers))
+        # Người đã lưu mà nay không còn trong danh sách (đã nghỉ việc, hoặc là
+        # khách mời) vẫn phải hiện đúng tên → thêm vào cuối danh sách.
+        saved = _txt(data, "display_name") or _txt(data, "interviewer_name")
+        if saved and self.name.findText(saved) < 0:
+            self.name.addItem(saved)
+        self.name.setCurrentText(saved)
+        head.addWidget(self.name, 3)
+
+        self.score = widgets.ComboBox(self)
+        self.score.addItems([""] + cv_schema.INTERVIEW_SCORE_CHOICES)
+        self.score.setCurrentText(_txt(data, "score"))
+        head.addWidget(self.score, 2)
+
+        head.addWidget(widgets.button(self, "", variant="neutral", icon="x",
+                                      command=self._remove), 0)
+        col.addLayout(head)
+
+        self.feedback = widgets.TextEdit(self)
+        self.feedback.setAcceptRichText(False)
+        self.feedback.setFixedHeight(66)
+        self.feedback.setPlaceholderText("What did they say about the candidate?")
+        self.feedback.setPlainText(_txt(data, "feedback"))
+        col.addWidget(self.feedback)
+
+    def _remove(self):
+        self.setParent(None)
+        self.deleteLater()
+
+    def value(self):
+        """dict để ghi xuống `interview_feedbacks`; None nếu dòng bỏ trống."""
+        name = self.name.currentText().strip()
+        text = self.feedback.toPlainText().strip()
+        if not name and not text:
+            return None
+        return {
+            "feedback_id":      self.feedback_id,
+            # Nối vào employees khi chọn người đang làm việc; tên lạ (khách mời,
+            # người đã nghỉ) chỉ lưu tên.
+            "employee_id":      self._people.get(name),
+            "interviewer_name": name or None,
+            "score":            self.score.currentText().strip() or None,
+            "feedback":         text or None,
+        }
+
+
+class _QuickEditDialog(ModalDialog):
+    """Nhập nhanh cho MỘT ứng viên: đơn ứng tuyển + 3 vòng phỏng vấn."""
+
+    def __init__(self, parent, row):
+        super().__init__(parent, "lg")
+        self._row = row
+        self._cid = row["candidate_id"]
+        self._app_id = _get_val(row, "application_id")
+        # tên hiển thị → employee_id, để nhận xét nối được vào `employees`.
+        self._interviewers = {e["full_name"]: e["employee_id"]
+                              for e in repo.list_interviewers() if e["full_name"]}
+        # Buổi phỏng vấn đã có của từng vòng — mỗi vòng nhiều nhất một buổi
+        # (chỉ mục duy nhất application_id + round).
+        self._rounds = {}
+        for iv in repo.list_interviews(candidate_id=self._cid):
+            self._rounds.setdefault(iv["round"] or 1, iv)
+        self._fb_rows = {}      # vòng → list _FeedbackRow đang hiện
+        self._fb_boxes = {}     # vòng → layout để chèn dòng mới vào
+
+        name = _txt(row, "full_name") or f"#{self._cid}"
+        card, lay = self.build_shell(f"Quick edit · {name}")
+
+        body = QWidget()
+        col = QVBoxLayout(body)
+        col.setContentsMargins(0, 0, 8, 0)
+        col.setSpacing(12)
+        col.addWidget(self._application_box(body))
+        for n in (1, 2, 3):
+            col.addWidget(self._round_box(body, n))
+        col.addStretch(1)
+        sa = widgets.scroll_area(body)
+        lay.addWidget(sa, 1)
+        self.set_grow_region(sa)
+
+        foot = QHBoxLayout()
+        foot.addWidget(widgets.button(card, "Save", variant="primary", icon="check",
+                                      command=self._save))
+        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
+                                      command=self.reject))
+        foot.addStretch(1)
+        lay.addLayout(foot)
+
+    # ------------------------------------------------------------ đơn ứng tuyển
+    def _application_box(self, parent):
+        box, v = _section_box(parent, "Application", "idcard")
+        if not self._app_id:
+            v.addWidget(_muted(box, "This candidate isn't linked to any position "
+                                    "yet. Double-click the row to open the full "
+                                    "form and pick a position first — interview "
+                                    "rounds hang off the application."))
+
+        # Vị trí ứng tuyển CHỈ ĐỂ XEM: đổi vị trí là đổi cả luồng tuyển dụng
+        # (JD, mẫu mail, các vòng đã có) nên chỉ làm ở form đầy đủ.
+        v.addLayout(_labeled(box, "Applying for",
+                             _readonly(box, _txt(self._row, "position_title"))))
+
+        two = QHBoxLayout()
+        two.setSpacing(12)
+        self.f_status = widgets.ComboBox(box)
+        self.f_status.addItems([""] + cv_schema.CANDIDATE_STATUS_CHOICES)
+        self.f_status.setCurrentText(_txt(self._row, "status"))
+        two.addLayout(_labeled(box, "Status", self.f_status), 1)
+
+        self.f_result = widgets.ComboBox(box)
+        self.f_result.addItems([""] + cv_schema.FINAL_STATUS_CHOICES)
+        self.f_result.setCurrentText(_txt(self._row, "final_status"))
+        two.addLayout(_labeled(box, "Result", self.f_result), 1)
+        v.addLayout(two)
+
+        self.f_ps_date = widgets.DateEdit(box)
+        self.f_ps_date.set(_txt(self._row, "phone_screen_date"))
+        v.addLayout(_labeled(box, "Phone screen date", self.f_ps_date))
+
+        self.f_ps_note = widgets.TextEdit(box)
+        self.f_ps_note.setAcceptRichText(False)
+        self.f_ps_note.setFixedHeight(60)
+        self.f_ps_note.setPlainText(_txt(self._row, "application_note"))
+        v.addLayout(_labeled(box, "Phone screen note", self.f_ps_note))
+        return box
+
+    # -------------------------------------------------------- một vòng phỏng vấn
+    def _round_box(self, parent, n):
+        interview = self._rounds.get(n)
+        box, v = _section_box(parent, _ROUND_TITLES[n - 1], "users")
+
+        two = QHBoxLayout()
+        two.setSpacing(12)
+        date = widgets.DateEdit(box)
+        date.set(_txt(interview, "interview_date"))
+        two.addLayout(_labeled(box, "Date", date), 1)
+
+        result = widgets.ComboBox(box)
+        result.addItems([""] + cv_schema.INTERVIEW_SCORE_CHOICES)
+        result.setCurrentText(_txt(interview, "overall_score"))
+        two.addLayout(_labeled(box, "Final result", result), 1)
+        v.addLayout(two)
+
+        setattr(self, f"f_r{n}_date", date)
+        setattr(self, f"f_r{n}_result", result)
+
+        head = QHBoxLayout()
+        lbl = QLabel("Interviewer feedback", box)
+        lbl.setObjectName("AILabel")
+        head.addWidget(lbl, 1)
+        head.addWidget(widgets.button(box, "Add interviewer", variant="neutral",
+                                      icon="plus",
+                                      command=lambda: self._add_feedback(n)))
+        v.addLayout(head)
+
+        holder = QVBoxLayout()
+        holder.setSpacing(8)
+        v.addLayout(holder)
+        self._fb_boxes[n] = holder
+        self._fb_rows[n] = []
+
+        existing = (repo.list_interview_feedbacks(interview["interview_id"])
+                    if interview else [])
+        for fb in existing:
+            self._add_feedback(n, fb)
+        if not existing:
+            self._add_feedback(n)      # sẵn một dòng trống để gõ ngay
+        return box
+
+    def _add_feedback(self, n, data=None):
+        row = _FeedbackRow(self, self._interviewers, data)
+        self._fb_boxes[n].addWidget(row)
+        self._fb_rows[n].append(row)
+
+    # ------------------------------------------------------------------- lưu
+    def _save(self):
+        """Ghi đơn ứng tuyển + 3 vòng phỏng vấn. Vòng trống trơn thì bỏ qua."""
+        try:
+            app_id = self._save_application()
+            for n in (1, 2, 3):
+                self._save_round(n, app_id)
+        except Exception as exc:   # noqa: BLE001 — báo một lần, giữ hộp thoại lại
+            dialogs.error(self, "Save failed", str(exc))
+            return
+        self.accept()
+
+    def _save_application(self):
+        """Cập nhật đơn ứng tuyển đang hiển thị; trả về application_id.
+
+        Không tạo đơn mới: vị trí ứng tuyển chỉ để xem ở hộp này nên chưa có đơn
+        thì cũng chưa biết gắn vào vị trí nào.
+        """
+        if not self._app_id:
+            return None
+        repo.update_application(self._app_id, {
+            "status":            self.f_status.currentText().strip() or None,
+            "final_status":      self.f_result.currentText().strip() or None,
+            "phone_screen_date": self.f_ps_date.get() or None,
+            "note":              self.f_ps_note.toPlainText().strip() or None,
+        })
+        return self._app_id
+
+    def _save_round(self, n, app_id):
+        """Ghi một vòng. Chưa có đơn thì không ghi được (buổi PV treo vào đơn)."""
+        entries = [v for v in (r.value() for r in self._fb_rows[n]) if v]
+        data = {
+            "interview_date": getattr(self, f"f_r{n}_date").get() or None,
+            "overall_score":  getattr(self, f"f_r{n}_result").currentText().strip() or None,
+        }
+        interview = self._rounds.get(n)
+        if not any(data.values()) and not entries and interview is None:
+            return                     # vòng chưa diễn ra → không tạo dòng rỗng
+        if not app_id:
+            raise ValueError(
+                f"{_ROUND_TITLES[n - 1]} needs an application — open the full form "
+                "(double-click the row) and pick a position first.")
+        data["candidate_id"] = self._cid
+        interview_id = repo.save_interview(app_id, n, data)
+        repo.save_interview_feedbacks(interview_id, entries)
+
+
+def _labeled(parent, text, widget):
+    """Nhãn nhỏ + ô nhập bên dưới. Trả về QVBoxLayout để nhét vào form."""
+    col = QVBoxLayout()
+    col.setSpacing(3)
+    lbl = QLabel(text, parent)
+    lbl.setObjectName("AILabel")
+    col.addWidget(lbl)
+    col.addWidget(widget)
+    return col
+
+
+def _readonly(parent, text):
+    """Ô CHỈ ĐỂ XEM: trông như ô nhập nhưng không sửa và không nhận focus."""
+    edit = QLineEdit(text or "—", parent)
+    edit.setReadOnly(True)
+    edit.setFocusPolicy(Qt.NoFocus)
+    edit.setDisabled(True)      # dùng luôn tông chữ mờ của QSS cho ô khoá
+    return edit
+
+
+def _get_val(row, key):
+    """row[key] an toàn cho sqlite3.Row / dict / None (giữ nguyên kiểu, không ép chuỗi)."""
+    if row is None:
+        return None
+    try:
+        return row[key]
+    except (KeyError, IndexError):
+        return None
+
+
 # ═══════════════════════════════ TOOL CHÍNH ═════════════════════════════
 class CandidateDbTool(BaseTool):
     name = "Candidate Manager"
@@ -1070,7 +1318,9 @@ class CandidateDbTool(BaseTool):
                                stretch_key="email", on_double=self._edit,
                                link_keys={"cv_file_path"}, on_link=self._on_file_link,
                                checkable=True,
-                               menu_actions=[("Update source…", self._bulk_source)])
+                               menu_actions=[
+                                   ("Quick edit (interview feedback)…", self._quick_edit),
+                                   ("Update source…", self._bulk_source)])
         lay.addWidget(self.table, 1)
 
         self.count_lbl = QLabel("")
@@ -1310,7 +1560,17 @@ class CandidateDbTool(BaseTool):
     # bằng AI không suy ra được thông tin này — nó đọc cả thư mục nên không biết
     # từng file lấy ở đâu — nên đây là chỗ điền tay duy nhất. Vào bằng CHUỘT PHẢI
     # trên bảng (xem menu_actions của DataTable), không chiếm chỗ trên toolbar.
-    def _bulk_source(self):
+    # ------------------------------------------- nhập nhanh (chuột phải 1 dòng)
+    def _quick_edit(self, candidate_id):
+        """Mở hộp nhập nhanh cho ĐÚNG dòng vừa bấm chuột phải (không cần tick)."""
+        row = next((r for r in self._rows
+                    if r["candidate_id"] == candidate_id), None)
+        if row is None:
+            return
+        if _QuickEditDialog(self._root, row).exec():
+            self._reload()
+
+    def _bulk_source(self, _candidate_id=None):
         rows = self.table.checked_rows()
         if not rows:
             dialogs.info(self._root, "Nothing selected",
@@ -1818,7 +2078,7 @@ class CandidateDbTool(BaseTool):
             second = first.addSecs(max(1800, prev_start.secsTo(prev_end)))
 
         cal = QCalendarWidget(card)
-        cal.setStyleSheet(_picker_qss())
+        cal.setStyleSheet(widgets.calendar_qss())
         cal.setGridVisible(False)
         cal.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)   # bỏ cột số tuần
         cal.setHorizontalHeaderFormat(QCalendarWidget.ShortDayNames)

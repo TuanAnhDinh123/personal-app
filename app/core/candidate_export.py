@@ -416,7 +416,7 @@ def _candidate_row(cand, rounds: dict, feedbacks_by_interview: dict) -> dict:
         record[f"r{n}_date"] = _date(_get(interview, "interview_date"))
         record[f"r{n}_interviewer"] = ", ".join(
             name for name in (_interviewer_name(fb) for fb in fbs) if name)
-        record[f"r{n}_eval"] = _interview_evaluation(interview, fbs)
+        record[f"r{n}_eval"] = _interview_evaluation(fbs)
         record[f"r{n}_result"] = _text(_get(interview, "overall_score"))
     return record
 
@@ -441,20 +441,13 @@ def _ai_evaluation(cand) -> str:
     return _text(_get(cand, "fit_summary"))
 
 
-def _interview_evaluation(interview, feedbacks) -> str:
+def _interview_evaluation(feedbacks) -> str:
     """Gộp nhận xét của MỌI người phỏng vấn trong một vòng vào một ô.
 
     Mỗi người một đoạn mở đầu bằng tên (kèm vai trò & kết luận nếu có), cách
-    nhau bằng dòng trống. Nhận xét của HR và tổng hợp hội đồng đứng trước.
+    nhau bằng dòng trống.
     """
-    if interview is None:
-        return ""
     blocks = []
-    for label, key in (("HR note", "note"), ("Panel summary", "summary")):
-        value = _text(_get(interview, key))
-        if value:
-            blocks.append(f"{label}: {value}")
-
     for fb in feedbacks:
         who = _interviewer_name(fb) or "(interviewer)"
         tags = " · ".join(t for t in (_text(_get(fb, "role")),

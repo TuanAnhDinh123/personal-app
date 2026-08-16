@@ -9,11 +9,11 @@ Khác biệt với bản Tk: mỗi hàm nhận `parent` là QWidget CÓ SẴN la
 """
 import os
 
-from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QDate, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFrame,
+    QCheckBox, QComboBox, QDateEdit, QFileDialog, QFrame,
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -54,6 +54,105 @@ class TextEdit(QTextEdit):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setTabChangesFocus(True)
+
+
+def calendar_qss():
+    """QSS cho QCalendarWidget — dùng cho lịch rời lẫn lịch bung của DateEdit.
+
+    QSS toàn cục của QTableView/::item bị QCalendarWidget kế thừa (ô ngày bị bo
+    góc, đệm sai, header ngày/tuần co thành '…'). Ghi đè bằng selector cụ thể
+    hơn để lịch gọn gàng, đúng tông màu app.
+    """
+    P = theme.PALETTE
+    return f"""
+    QCalendarWidget QWidget {{ alternate-background-color: {P['--input-bg']};
+        color: {P['--text']}; }}
+    QCalendarWidget QAbstractItemView {{
+        background: {P['--input-bg']}; color: {P['--text']};
+        selection-background-color: {P['--accent']}; selection-color: #ffffff;
+        outline: none; border: none; border-radius: 0;
+        gridline-color: transparent; padding: 2px;
+    }}
+    QCalendarWidget QAbstractItemView::item {{
+        border: none; border-radius: 8px; padding: 2px; }}
+    QCalendarWidget QAbstractItemView:disabled {{ color: {P['--text-faint']}; }}
+    QCalendarWidget QHeaderView::section {{
+        background: transparent; color: {P['--text-muted']};
+        border: none; padding: 4px 0; font-weight: 600; }}
+    QCalendarWidget #qt_calendar_navigationbar {{
+        background: {P['--card-bg']};
+        border-top-left-radius: 10px; border-top-right-radius: 10px; }}
+    QCalendarWidget QToolButton {{
+        color: {P['--text']}; background: transparent; font-size: 13px;
+        font-weight: 600; padding: 5px 12px; border-radius: 8px; margin: 3px; }}
+    QCalendarWidget QToolButton:hover {{ background: {P['--accent-soft']}; }}
+    QCalendarWidget QToolButton::menu-indicator {{ image: none; }}
+    QCalendarWidget QMenu {{ background: {P['--card-bg']}; color: {P['--text']};
+        border: 1px solid {P['--border-strong']}; border-radius: 8px; }}
+    QCalendarWidget QSpinBox {{ background: {P['--input-bg']}; color: {P['--text']};
+        border: 1px solid {P['--border-strong']}; border-radius: 8px;
+        padding: 2px 6px; }}
+    """
+
+
+class DateEdit(QDateEdit):
+    """Ô chọn ngày có lịch bung ra, và ĐỂ TRỐNG được.
+
+    QDateEdit luôn phải mang một ngày nào đó, nên `EMPTY` (ngày nhỏ nhất) đóng
+    vai "chưa nhập" và `specialValueText` cho nó hiển thị thành ô rỗng — nhờ vậy
+    vòng phỏng vấn chưa diễn ra không bị điền sẵn một ngày vô nghĩa.
+
+    Đọc/ghi bằng `.get()` / `.set()` theo chuỗi `yyyy-mm-dd` (khớp cách SQLite
+    lưu ngày trong app); chuỗi có kèm giờ thì phần giờ bị cắt bỏ.
+    """
+
+    EMPTY = QDate(1900, 1, 1)
+
+    def __init__(self, parent=None, display="dd/MM/yyyy"):
+        super().__init__(parent)
+        self.setCalendarPopup(True)
+        self.setDisplayFormat(display)
+        self.setMinimumDate(self.EMPTY)
+        # Chuỗi RỖNG bị Qt hiểu là "tắt special value text" → ô lại hiện
+        # 01/01/1900. Một dấu cách mới cho ra ô trắng như mong muốn.
+        self.setSpecialValueText(" ")
+        self.setDate(self.EMPTY)
+        self.calendarWidget().setStyleSheet(calendar_qss())
+
+    def wheelEvent(self, e):
+        # Lăn chuột KHÔNG đổi ngày — để cuộn trang/modal không vô tình sửa dữ
+        # liệu khi con trỏ dừng trên ô (cùng lý do với ComboBox ở trên).
+        e.ignore()
+
+    def keyPressEvent(self, e):
+        # Delete / Backspace = xóa trắng ô, vì lịch không có cách nào bỏ chọn.
+        if e.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            self.clear_date()
+            return
+        super().keyPressEvent(e)
+
+    def clear_date(self):
+        self.setDate(self.EMPTY)
+
+    def get(self):
+        """'yyyy-mm-dd', hoặc '' khi để trống."""
+        d = self.date()
+        return "" if d == self.EMPTY else d.toString("yyyy-MM-dd")
+
+    def set(self, value):
+        """Nhận 'yyyy-mm-dd' (thừa phần giờ cũng được), date/datetime, hoặc rỗng."""
+        text = str(value or "").strip()[:10]
+        d = QDate.fromString(text, "yyyy-MM-dd") if text else QDate()
+        self.setDate(d if d.isValid() and d >= self.EMPTY else self.EMPTY)
+
+
+def date_row(parent, label, value=""):
+    """Nhãn + ô chọn ngày, tự thêm vào layout cột của `parent`. Trả về DateEdit."""
+    block, v = _field_block(parent, label)
+    edit = DateEdit(block)
+    edit.set(value)
+    v.addWidget(edit)
+    return edit
 
 
 # ----- Icon line (SVG) tô màu theo yêu cầu (crisp, thay cho emoji nhòe) -----

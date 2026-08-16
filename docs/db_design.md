@@ -2,7 +2,7 @@
 
 SQLite · không dùng `FOREIGN KEY` (cột `*_id` là tham chiếu mềm) · mọi cột cho phép NULL trừ khóa chính · mọi bảng có `created_at` + `updated_at` · danh sách nhiều giá trị trong một ô ngăn bởi `;`.
 
-**Mục lục:** [Sơ đồ tổng thể](#sơ-đồ-tổng-thể) · [Bốn bài toán](#bốn-bài-toán-và-lời-giải) · [A. Tuyển dụng](#a--tuyển-dụng) · [B. Danh mục](#b--danh-mục-dùng-chung) · [C. Nhân sự](#c--nhân-sự--đào-tạo) · [Giá trị cố định](#giá-trị-cố-định)
+**Mục lục:** [Sơ đồ tổng thể](#sơ-đồ-tổng-thể) · [Bốn bài toán](#bốn-bài-toán-và-lời-giải) · [A. Tuyển dụng](#a--tuyển-dụng) · [B. Danh mục](#b--danh-mục-dùng-chung) · [C. Nhân sự](#c--nhân-sự--đào-tạo) · [Giá trị cố định](#giá-trị-cố-định) · [Migrations](#lịch-sử-thay-đổi-cấu-trúc-migrations)
 
 ---
 
@@ -94,7 +94,7 @@ Mũi tên = chiều tham chiếu: bảng ở đầu mũi tên chứa cột `*_id
 | Bài toán | Giải bằng | Nguyên tắc |
 |---|---|---|
 | AI chấm một ứng viên **nhiều lần** (nhiều vị trí, nhiều thời điểm) | `candidate_evaluations` | **Chỉ ghi thêm, không ghi đè.** Không có chỉ mục duy nhất. Mỗi lượt chấm giữ lại `evaluated_at` + `model` + bản CV đã dùng. |
-| Ghi **kết quả từng vòng phỏng vấn**: nhận xét của HR và của từng người PV | `interviews` + `interview_feedbacks` | Một vòng = một dòng `interviews` (`note` = nhận xét của HR); mỗi người phỏng vấn = một dòng `interview_feedbacks` với điểm và nhận xét riêng. |
+| Ghi **kết quả từng vòng phỏng vấn** và nhận xét của từng người PV | `interviews` + `interview_feedbacks` | Một vòng = một dòng `interviews` (chỉ phần hành chính: ngày giờ, kết luận chung); mỗi người phỏng vấn = một dòng `interview_feedbacks` với điểm và nhận xét riêng. |
 | Xem detail ứng viên phải thấy **đã liên hệ những gì** | `candidate_activities` | Mọi mail đã gửi, lịch phỏng vấn, đổi trạng thái, ghi chú đều thành một dòng có mốc thời gian. |
 | CV nhận năm 2023, quét lại năm 2026 → **kinh nghiệm đã khác** | `candidate_cvs` + `candidate_experiences` | Mỗi bản CV là một ảnh chụp có `received_at`. Kinh nghiệm lưu thành **dòng thời gian công việc** (ngày vào – ngày ra) nên tính lại được số năm ở bất kỳ thời điểm nào. |
 
@@ -160,7 +160,7 @@ Danh tính + **ảnh chụp mới nhất** để lọc cho nhanh. Dữ liệu g�
 | `first_seen_at` | DATETIME | Lần đầu vào pool. |
 | `last_contacted_at` | DATETIME | Chép từ `candidate_activities` mới nhất — trả lời ngay "đã liên hệ chưa". |
 | `latest_cv_id` | INT | → `candidate_cvs.cv_id`, bản CV mới nhất. |
-| `source` | VARCHAR | Nguồn biết đến lần đầu (TopCV, giới thiệu…). |
+| `source` | VARCHAR | Nơi cung cấp CV, biết đến lần đầu — xem [Nguồn ứng viên](#nguồn-ứng-viên). |
 | `note` | TEXT | Ghi chú tay. |
 
 **Ảnh chụp hồ sơ** — chép từ bản CV mới nhất, chỉ để lọc/sắp xếp nhanh
@@ -212,7 +212,7 @@ Một ứng viên gửi CV năm 2023, gửi lại năm 2026 → hai dòng. Mỗi
 | `file_hash` | VARCHAR | Băm nội dung file → không quét lại cùng một file hai lần. |
 | `received_at` | DATE | **Ngày nhận CV** — mốc thời gian của mọi số liệu trong bản này. |
 | `batch` | INT | Số đợt quét, lấy từ tên thư mục `batch1`, `batch2`… |
-| `source` | VARCHAR | Nguồn của riêng lần nộp này. |
+| `source` | VARCHAR | Bản CV này lấy ở đâu — xem [Nguồn ứng viên](#nguồn-ứng-viên). |
 | `cv_text` | TEXT | Toàn văn CV đã trích xuất → chấm lại khỏi mở lại PDF. |
 | `scanned_at` | DATETIME | Lúc AI đọc bản này. Rỗng = chưa quét. |
 | `scan_model` | VARCHAR | Model AI đã đọc. |
@@ -299,7 +299,7 @@ Trạng thái tuyển dụng nằm ở đây, **không** nằm ở `candidates`.
 | `position_id` | INT | → `positions.position_id` |
 | `cv_id` | INT | Nộp bằng bản CV nào. |
 | `origin` | VARCHAR | `Applied` (tự nộp) · `Pool search` (kéo từ pool) · `Referral` |
-| `source` | VARCHAR | Nguồn của lần ứng tuyển này: Itviec · LinkedIn · Referral · HH- PSK… |
+| `source` | VARCHAR | Lần ứng tuyển này đến từ đâu — xem [Nguồn ứng viên](#nguồn-ứng-viên). |
 | `status` | VARCHAR | Giai đoạn đang ở — xem [Giá trị cố định](#trạng-thái-đơn-ứng-tuyển). |
 | `final_status` | VARCHAR | Kết cục: `Pass` · `Fail` · `Considering` · `Withdraw` · `Ongoing` · `Could not contact` · `Not proceed` |
 | `phone_screen_date` | DATE | Ngày sàng lọc qua điện thoại. |
@@ -324,7 +324,7 @@ CREATE INDEX idx_app_status    ON applications(status);
 
 Một dòng = **một vòng** của một đơn ứng tuyển. Mỗi vòng một dòng nên thêm vòng 4, vòng 5 không phải sửa cấu trúc.
 
-Nhận xét của **HR** nằm ở đây (`note`); nhận xét của **từng người phỏng vấn** nằm ở `interview_feedbacks`.
+Bảng này chỉ giữ phần **hành chính** của buổi phỏng vấn (khi nào, ở đâu, kết luận chung). Mọi **nhận xét** đều nằm ở `interview_feedbacks` — mỗi người phỏng vấn một dòng.
 
 | Cột | Kiểu | Mô tả |
 |---|---|---|
@@ -337,8 +337,6 @@ Nhận xét của **HR** nằm ở đây (`note`); nhận xét của **từng ng
 | `mode` | VARCHAR | `Onsite` · `Online` · `Phone` |
 | `location` | VARCHAR | Phòng họp hoặc link online. |
 | `overall_score` | VARCHAR | Kết luận chung của vòng: `Pass` · `Fail` · `Consideration` |
-| `note` | TEXT | **Nhận xét của HR** về buổi này. |
-| `summary` | TEXT | Tổng hợp ý kiến cả hội đồng. |
 | `next_step` | VARCHAR | Kết luận: đi tiếp vòng nào / dừng. |
 | `status` | VARCHAR | `Scheduled` · `Completed` · `Cancelled` · `No show` |
 | `mail_activity_id` | INT | → `candidate_activities.activity_id`, thư mời đã gửi cho buổi này. |
@@ -348,6 +346,8 @@ CREATE UNIQUE INDEX idx_intv_round     ON interviews(application_id, round);
 CREATE INDEX        idx_intv_candidate ON interviews(candidate_id, interview_date);
 CREATE INDEX        idx_intv_date      ON interviews(interview_date);
 ```
+
+> **Đã bỏ ở lượt `0002_drop_interview_notes`**: `note` (nhận xét của HR) và `summary` (tổng hợp hội đồng). Nhận xét chỉ còn ở cấp **từng người phỏng vấn**, vì đó mới là thứ thực sự nhận được sau mỗi vòng. Hai cột vẫn nằm trong lượt `0001` (lượt cũ không được sửa) — máy mới tạo ra rồi `0002` xóa đi ngay.
 
 ---
 
@@ -602,12 +602,14 @@ CREATE INDEX idx_mailtpl_type ON mail_templates(type);
 
 ### `app_meta` — Key-value nội bộ
 
-Đánh dấu các lượt nạp dữ liệu khởi tạo / chuyển đổi dữ liệu đã chạy.
+Đánh dấu vết những lượt đã chạy trên **file `.db` này**, để lần mở app sau không chạy lại.
 
 | Cột | Kiểu | Mô tả |
 |---|---|---|
-| `key` | VARCHAR **PK** | `seed:departments:v1`, `data:candidate_status:v1`… |
+| `key` | VARCHAR **PK** | `migration:0001_initial_schema` · `seed:departments:v1` · `data:candidate_status:v1`… |
 | `value` | VARCHAR | |
+
+Khóa `migration:*` do `cv_repository.init_db()` ghi — xem [Lịch sử thay đổi cấu trúc](#lịch-sử-thay-đổi-cấu-trúc-migrations).
 
 ---
 
@@ -785,9 +787,21 @@ Khai báo trong `app/core/cv_schema.py`.
 
 ### Nguồn ứng viên
 
-`applications.source` — nạp sẵn qua `SEED_DATA`, người dùng thêm được:
+**NƠI CUNG CẤP CV** — sàn tuyển dụng, headhunt, người giới thiệu. Danh sách ở hằng `cv_schema.CANDIDATE_SOURCE_CHOICES` (không phải `SEED_DATA`), người dùng gõ thêm được:
 
-`Itviec` · `LinkedIn` · `Referral` · `HH- PSK` · `HH- Adecco` · `University` · `Internal Sourced`
+`Itviec` · `VietnamWorks` · `LinkedIn` · `TopCV` · `Referral` · `HH- PSK` · `HH- Adecco` · `University` · `Internal Sourced`
+
+Cột `source` có ở **ba bảng**, cùng mô tả một sự việc dưới ba góc:
+
+| Cột | Nghĩa |
+|---|---|
+| `candidates.source` | Ứng viên biết đến từ đâu (lần đầu vào pool). |
+| `applications.source` | Lần ứng tuyển **này** đến từ đâu — cùng một người có thể nộp lại qua sàn khác. |
+| `candidate_cvs.source` | Bản CV **này** lấy ở đâu. |
+
+Ba cột phải khớp nhau, nếu không mỗi màn hình lại đọc ra một giá trị khác → `cv_repository.set_candidate_source()` ghi **cả ba** trong một lượt (đơn đang hiển thị + bản CV `latest_cv_id`).
+
+**Dấu `AI CV Scan`** (`cv_schema.CANDIDATE_SOURCE_AUTO`) là giá trị tool *AI CV Scan* đóng vào cả ba cột khi quét thư mục CV. Nó nói hồ sơ vào app bằng **đường nào**, chứ không phải sàn nào — quét cả thư mục thì không thể biết từng file lấy ở đâu. Vì vậy nó **không** nằm trong `CANDIDATE_SOURCE_CHOICES`, và cả bảng danh sách lẫn file Excel đều hiển thị **ô trống** khi gặp dấu này, để thấy ngay hồ sơ nào còn phải gán sàn bằng tay.
 
 ### Điểm phỏng vấn
 
@@ -834,3 +848,25 @@ Khai báo trong `app/core/cv_schema.py`.
 | `cost_centers.group_function` | `VNPlant` · `Corporate` · `R&D` |
 | `courses.course_type` | `0` inhouse · `1` external · `2` funded |
 | `course_employees.status` | `Not started` · `Completed` |
+
+---
+
+## Lịch sử thay đổi cấu trúc (migrations)
+
+**Đây là chỗ ghi MỌI thay đổi cấu trúc DB.** Sửa `cv_schema.MIGRATIONS` mà không cập nhật bảng dưới đây là thiếu sót.
+
+Cấu trúc DB dựng và cập nhật **chỉ bằng** `cv_schema.MIGRATIONS` — danh sách `(tên, SQL)` chạy theo thứ tự, dấu vết ghi vào `app_meta` với khóa `migration:<tên>`:
+
+- Máy chưa có file `.db` → chạy **tất cả**, bắt đầu từ `0001` tạo bảng.
+- Máy đã có DB → chỉ chạy những lượt **chưa có dấu vết**.
+
+Ba quy tắc bắt buộc:
+
+1. Thêm lượt mới vào **cuối** danh sách, tên đánh số tăng dần.
+2. **Không sửa/xóa lượt cũ** — máy khác đã chạy qua rồi, sửa cũng không chạy lại, chỉ làm hai máy lệch cấu trúc nhau. Vì vậy cột đã bỏ **vẫn còn** trong lượt `0001`: máy mới tạo ra rồi lượt sau xóa đi.
+3. Đổi tên một lượt = tạo lượt mới → nó chạy lại trên mọi máy.
+
+| Lượt | Bảng | Thay đổi |
+|---|---|---|
+| `0001_initial_schema` | *(tất cả)* | Cấu trúc ban đầu — nội dung `cv_schema.SCHEMA_SQL`. |
+| `0002_drop_interview_notes` | `interviews` | **Bỏ** `note` (nhận xét của HR) và `summary` (tổng hợp hội đồng). Nhận xét chỉ còn ở cấp từng người phỏng vấn (`interview_feedbacks`) — đó mới là thứ thực sự nhận được sau mỗi vòng. Nội dung đang có trong hai cột này **mất theo**. Dùng `ALTER TABLE … DROP COLUMN`, cần SQLite ≥ 3.35. |

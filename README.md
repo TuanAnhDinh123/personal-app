@@ -50,7 +50,7 @@ personal-app/
 ├── icon_app.ico
 ├── app_qt/                  # GIAO DIỆN (PySide6)
 │   ├── theme.py / theme.qss # Bảng màu + "CSS" (QSS)
-│   ├── widgets.py           # Widget dựng sẵn (API .get()/.set()) + icon SVG
+│   ├── widgets.py           # Widget dựng sẵn (API .get()/.set()) + DateEdit + icon SVG
 │   ├── base_tool.py         # Lớp cha tool
 │   ├── registry.py          # Tự phát hiện tool
 │   ├── main_window.py       # Cửa sổ chính (frameless): sidebar + nội dung
@@ -205,9 +205,45 @@ Department · Status · Batch*, **bảng kết quả** có cột tick chọn, v�
 | **Add** | không | thêm hồ sơ nhập tay |
 | **Reload** | không | tải lại bảng |
 
-**Chuột phải trên bảng** có thêm **Update source…** (ngoài *Copy* / *Copy row*
-dùng chung): mở popup nhỏ, chọn **sàn cung cấp CV** rồi ghi một lượt cho **mọi hồ
-sơ đang tick**. Ô chọn **gõ tay được** nên sàn mới chưa có trong
+**Chuột phải trên bảng** có thêm hai mục (ngoài *Copy* / *Copy row* dùng chung):
+
+**① Quick edit (interview feedback)…** — làm trên **đúng dòng vừa bấm**, không
+cần tick. Đây là chỗ **nhập nhận xét phỏng vấn**: form sửa hồ sơ đầy đủ có ~30 ô
+(thông tin cá nhân · hồ sơ nghề nghiệp · nguyện vọng · đơn ứng tuyển) nên quá dài
+cho việc làm thường xuyên nhất sau mỗi buổi phỏng vấn. Hộp này chỉ giữ **đúng các
+ô có trong file Excel xuất ra**:
+
+- **Application** — *Applying for* (**chỉ để xem** — đổi vị trí là đổi cả luồng
+  tuyển dụng: JD, mẫu mail, các vòng đã có, nên chỉ làm ở form đầy đủ) · Status ·
+  Result · Phone screen date & note
+- **1st / 2nd / 3rd interview** — Date · Final result, kèm danh sách
+  **Interviewer feedback**: bấm *Add interviewer* để thêm bao nhiêu người tuỳ ý,
+  mỗi người một dòng *(tên · kết luận · nhận xét)*, bấm ✕ để bỏ. Mỗi dòng ứng với
+  một bản ghi `interview_feedbacks` — đúng thứ mà cột *INTERVIEW EVALUATION* của
+  file Excel ghép lại, nên nhập tách từng người ở đây thì lúc xuất mới khớp đúng
+  tên với nhận xét tương ứng.
+
+Ô người phỏng vấn là **danh sách nhân viên** (`repo.list_interviewers()`) và lưu
+luôn `employee_id` — chức danh & phòng ban tra thẳng từ `employees`, không hỏi
+lại trong form. Tên đã lưu mà nay không còn trong danh sách (khách mời, người đã
+nghỉ) vẫn hiện đúng, chỉ không nối được vào `employees`.
+
+Mọi ô ngày dùng **`widgets.DateEdit`** — lịch bung ra, hiển thị `dd/MM/yyyy`, lưu
+`yyyy-mm-dd`. Ô **để trống được** (vòng chưa diễn ra thì không điền sẵn ngày vô
+nghĩa): nhấn `Delete`/`Backspace` để xoá trắng. Lăn chuột không đổi ngày, để cuộn
+modal không vô tình sửa dữ liệu.
+
+> Nhận xét chỉ tồn tại ở **cấp từng người phỏng vấn**. Hai cột cũ ở cấp buổi —
+> `interviews.note` (HR note) và `interviews.summary` (Panel summary) — đã bỏ ở
+> lượt migration `0002_drop_interview_notes`.
+
+Vòng nào để trống hoàn toàn thì **không tạo dòng rỗng** trong DB. Bỏ một người ra
+khỏi form là xoá luôn nhận xét của họ (`repo.save_interview_feedbacks()` đồng bộ
+hai chiều). Các cột do máy sinh — *Batch* · *ID* (bóc từ tên file CV) · *Score* &
+*AI Evaluation* (AI chấm) — **không cho sửa tay**, sửa là hỏng lịch sử đánh giá.
+
+**② Update source…** — mở popup nhỏ, chọn **sàn cung cấp CV** rồi ghi một lượt
+cho **mọi hồ sơ đang tick**. Ô chọn **gõ tay được** nên sàn mới chưa có trong
 `cv_schema.CANDIDATE_SOURCE_CHOICES` vẫn điền thẳng; các hồ sơ đang cùng một
 nguồn thì popup điền sẵn nguồn đó.
 

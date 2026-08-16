@@ -300,8 +300,10 @@ class DataTable(QTableView):
                  copy_keys=None, menu_actions=None, parent=None):
         super().__init__(parent)
         self.hover_row = -1
-        # menu_actions: [(nhãn, hàm chạy)] — thao tác riêng của từng tool, hiện
-        # ở ĐẦU menu chuột phải, phía trên nhóm Copy dùng chung.
+        # menu_actions: [(nhãn, hàm chạy)] — thao tác riêng của từng tool, hiện ở
+        # ĐẦU menu chuột phải, phía trên nhóm Copy dùng chung. Hàm nhận KHÓA CHÍNH
+        # của dòng vừa bấm chuột phải; thao tác làm trên các dòng đang tick thì
+        # cứ bỏ qua tham số đó.
         self._menu_actions = list(menu_actions) if menu_actions else []
         # copy_keys: thứ tự cột CỐ ĐỊNH khi copy cả dòng (xem _copy_columns).
         self._copy_keys = list(copy_keys) if copy_keys else None
@@ -546,8 +548,9 @@ class DataTable(QTableView):
         if not idx.isValid():
             return
         menu = QMenu(self)
+        row_id = self._model.id_at(idx.row())
         for label, callback in self._menu_actions:
-            menu.addAction(label, callback)
+            menu.addAction(label, lambda cb=callback: cb(row_id))
         if self._menu_actions:
             menu.addSeparator()
         act = menu.addAction("Copy", lambda: self._copy(self._model._text(idx)))

@@ -74,7 +74,7 @@ APPLICATION_FIELDS = [
 ]
 INTERVIEW_FIELDS = [
     "application_id", "candidate_id", "round", "interview_date", "duration_minutes",
-    "mode", "location", "overall_score", "note", "summary", "next_step", "status",
+    "mode", "location", "overall_score", "next_step", "status",
     "mail_activity_id",
 ]
 INTERVIEW_FEEDBACK_FIELDS = [
@@ -1438,6 +1438,36 @@ def list_feedbacks_by_interviews(interview_ids):
                 f"WHERE f.interview_id IN ({marks}) "
                 "ORDER BY f.interview_id, f.feedback_id", list(chunk)).fetchall()
     return rows
+
+
+def save_interview_feedbacks(interview_id, entries) -> None:
+    """Đặt LẠI toàn bộ nhận xét của một buổi phỏng vấn cho khớp `entries`.
+
+    `entries` là list dict theo INTERVIEW_FEEDBACK_FIELDS; dict nào có sẵn
+    `feedback_id` thì được CẬP NHẬT (giữ nguyên `submitted_at` cũ), không có thì
+    chèn mới. Dòng đang nằm trong DB mà không còn trong `entries` bị xóa — form
+    nhập là nguồn sự thật cho buổi đó, nên xóa người khỏi form là xóa luôn nhận
+    xét của họ.
+    """
+    keep = {e["feedback_id"] for e in entries if e.get("feedback_id")}
+    with get_connection() as conn:
+        old = {r["feedback_id"] for r in conn.execute(
+            "SELECT feedback_id FROM interview_feedbacks WHERE interview_id = ?",
+            (interview_id,))}
+        for feedback_id in old - keep:
+            conn.execute("DELETE FROM interview_feedbacks WHERE feedback_id = ?",
+                         (feedback_id,))
+        for entry in entries:
+            data = dict(entry)
+            data["interview_id"] = interview_id
+            feedback_id = data.pop("feedback_id", None)
+            if feedback_id in old:
+                _update_conn(conn, "interview_feedbacks",
+                             INTERVIEW_FEEDBACK_FIELDS, feedback_id, data)
+            else:
+                data.setdefault("submitted_at", _now())
+                _insert_conn(conn, "interview_feedbacks",
+                             INTERVIEW_FEEDBACK_FIELDS, data)
 
 
 def get_interview_feedback(feedback_id):

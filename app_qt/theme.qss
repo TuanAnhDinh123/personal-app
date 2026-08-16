@@ -154,7 +154,7 @@ QWidget {
 /* ============================================================
    Ô NHẬP LIỆU
    ============================================================ */
-QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox {
+QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox, QDateEdit {
     background: {{--input-bg}};
     border: 1px solid {{--border-strong}};
     border-radius: 10px;
@@ -164,22 +164,22 @@ QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox {
     selection-color: white;
 }
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus,
-QComboBox:focus, QSpinBox:focus {
+QComboBox:focus, QSpinBox:focus, QDateEdit:focus {
     border: 1px solid {{--accent}};
 }
-QLineEdit:disabled, QComboBox:disabled {
+QLineEdit:disabled, QComboBox:disabled, QDateEdit:disabled {
     color: {{--text-faint}};
     background: {{--card-bg}};
 }
 QLineEdit::placeholder { color: {{--text-faint}}; }
 
-QComboBox::drop-down {
+QComboBox::drop-down, QDateEdit::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: center right;
     border: none;
     width: 30px;
 }
-QComboBox::down-arrow {
+QComboBox::down-arrow, QDateEdit::down-arrow {
     image: url("{{CHEVRON_ICON}}");
     width: 14px;
     height: 14px;

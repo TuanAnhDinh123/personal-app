@@ -302,8 +302,12 @@ CREATE TABLE IF NOT EXISTS applications (
 );
 
 -- BUỔI PHỎNG VẤN TỪNG VÒNG. Một dòng = một vòng của một đơn → thêm vòng 4,
--- vòng 5 không phải sửa cấu trúc. `note` = nhận xét của HR về buổi này; nhận
--- xét của từng người phỏng vấn nằm ở interview_feedbacks.
+-- vòng 5 không phải sửa cấu trúc. Nhận xét của từng người phỏng vấn nằm ở
+-- interview_feedbacks.
+--
+-- Hai cột `note` (nhận xét của HR) và `summary` (tổng hợp hội đồng) ĐÃ BỎ ở lượt
+-- "0002_drop_interview_notes". Chúng vẫn nằm trong lượt 0001 vì lượt cũ không
+-- được sửa (máy khác đã chạy qua rồi) — máy mới tạo ra rồi 0002 xóa đi ngay.
 CREATE TABLE IF NOT EXISTS interviews (
     interview_id     INTEGER PRIMARY KEY AUTOINCREMENT,
     application_id   INT,           -- → applications.application_id
@@ -314,8 +318,8 @@ CREATE TABLE IF NOT EXISTS interviews (
     mode             VARCHAR,       -- xem INTERVIEW_MODE_CHOICES
     location         VARCHAR,       -- phòng họp hoặc link online
     overall_score    VARCHAR,       -- kết luận chung — xem INTERVIEW_SCORE_CHOICES
-    note             TEXT,          -- NHẬN XÉT CỦA HR
-    summary          TEXT,          -- tổng hợp ý kiến cả hội đồng
+    note             TEXT,          -- (bỏ ở lượt 0002)
+    summary          TEXT,          -- (bỏ ở lượt 0002)
     next_step        VARCHAR,
     status           VARCHAR,       -- xem INTERVIEW_STATUS_CHOICES
     mail_activity_id INT,           -- → candidate_activities (thư mời đã gửi)
@@ -626,6 +630,14 @@ CREATE VIRTUAL TABLE IF NOT EXISTS candidates_fts USING fts5(
 # =============================================================================
 MIGRATIONS: list[tuple[str, str]] = [
     ("0001_initial_schema", SCHEMA_SQL),
+    # Bỏ nhận xét ở CẤP BUỔI phỏng vấn: chỉ giữ nhận xét của TỪNG NGƯỜI phỏng vấn
+    # (interview_feedbacks) — đó mới là thứ thực sự nhận được sau mỗi vòng. Nội
+    # dung đang có trong hai cột này MẤT theo. `ALTER TABLE … DROP COLUMN` cần
+    # SQLite ≥ 3.35 (Python 3.11 trở lên đều kèm bản mới hơn).
+    ("0002_drop_interview_notes", '''
+        ALTER TABLE interviews DROP COLUMN note;
+        ALTER TABLE interviews DROP COLUMN summary;
+    '''),
 ]
 
 # =============================================================================
