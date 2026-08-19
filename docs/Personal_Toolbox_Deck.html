@@ -1,0 +1,980 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+    html { -webkit-text-size-adjust: 100%; }
+    body { margin: 0; }
+    img, svg { max-width: 100%; }
+  </style>
+<title>Personal Toolbox</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Newsreader:ital,wght@1,400;1,500&display=swap">
+
+<style>
+/* ---------------------------------------------------------------- tokens
+   Bảng màu lấy thẳng từ app_qt/theme.py để slide và app nhìn cùng một hệ. */
+:root {
+  --paper:        #f4f6fb;
+  --card:         #ffffff;
+  --card-2:       #fbfcff;
+  --ink:          #1f2735;
+  --muted:        #64748b;
+  --faint:        #94a1b5;
+  --line:         #e4e9f2;
+  --line-strong:  #d3dbe8;
+  --accent:       #6366f1;
+  --accent-soft:  #eef0fe;
+  --rail:         #0f1420;
+  --rail-ink:     #c4ccdb;
+  --rail-faint:   #5d6a7e;
+  --rail-line:    #1d2534;
+
+  --violet: #8b5cf6;   /* Recruitment  */
+  --green:  #10b981;   /* Human Resources */
+  --amber:  #f59e0b;   /* Office */
+  --blue:   #3b82f6;   /* Files & Documents */
+  --red:    #ef4444;
+
+  --shadow: 0 1px 2px rgba(31,39,53,.05), 0 8px 24px -16px rgba(31,39,53,.28);
+
+  --sec: var(--accent);
+
+  --step: clamp(15px, 1.05vw + 8px, 20px);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:       #0d111a;
+    --card:        #161d2b;
+    --card-2:      #1a2130;
+    --ink:         #e7ecf6;
+    --muted:       #97a3b8;
+    --faint:       #6b7789;
+    --line:        #242c3d;
+    --line-strong: #313b50;
+    --accent:      #838cf8;
+    --accent-soft: #1e2340;
+    --rail:        #080b12;
+    --rail-ink:    #b6bfd0;
+    --rail-faint:  #556174;
+    --rail-line:   #161d2b;
+    --violet:      #a78bfa;
+    --green:       #34d399;
+    --amber:       #fbbf24;
+    --blue:        #60a5fa;
+    --red:         #f87171;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 30px -18px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"] {
+  --paper:       #0d111a;
+  --card:        #161d2b;
+  --card-2:      #1a2130;
+  --ink:         #e7ecf6;
+  --muted:       #97a3b8;
+  --faint:       #6b7789;
+  --line:        #242c3d;
+  --line-strong: #313b50;
+  --accent:      #838cf8;
+  --accent-soft: #1e2340;
+  --rail:        #080b12;
+  --rail-ink:    #b6bfd0;
+  --rail-faint:  #556174;
+  --rail-line:   #161d2b;
+  --violet:      #a78bfa;
+  --green:       #34d399;
+  --amber:       #fbbf24;
+  --blue:        #60a5fa;
+  --red:         #f87171;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 30px -18px rgba(0,0,0,.8);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: Archivo, "Segoe UI", system-ui, sans-serif;
+  font-size: var(--step);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ------------------------------------------------------------------ rail */
+.rail {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 64px;
+  background: var(--rail);
+  border-right: 1px solid var(--rail-line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 0;
+  z-index: 20;
+}
+.rail-mark {
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  background: var(--accent);
+  display: grid; place-items: center;
+  color: #fff;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 13px; font-weight: 500;
+}
+.rail-sec {
+  writing-mode: vertical-rl;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--rail-faint);
+  transition: color .3s ease;
+}
+.rail-count {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: .06em;
+  color: var(--rail-ink);
+  font-variant-numeric: tabular-nums;
+  writing-mode: vertical-rl;
+}
+.progress {
+  position: fixed;
+  left: 64px; right: 0; bottom: 0;
+  height: 2px;
+  background: transparent;
+  z-index: 20;
+}
+.progress span {
+  display: block; height: 100%;
+  background: var(--sec, var(--accent));
+  width: 0;
+  transition: width .25s ease, background .3s ease;
+}
+
+/* ----------------------------------------------------------------- deck */
+.deck {
+  margin-left: 64px;
+  height: 100svh;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) { .deck { scroll-behavior: auto; } }
+
+/* Một cột nội dung rộng tối đa 1180px, canh giữa khung nhìn.
+   Dùng grid chứ không phải flex + margin auto: các khối tự đặt max-width hẹp
+   hơn (.lead, .note, .quote) phải nằm sát mép trái cột, không bị kéo vào giữa. */
+.slide {
+  scroll-snap-align: start;
+  min-height: 100svh;
+  padding: clamp(32px, 4.6vh, 64px) clamp(28px, 4.5vw, 86px);
+  display: grid;
+  grid-template-columns: minmax(0, 1180px);
+  justify-content: center;
+  align-content: center;
+  align-content: safe center;
+  gap: clamp(18px, 2.4vh, 30px);
+  border-bottom: 1px solid var(--line);
+}
+.slide > * { min-width: 0; }
+
+[data-sec="recruit"] { --sec: var(--violet); }
+[data-sec="people"]  { --sec: var(--green); }
+[data-sec="daily"]   { --sec: var(--amber); }
+[data-sec="trust"]   { --sec: var(--blue); }
+
+/* --------------------------------------------------------------- type */
+.eyebrow {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--sec);
+  display: flex; align-items: center; gap: 12px;
+}
+.eyebrow::after {
+  content: ""; flex: 1; height: 1px;
+  background: linear-gradient(to right, var(--line-strong), transparent);
+}
+h1 {
+  font-size: clamp(38px, 5.6vw, 78px);
+  line-height: 1.02;
+  letter-spacing: -.035em;
+  font-weight: 700;
+  margin: 0;
+  text-wrap: balance;
+}
+h2 {
+  font-size: clamp(26px, 2.9vw, 43px);
+  line-height: 1.1;
+  letter-spacing: -.028em;
+  font-weight: 600;
+  margin: 0;
+  text-wrap: balance;
+}
+h3 {
+  font-size: 1.02em;
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+p { margin: 0; max-width: 68ch; }
+.lead { color: var(--muted); font-size: 1.06em; max-width: 62ch; }
+.quote {
+  font-family: Newsreader, Georgia, serif;
+  font-style: italic;
+  font-size: clamp(19px, 1.7vw, 26px);
+  line-height: 1.42;
+  color: var(--ink);
+  max-width: 40ch;
+  border-left: 2px solid var(--sec);
+  padding-left: 18px;
+}
+.mono {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: .88em;
+  font-variant-numeric: tabular-nums;
+}
+strong { font-weight: 600; }
+em { font-style: italic; }
+
+/* ------------------------------------------------------------ elements */
+.cols {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(22px, 3.4vw, 56px);
+  align-items: start;
+}
+.cols.even { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 880px) { .cols, .cols.even { grid-template-columns: 1fr; } }
+
+/* Dấu đầu dòng vẽ bằng ::before ĐẶT TUYỆT ĐỐI, không dùng grid trên <li>:
+   grid biến mỗi <strong>/<em> bên trong thành một ô riêng, làm câu văn vỡ vụn. */
+ul.ticks { list-style: none; margin: 0; padding: 0; display: grid; gap: 13px; }
+ul.ticks li { position: relative; padding-left: 28px; }
+ul.ticks li::before {
+  content: "";
+  position: absolute;
+  left: 4px; top: .58em;
+  width: 7px; height: 7px;
+  border-radius: 2px;
+  background: var(--sec);
+  opacity: .85;
+}
+ul.plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; color: var(--muted); }
+
+.steps { display: grid; gap: 0; counter-reset: s; }
+.steps li {
+  list-style: none;
+  counter-increment: s;
+  position: relative;
+  padding: 13px 0 13px 56px;
+  border-top: 1px solid var(--line);
+}
+.steps li:last-child { border-bottom: 1px solid var(--line); }
+.steps li::before {
+  content: counter(s, decimal-leading-zero);
+  position: absolute;
+  left: 0; top: 13px;
+  line-height: 1.55;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--sec);
+  font-variant-numeric: tabular-nums;
+}
+.steps b { font-weight: 600; }
+.steps span { color: var(--muted); }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 18px 20px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  box-shadow: var(--shadow);
+}
+.card p { color: var(--muted); font-size: .95em; }
+.card .num {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: .16em;
+  color: var(--sec);
+}
+
+.stats { display: flex; flex-wrap: wrap; gap: clamp(20px, 3vw, 54px); }
+.stat { display: grid; gap: 2px; }
+.stat b {
+  font-size: clamp(28px, 3.4vw, 46px);
+  font-weight: 700;
+  letter-spacing: -.035em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.stat span {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.scroll { overflow-x: auto; border-radius: 12px; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .95em;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  background: var(--card-2);
+}
+tr:last-child td { border-bottom: 0; }
+td.key { font-weight: 600; }
+td.dim { color: var(--muted); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  background: var(--card);
+}
+.chip.on { border-color: transparent; background: var(--sec); color: #fff; }
+
+.note {
+  border-left: 2px solid var(--sec);
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: .96em;
+  max-width: 64ch;
+}
+
+/* ---------------------------------------------------------- title slide */
+.slide.cover { gap: 24px; }
+.cover .tagline {
+  font-size: clamp(21px, 2.5vw, 36px);
+  font-weight: 600;
+  letter-spacing: -.022em;
+  line-height: 1.14;
+  color: var(--accent);
+  max-width: 24ch;
+}
+.cover .meta {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--faint);
+  display: flex; flex-wrap: wrap; gap: 10px 22px;
+}
+.hint {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: .1em;
+  color: var(--faint);
+}
+kbd {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 1px 6px;
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------ divider slides */
+.slide.divider { justify-content: center; }
+.divider h2 {
+  font-size: clamp(40px, 6.4vw, 92px);
+  letter-spacing: -.045em;
+  line-height: .98;
+}
+.divider .rule { height: 3px; width: 92px; background: var(--sec); border-radius: 2px; }
+
+a:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.deck:focus, .deck:focus-visible { outline: none; }
+
+@media (max-width: 620px) {
+  .rail { flex-direction: row; inset: 0 0 auto 0; width: auto; height: 48px; padding: 0 14px; }
+  .rail-sec, .rail-count { writing-mode: horizontal-tb; }
+  .deck { margin-left: 0; height: calc(100svh - 48px); margin-top: 48px; }
+  .progress { left: 0; }
+}
+
+@media print {
+  @page { size: A4 landscape; margin: 12mm; }
+  .rail, .progress, .hint { display: none; }
+  /* Bản in hẹp hơn màn hình: hạ cỡ chữ + lề để slide dày nhất vẫn gọn 1 trang. */
+  body { font-size: 15px; }
+  .deck { margin: 0; height: auto; overflow: visible; }
+  .slide { min-height: auto; page-break-after: always; border: 0; padding: 5mm 0 6mm; gap: 16px; }
+  .slide:last-child { page-break-after: auto; }
+  .card, table { box-shadow: none; }
+}
+</style>
+</head>
+<body>
+
+
+<div class="rail">
+  <div class="rail-mark">PT</div>
+  <div class="rail-sec" id="railSec">Personal Toolbox</div>
+  <div class="rail-count"><span id="railNum">01</span> / 21</div>
+</div>
+<div class="progress"><span id="bar"></span></div>
+
+<div class="deck" id="deck">
+
+  <!-- 01 ------------------------------------------------------------ -->
+  <section class="slide cover" data-name="Personal Toolbox">
+    <div class="eyebrow">Internal HR Tooling · First look</div>
+    <h1>Personal&nbsp;Toolbox</h1>
+    <p class="tagline">One app for the HR work we repeat every week.</p>
+    <p class="lead">Recruitment · People data · Training · The small daily jobs that never make it
+      into a system.</p>
+    <div class="meta">
+      <span>Presenter</span><span>Region</span><span>Date</span>
+    </div>
+    <p class="hint">Use <kbd>→</kbd> <kbd>←</kbd> or <kbd>Space</kbd> to move through the deck.</p>
+  </section>
+
+  <!-- 02 ------------------------------------------------------------ -->
+  <section class="slide" data-name="The problem">
+    <div class="eyebrow">Where we are today</div>
+    <h2>The work is fine. The filing is the problem.</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>What happens today</th><th>What it costs us</th></tr></thead>
+        <tbody>
+          <tr><td class="key">CVs sit in folders, named however the sender named them</td>
+              <td class="dim">Nobody can find last year's candidate for a similar role</td></tr>
+          <tr><td class="key">Candidate tracking lives in an Excel file — copied per batch, per person</td>
+              <td class="dim">Two people, two versions, no single truth</td></tr>
+          <tr><td class="key">Interview feedback arrives by email, chat, or on paper</td>
+              <td class="dim">The evaluation is lost the moment the hire is closed</td></tr>
+          <tr><td class="key">After hiring, the same person is typed into the employee file again</td>
+              <td class="dim">One person, three entries, three chances to be wrong</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">This is not anyone's fault — it is what happens when the work moves faster than
+      the filing. The app doesn't ask you to work differently. It removes the retyping.</p>
+  </section>
+
+  <!-- 03 ------------------------------------------------------------ -->
+  <section class="slide" data-name="What it is">
+    <div class="eyebrow">What it is</div>
+    <div class="cols">
+      <div style="display:grid;gap:20px">
+        <h2>One drawer instead of&nbsp;fifteen.</h2>
+        <p class="lead">A desktop app on your own Windows laptop. One window, a menu down the left,
+          and everything you enter kept in one place instead of scattered across files.</p>
+        <div class="chips">
+          <span class="chip on">Recruitment</span>
+          <span class="chip">Human Resources</span>
+          <span class="chip">Files &amp; Documents</span>
+          <span class="chip">Office</span>
+          <span class="chip">Master Data</span>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="card"><div class="num">NO SERVER</div><h3>Nothing to buy or host</h3>
+          <p>A single program file. No admin rights, no installation ticket, no browser login.</p></div>
+        <div class="card"><div class="num">10 TOOLS</div><h3>Grouped the way HR works</h3>
+          <p>Five groups in the sidebar, plus seven shared directories under Master Data.</p></div>
+        <div class="card"><div class="num">OFFLINE</div><h3>Works without internet</h3>
+          <p>Only the AI reading features need a connection. Everything else runs locally.</p></div>
+        <div class="card"><div class="num">FAMILIAR</div><h3>Uses what we already have</h3>
+          <p>Outlook for mail and calendar, Excel for reports — the app just stops the retyping.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 04 ------------------------------------------------------------ -->
+  <section class="slide divider" data-sec="recruit" data-name="Recruitment">
+    <div class="rule"></div>
+    <h2>Recruitment</h2>
+    <p class="quote">From a folder of PDFs to a shortlist — without typing a candidate twice.</p>
+  </section>
+
+  <!-- 05 ------------------------------------------------------------ -->
+  <section class="slide" data-sec="recruit" data-name="Recruitment">
+    <div class="eyebrow">The demo you are about to see</div>
+    <div class="cols">
+      <div style="display:grid;gap:18px">
+        <h2>One hiring run, end to&nbsp;end.</h2>
+        <p class="lead">Seven steps. Today six of them involve retyping. In the app, a candidate is
+          entered once at step&nbsp;3 and that same record carries all the way to step&nbsp;7.</p>
+      </div>
+      <ol class="steps">
+        <li><b>Receive</b> <span>— a folder of CV files</span></li>
+        <li><b>Name</b> <span>— file names normalised into batch codes</span></li>
+        <li><b>Read &amp; score</b> <span>— AI reads each CV against the position's job description</span></li>
+        <li><b>Shortlist</b> <span>— search and filter one candidate list</span></li>
+        <li><b>Invite</b> <span>— Outlook invitations with the CV attached</span></li>
+        <li><b>Evaluate</b> <span>— feedback per interviewer, per round</span></li>
+        <li><b>Report</b> <span>— the Excel file you already know, in one click</span></li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- 06 ------------------------------------------------------------ -->
+  <section class="slide" data-sec="recruit" data-name="Recruitment">
+    <div class="eyebrow">Step 1–2 · CV intake</div>
+    <div class="cols">
+      <div style="display:grid;gap:18px">
+        <h2>Every CV gets the same name, every&nbsp;time.</h2>
+        <p class="quote">The batch code follows the candidate from the file name to the final report.</p>
+      </div>
+      <ul class="ticks">
+        <li>Point the app at the folder of CVs you received.</li>
+        <li><strong>Normalize file names</strong>: pick a prefix and a starting number, list the
+          words to strip out of candidate names.</li>
+        <li><strong>Preview before / after</strong> in a table — and correct any name by hand —
+          then rename the whole batch at once.</li>
+        <li>Result: <span class="mono">PREFIX0123_Candidate Name.pdf</span>, one rule for everyone.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 07 ------------------------------------------------------------ -->
+  <section class="slide" data-sec="recruit" data-name="Recruitment">
+    <div class="eyebrow">Step 3 · AI CV Scan</div>
+    <h2>The AI reads every CV against that position's job description.</h2>
+    <div class="cols even">
+      <ul class="ticks">
+        <li>Choose the <strong>position</strong> — the app already knows which job description
+          belongs to it. Nobody hunts for a JD file.</li>
+        <li>Add your own instructions if you want: <em>"must have electronics manufacturing
+          background"</em>.</li>
+        <li>It runs in the background with a progress bar — the app stays usable.</li>
+        <li>Same email or phone as an existing candidate? It stops and asks. It never quietly
+          merges two people.</li>
+      </ul>
+      <div class="card">
+        <div class="num">CAPTURED PER CANDIDATE</div>
+        <h3>Straight into the candidate list</h3>
+        <p>Full name · date of birth · email · phone<br>
+           <strong>Fit score 0–100</strong> with a written justification<br>
+           <strong>Strengths</strong> and <strong>weaknesses</strong> against that specific JD<br>
+           The CV file itself, linked to the record</p>
+      </div>
+    </div>
+    <p class="note">Reading and summarising forty CVs is an evening of work. Here the result isn't a
+      note in your head — it is data you can still search next year.</p>
+  </section>
+
+  <!-- 08 ------------------------------------------------------------ -->
+  <section class="slide" data-sec="recruit" data-name="Recruitment">
+    <div class="eyebrow">Step 4 · Candidate list</div>
+    <div class="cols">
+      <div style="display:grid;gap:18px">
+        <h2>One list, and it answers questions.</h2>
+        <p class="quote">"Who did we interview for this role last year, and why didn't we hire
+          them?" becomes a search instead of an excavation.</p>
+      </div>
+      <ul class="ticks">
+        <li><strong>Free-text search</strong> across the whole candidate record.</li>
+        <li>Filters that match how we talk: <strong>Position · Department · Status · Batch</strong>.</li>
+        <li>Click the CV file name to open the PDF. Moved or renamed? Point at it once — the app
+          remembers the new location.</li>
+        <li>Tick several candidates and act on all of them together.</li>
+        <li>Right-click for <strong>Quick edit</strong> (interview feedback) and
+          <strong>Update source</strong> — the job board or referral the CV came from, set for the
+          whole selection at once.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 09 ------------------------------------------------------------ -->
+  <section class="slide" data-sec="recruit" data-name="Recruitment">
+    <div class="eyebrow">Step 5 · Invitations</div>
+    <h2>Interview invitations, prepared for you — sent by you.</h2>
+    <div class="cols even">
+      <ul class="ticks">
+        <li>Tick the candidates, choose the round: <strong>1st · 2nd · 3rd</strong>.</li>
+        <li>The app uses the <strong>email template attached to that position for that round</strong>,
+          so the wording is the same whoever sends it.</li>
+        <li>Set a time per candidate — the next one is pre-set to follow on, and <em>Skip</em>
+          passes over anyone you'd rather schedule later.</li>
+        <li>It opens one <strong>Outlook meeting window per candidate</strong>: recipient, CC, time,
+          template body — <strong>and the CV attached</strong>.</li>
+        <li>You add the room and press Send. Outlook handles invitation, calendar and booking.</li>
+        <li>Right after, it offers to move exactly those candidates to the next status.</li>
+      </ul>
+      <div style="display:grid;gap:16px;align-content:start">
+        <p class="quote">Notice what it deliberately does <em>not</em> do: it never sends anything by
+          itself. Every mail stops in front of you first.</p>
+        <div class="card">
+          <div class="num">ALSO</div>
+          <h3>Application Thank You</h3>
+          <p>Opens a normal mail instead — no time slots, no meeting, and the candidate's status is
+            left exactly where it was.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 ------------------------------------------------------------ -->
+  <section class="slide" data-sec="recruit" data-name="Recruitment">
+    <div class="eyebrow">Step 6 · Interview feedback</div>
+    <div class="cols">
+      <div style="display:grid;gap:18px">
+        <h2>Feedback keeps the name of the person who wrote&nbsp;it.</h2>
+        <p class="quote">The full candidate form has thirty fields. The thing you do after every
+          interview needs five — so it has its own short form.</p>
+      </div>
+      <ul class="ticks">
+        <li>Status · result · phone screen date and note.</li>
+        <li>For each of the three rounds: date, overall result, and
+          <strong>as many interviewers as attended</strong> — each with their own conclusion and
+          comments.</li>
+        <li>Interviewer names come from the <strong>employee directory</strong>, so title and
+          department are looked up, never retyped.</li>
+        <li>Dates open a calendar, show <span class="mono">dd/MM/yyyy</span>, and may be left empty —
+          a round that hasn't happened yet doesn't get a meaningless date.</li>
+        <li>In the Excel report, each comment still carries its author. Nothing is merged into one
+          anonymous paragraph.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 11 ------------------------------------------------------------ -->
+  <section class="slide" data-sec="recruit" data-name="Recruitment">
+    <div class="eyebrow">Step 7 · Reporting</div>
+    <h2>The Excel file stays. It is generated, not maintained.</h2>
+    <div class="cols even">
+      <ul class="ticks">
+        <li>The familiar <strong>Candidates</strong> sheet — <strong>25 columns, A to Y</strong>:
+          batch, ID, name, position, source, contact, score, AI evaluation, status, result, phone
+          screen, and four columns for each of the three rounds.</li>
+        <li>Dropdown lists on the columns that should be chosen rather than typed.</li>
+        <li>Status and result colour-coded; <strong>duplicate email addresses flagged in red</strong>.</li>
+        <li>File already exists? It asks: <strong>Append · Overwrite · Cancel</strong>. It never
+          silently rewrites a file you already sent to someone.</li>
+      </ul>
+      <div style="display:grid;gap:24px;align-content:start">
+        <div class="stats">
+          <div class="stat"><b>166</b><span>records exported</span></div>
+          <div class="stat"><b>&lt;1s</b><span>to build the file</span></div>
+          <div class="stat"><b>56 KB</b><span>file size</span></div>
+        </div>
+        <p class="note">No formulas, no links to other workbooks — so it opens instantly on any
+          machine, including one that has never seen our templates.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12 ------------------------------------------------------------ -->
+  <section class="slide divider" data-sec="people" data-name="People &amp; training">
+    <div class="rule"></div>
+    <h2>People &amp;<br>Training</h2>
+    <p class="quote">The same principle after the hire: type it once.</p>
+  </section>
+
+  <!-- 13 ------------------------------------------------------------ -->
+  <section class="slide" data-sec="people" data-name="People &amp; training">
+    <div class="eyebrow">Employees</div>
+    <h2>The master headcount file, with the fragile parts removed.</h2>
+    <div class="cols even">
+      <ul class="ticks">
+        <li><strong>~90 fields</strong>, matching our <em>Master HC file</em> almost column for column.</li>
+        <li>Bulk import <strong>matches by column heading, not column position</strong> — reorder or
+          add columns and the import still lands correctly.</li>
+        <li>Emergency contact arrives as one messy cell (name and number mixed, in every possible
+          format) — the app splits it into name and phone on import.</li>
+        <li><strong>Working / resigned is derived from the termination date</strong>, so the two can
+          never disagree. Resigned colleagues hidden by default, one tick to show them.</li>
+        <li>90 columns would be unreadable: a sensible default set is shown, the rest switch on in
+          <strong>Columns</strong>, grouped as Identity · Contact · Education. Your choice is remembered.</li>
+      </ul>
+      <div style="display:grid;gap:16px;align-content:start">
+        <div class="card">
+          <div class="num">PRE-LOADED DIRECTORIES</div>
+          <h3>Everyone picks from the same list</h3>
+          <p>Nobody types a department name by hand — which is what makes regional numbers add up
+            later.</p>
+        </div>
+        <div class="stats">
+          <div class="stat"><b>20</b><span>departments</span></div>
+          <div class="stat"><b>12</b><span>job levels</span></div>
+          <div class="stat"><b>6</b><span>employee types</span></div>
+          <div class="stat"><b>42</b><span>cost centers</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14 ------------------------------------------------------------ -->
+  <section class="slide" data-sec="people" data-name="People &amp; training">
+    <div class="eyebrow">New joiners</div>
+    <h2>The application form reads itself — then waits for you.</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>How the form arrives</th><th>What the app does</th></tr></thead>
+        <tbody>
+          <tr><td class="key">Typed into the template file</td>
+              <td class="dim">Reads the cells the new employee filled in</td></tr>
+          <tr><td class="key">Printed, completed by hand, scanned to PDF</td>
+              <td class="dim">Reads the handwriting, page by page</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul class="ticks">
+      <li>Several forms can be processed in one go.</li>
+      <li><strong>Every form opens a pre-filled review screen before anything is saved.</strong>
+        Handwriting is not always legible, so a person confirms. <em>Save</em> writes it,
+        <em>Cancel</em> skips it.</li>
+      <li>Before saving it checks employee code, ID number and full name against existing records and
+        shows you any possible duplicate.</li>
+      <li>Fields the form has but the employee record doesn't (references, expected salary…) are
+        deliberately not stored. We keep what we use.</li>
+    </ul>
+  </section>
+
+  <!-- 15 ------------------------------------------------------------ -->
+  <section class="slide" data-sec="people" data-name="People &amp; training">
+    <div class="eyebrow">Training</div>
+    <div class="cols">
+      <div style="display:grid;gap:18px">
+        <h2>A signed attendance sheet updates the training records.</h2>
+        <p class="quote">Nobody should be paid to tick a hundred boxes that a scan already answers.</p>
+      </div>
+      <ul class="ticks">
+        <li><strong>Enroll</strong> employees onto a course straight from the employee list.</li>
+        <li><strong>Course Manager</strong> shows every enrolment and its learning status.</li>
+        <li>We print the roster, everyone signs by hand, the stack is scanned into one PDF.</li>
+        <li>The app splits that PDF page by page, finds which rows carry a handwritten signature,
+          matches them by <strong>employee code</strong>, and marks those people
+          <strong>Completed</strong>.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 16 ------------------------------------------------------------ -->
+  <section class="slide" data-sec="daily" data-name="Every week">
+    <div class="eyebrow">And the small things</div>
+    <h2>Five minutes each. Every week. Forever.</h2>
+    <div class="grid">
+      <div class="card"><div class="num">OFFICE</div><h3>Gate-Open Mail</h3>
+        <p>Each morning it checks today's Outlook calendar for interviews and drafts the mail asking
+          Security to open the gate — shown to you before it goes.</p></div>
+      <div class="card"><div class="num">OFFICE</div><h3>Interview Follow-up</h3>
+        <p>Scans the last month of interviews and reminds you which candidates are still waiting for
+          an answer.</p></div>
+      <div class="card"><div class="num">OFFICE</div><h3>Birthday emails</h3>
+        <p>Sends the birthday card to the right employees on the right day.</p></div>
+      <div class="card"><div class="num">FILES</div><h3>Split Payroll</h3>
+        <p>Splits one master payroll file into a separate file per vendor.</p></div>
+      <div class="card"><div class="num">FILES</div><h3>Quarterly Bonus</h3>
+        <p>Aggregates a quarter's attendance issues into one summary sheet for bonus review.</p></div>
+      <div class="card"><div class="num">FILES</div><h3>PDF → Text</h3>
+        <p>Turns a PDF back into text that keeps its layout, ready to paste into Word.</p></div>
+    </div>
+    <p class="note">Every one of these started as something I was doing by hand, and said out loud in
+      one sentence. That is still how new tools get added.</p>
+  </section>
+
+  <!-- 17 ------------------------------------------------------------ -->
+  <section class="slide divider" data-sec="trust" data-name="Built to be trusted">
+    <div class="rule"></div>
+    <h2>Built to be<br>trusted</h2>
+    <p class="quote">Efficiency is easy to demo. Trust decides whether a tool survives its first
+      month — so most of the work went here.</p>
+  </section>
+
+  <!-- 18 ------------------------------------------------------------ -->
+  <section class="slide" data-sec="trust" data-name="Built to be trusted">
+    <div class="eyebrow">Six rules the app follows everywhere</div>
+    <div class="grid">
+      <div class="card"><div class="num">01</div><h3>AI never writes without a human</h3>
+        <p>Every AI result — CV score, application form, signature sheet — lands in a screen you
+          approve first.</p></div>
+      <div class="card"><div class="num">02</div><h3>Nothing is overwritten silently</h3>
+        <p>Duplicate candidates, duplicate employees, existing Excel files: the app asks, and
+          <em>Cancel</em> is always one of the answers.</p></div>
+      <div class="card"><div class="num">03</div><h3>History is added, never replaced</h3>
+        <p>Each AI evaluation is kept with its date, the model used, and which version of the CV it
+          read. You can see how an assessment changed.</p></div>
+      <div class="card"><div class="num">04</div><h3>Machine-written columns are locked</h3>
+        <p>Batch, ID, score, AI evaluation. Editing those by hand would corrupt the evaluation
+          history, so the app doesn't allow it.</p></div>
+      <div class="card"><div class="num">05</div><h3>Shared lists instead of free typing</h3>
+        <p>Departments, levels, positions, statuses and email templates live in one directory used by
+          every screen.</p></div>
+      <div class="card"><div class="num">06</div><h3>Small details, on purpose</h3>
+        <p>Dates always <span class="mono">dd/MM/yyyy</span> and allowed to be empty · the scroll
+          wheel can't change a date by accident · phone numbers keep their leading zero in Excel ·
+          long jobs run in the background instead of freezing the window.</p></div>
+    </div>
+  </section>
+
+  <!-- 19 ------------------------------------------------------------ -->
+  <section class="slide" data-sec="trust" data-name="Built to be trusted">
+    <div class="eyebrow">Before you ask</div>
+    <h2>Where AI is used — and where it is not.</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Used for</th><th>Never used for</th></tr></thead>
+        <tbody>
+          <tr><td class="key">Reading a CV and scoring fit against the JD</td>
+              <td class="dim">Deciding who to hire or reject</td></tr>
+          <tr><td class="key">Reading a completed application form</td>
+              <td class="dim">Writing anything into the records unreviewed</td></tr>
+          <tr><td class="key">Reading handwritten signatures on a scanned roster</td>
+              <td class="dim">Sending any email on its own</td></tr>
+          <tr><td class="key">Turning scanned PDFs back into text</td>
+              <td class="dim">Anything at all while you are offline</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul class="ticks">
+      <li>What leaves the machine: only the specific file being read, for that one request. Nothing
+        is uploaded in the background.</li>
+      <li>The AI key is set once in <strong>Settings</strong> and shared by every AI feature.</li>
+      <li>If AI is unavailable, every screen still works — you type instead of it reading.</li>
+    </ul>
+  </section>
+
+  <!-- 20 ------------------------------------------------------------ -->
+  <section class="slide" data-name="Where this goes">
+    <div class="eyebrow">Direction</div>
+    <h2>From one laptop to one source of truth.</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Phase</th><th>What changes</th><th>What you get</th></tr></thead>
+        <tbody>
+          <tr><td class="key">Now</td>
+              <td>Individual use, one HR team, data on your own machine</td>
+              <td class="dim">Time back on CV screening, invitations and reporting</td></tr>
+          <tr><td class="key">Next</td>
+              <td>One shared central database, several regions on the same lists</td>
+              <td class="dim">One candidate history, one employee master, nothing to reconcile</td></tr>
+          <tr><td class="key">Then</td>
+              <td>Reporting on top of that data, plus access rights per role</td>
+              <td class="dim">Headcount, hiring funnel, time-to-hire and training coverage — regional
+                numbers that agree with each other</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">Everything you saw was built so this step is possible: shared lists, records that
+      keep their history, one place per fact. Moving to a central database is then a change of
+      location — not a rebuild.</p>
+  </section>
+
+  <!-- 21 ------------------------------------------------------------ -->
+  <section class="slide" data-name="What I need from you">
+    <div class="eyebrow">Next steps</div>
+    <div class="cols">
+      <div style="display:grid;gap:18px">
+        <h2>What I'd like from&nbsp;you.</h2>
+        <p class="quote">The work is the same. The typing isn't.</p>
+        <p class="lead">Contact · how to get a copy · where the pilot starts.</p>
+      </div>
+      <ol class="steps">
+        <li><b>One pilot volunteer per region</b> <span>— run it on a real hiring batch and tell me
+          where it annoys you.</span></li>
+        <li><b>Confirm the report columns</b> <span>— if your region needs a column the sheet doesn't
+          have, now is the cheapest moment to add it.</span></li>
+        <li><b>Agree the shared lists</b> <span>— statuses, levels, sources, departments. A central
+          database only helps if we name things the same way.</span></li>
+        <li><b>Name your biggest repeated task</b> <span>— every tool in this app started as one
+          sentence like that.</span></li>
+      </ol>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(function () {
+  var deck = document.getElementById('deck');
+  var slides = Array.prototype.slice.call(deck.querySelectorAll('.slide'));
+  var railSec = document.getElementById('railSec');
+  var railNum = document.getElementById('railNum');
+  var bar = document.getElementById('bar');
+  var current = 0;
+
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+  function paint(i) {
+    current = i;
+    var s = slides[i];
+    railSec.textContent = s.dataset.name || '';
+    railSec.style.color = getComputedStyle(s).getPropertyValue('--sec');
+    railNum.textContent = pad(i + 1);
+    bar.style.background = getComputedStyle(s).getPropertyValue('--sec');
+    bar.style.width = ((i + 1) / slides.length * 100) + '%';
+  }
+
+  // Slide đang xem = slide phủ phần giữa khung nhìn.
+  var ticking = false;
+  deck.addEventListener('scroll', function () {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(function () {
+      var mid = deck.scrollTop + deck.clientHeight / 2;
+      for (var i = 0; i < slides.length; i++) {
+        if (slides[i].offsetTop <= mid && slides[i].offsetTop + slides[i].offsetHeight > mid) {
+          if (i !== current) paint(i);
+          break;
+        }
+      }
+      ticking = false;
+    });
+  }, { passive: true });
+
+  function go(delta) {
+    var i = Math.min(slides.length - 1, Math.max(0, current + delta));
+    slides[i].scrollIntoView({ block: 'start' });
+    paint(i);
+  }
+
+  window.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'PageDown' ||
+        (e.key === ' ' && !e.shiftKey)) { e.preventDefault(); go(1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp' ||
+        (e.key === ' ' && e.shiftKey)) { e.preventDefault(); go(-1); }
+    else if (e.key === 'Home') { e.preventDefault(); go(-slides.length); }
+    else if (e.key === 'End') { e.preventDefault(); go(slides.length); }
+  });
+
+  paint(0);
+})();
+</script>
+
+</body>
+</html>
