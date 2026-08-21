@@ -13,7 +13,7 @@ from PySide6.QtCore import QDate, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDateEdit, QFileDialog, QFrame,
+    QCalendarWidget, QCheckBox, QComboBox, QDateEdit, QFileDialog, QFrame,
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -69,12 +69,19 @@ def calendar_qss():
         color: {P['--text']}; }}
     QCalendarWidget QAbstractItemView {{
         background: {P['--input-bg']}; color: {P['--text']};
-        selection-background-color: {P['--accent']}; selection-color: #ffffff;
+        selection-background-color: transparent; selection-color: #ffffff;
         outline: none; border: none; border-radius: 0;
         gridline-color: transparent; padding: 2px;
     }}
     QCalendarWidget QAbstractItemView::item {{
         border: none; border-radius: 8px; padding: 2px; }}
+    /* Nền ô ngày được chọn do RIÊNG rule này vẽ (bo góc), nên
+       selection-background-color ở trên phải trong suốt: nếu tô màu, Qt vẽ
+       thêm một hình chữ nhật VUÔNG phía dưới và bốn góc của nó lòi ra ngoài
+       viên thuốc bo góc, trông như viền tím quanh ngày đang chọn. */
+    QCalendarWidget QAbstractItemView::item:selected {{
+        background: {P['--accent']}; color: #ffffff;
+        border: none; border-radius: 8px; }}
     QCalendarWidget QAbstractItemView:disabled {{ color: {P['--text-faint']}; }}
     QCalendarWidget QHeaderView::section {{
         background: transparent; color: {P['--text-muted']};
@@ -93,6 +100,38 @@ def calendar_qss():
         border: 1px solid {P['--border-strong']}; border-radius: 8px;
         padding: 2px 6px; }}
     """
+
+
+
+class Calendar(QCalendarWidget):
+    """Lịch của app: style theo palette + khoanh viền NGÀY HÔM NAY.
+
+    QSS không có pseudo-state nào cho "hôm nay" nên viền phải vẽ tay ở
+    paintCell. Hôm nay CHỈ có viền (không tô nền) để phân biệt rõ với ngày đang
+    chọn — ô đang chọn mới là ô tô đầy màu accent. Ngày đang chọn trùng hôm nay
+    thì bỏ viền, vì nền đầy đã nói rõ hơn.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(calendar_qss())
+        self.setGridVisible(False)
+        self.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)
+        self.setHorizontalHeaderFormat(QCalendarWidget.ShortDayNames)
+
+    def paintCell(self, painter, rect, date):
+        super().paintCell(painter, rect, date)
+        if date != QDate.currentDate() or date == self.selectedDate():
+            return
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(QColor(theme.PALETTE["--accent"]))
+        pen.setWidthF(1.4)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        # Viền trùng khít viên thuốc của ngày đang chọn (bán kính 8 như QSS).
+        painter.drawRoundedRect(QRectF(rect).adjusted(1.2, 1.2, -1.2, -1.2), 8, 8)
+        painter.restore()
 
 
 class DateEdit(QDateEdit):
@@ -117,7 +156,7 @@ class DateEdit(QDateEdit):
         # 01/01/1900. Một dấu cách mới cho ra ô trắng như mong muốn.
         self.setSpecialValueText(" ")
         self.setDate(self.EMPTY)
-        self.calendarWidget().setStyleSheet(calendar_qss())
+        self.setCalendarWidget(Calendar(self))
 
     def wheelEvent(self, e):
         # Lăn chuột KHÔNG đổi ngày — để cuộn trang/modal không vô tình sửa dữ

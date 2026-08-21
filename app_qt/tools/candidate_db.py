@@ -19,7 +19,7 @@ import unicodedata
 from PySide6.QtCore import QDate, QDateTime, QTime, Qt
 from PySide6.QtGui import QCursor, QTextDocument
 from PySide6.QtWidgets import (
-    QApplication, QCalendarWidget, QFileDialog, QFrame, QHBoxLayout,
+    QApplication, QFileDialog, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QToolTip, QVBoxLayout, QWidget,
 )
 
@@ -1110,7 +1110,7 @@ class _QuickEditDialog(ModalDialog):
         self._fb_boxes = {}     # vòng → layout để chèn dòng mới vào
 
         name = _txt(row, "full_name") or f"#{self._cid}"
-        card, lay = self.build_shell(f"Quick edit · {name}")
+        card, lay = self.build_shell(f"Update feedback · {name}")
 
         body = QWidget()
         col = QVBoxLayout(body)
@@ -1319,8 +1319,9 @@ class CandidateDbTool(BaseTool):
                                link_keys={"cv_file_path"}, on_link=self._on_file_link,
                                checkable=True,
                                menu_actions=[
-                                   ("Quick edit (interview feedback)…", self._quick_edit),
-                                   ("Update source…", self._bulk_source)])
+                                   ("Update feedback", self._quick_edit,
+                                    {"single": True}),
+                                   ("Update source", self._bulk_source)])
         lay.addWidget(self.table, 1)
 
         self.count_lbl = QLabel("")
@@ -1561,21 +1562,15 @@ class CandidateDbTool(BaseTool):
     # từng file lấy ở đâu — nên đây là chỗ điền tay duy nhất. Vào bằng CHUỘT PHẢI
     # trên bảng (xem menu_actions của DataTable), không chiếm chỗ trên toolbar.
     # ------------------------------------------- nhập nhanh (chuột phải 1 dòng)
-    def _quick_edit(self, candidate_id):
-        """Mở hộp nhập nhanh cho ĐÚNG dòng vừa bấm chuột phải (không cần tick)."""
-        row = next((r for r in self._rows
-                    if r["candidate_id"] == candidate_id), None)
-        if row is None:
-            return
-        if _QuickEditDialog(self._root, row).exec():
+    def _quick_edit(self, rows):
+        """Mở hộp nhập nhanh cho dòng chuột phải trỏ tới (khai báo `single` nên
+        bảng chỉ gọi khi phạm vi đúng 1 dòng)."""
+        if _QuickEditDialog(self._root, rows[0]).exec():
             self._reload()
 
-    def _bulk_source(self, _candidate_id=None):
-        rows = self.table.checked_rows()
-        if not rows:
-            dialogs.info(self._root, "Nothing selected",
-                         "Tick at least one candidate in the table to update source.")
-            return
+    def _bulk_source(self, rows):
+        """Đổi nguồn cho các dòng bảng đã giải sẵn — dòng chuột phải nếu nó chưa
+        tick, cả nhóm tick nếu nó nằm trong nhóm."""
         self._ask_bulk_source(rows)
 
     def _ask_bulk_source(self, rows):
@@ -2077,11 +2072,7 @@ class CandidateDbTool(BaseTool):
             first = prev_end.time()
             second = first.addSecs(max(1800, prev_start.secsTo(prev_end)))
 
-        cal = QCalendarWidget(card)
-        cal.setStyleSheet(widgets.calendar_qss())
-        cal.setGridVisible(False)
-        cal.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)   # bỏ cột số tuần
-        cal.setHorizontalHeaderFormat(QCalendarWidget.ShortDayNames)
+        cal = widgets.Calendar(card)     # đã style sẵn, bỏ cột số tuần, khoanh hôm nay
         cal.setNavigationBarVisible(True)
         cal.setFirstDayOfWeek(Qt.Monday)
         cal.setMinimumDate(QDate.currentDate())

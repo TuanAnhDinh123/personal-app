@@ -104,6 +104,13 @@ def _tsv_cell(value):
     return s
 
 
+def _row_count(rows):
+    """Phạm vi thao tác dạng chữ để ghép vào nhãn menu — luôn ghi cả số 1
+    ("1 row") để người dùng thấy rõ thao tác chỉ chạy trên một dòng."""
+    n = len(rows)
+    return f"{n} row" if n == 1 else f"{n} rows"
+
+
 class DictTableModel(QAbstractTableModel):
     def __init__(self, columns, rows=None, pk=None, link_keys=None):
         super().__init__()
@@ -300,11 +307,13 @@ class DataTable(QTableView):
                  copy_keys=None, menu_actions=None, parent=None):
         super().__init__(parent)
         self.hover_row = -1
-        # menu_actions: [(nhãn, hàm chạy)] — thao tác riêng của từng tool, hiện ở
-        # ĐẦU menu chuột phải, phía trên nhóm Copy dùng chung. Hàm nhận KHÓA CHÍNH
-        # của dòng vừa bấm chuột phải; thao tác làm trên các dòng đang tick thì
-        # cứ bỏ qua tham số đó.
-        self._menu_actions = list(menu_actions) if menu_actions else []
+        # menu_actions: [(nhãn, hàm chạy)] hoặc [(nhãn, hàm chạy, opts)] — thao
+        # tác riêng của từng tool, hiện ở ĐẦU menu chuột phải, phía trên nhóm
+        # Copy dùng chung. Hàm nhận DANH SÁCH DÒNG đã giải theo _target_rows —
+        # tool không cần tự đọc nhóm tick nữa. opts: {"single": True} cho thao
+        # tác chỉ làm được trên 1 dòng.
+        self._menu_actions = [a if len(a) > 2 else (*a, {})
+                              for a in (menu_actions or ())]
         # copy_keys: thứ tự cột CỐ ĐỊNH khi copy cả dòng (xem _copy_columns).
         self._copy_keys = list(copy_keys) if copy_keys else None
         # checkable → chèn cột checkbox ở đầu (cần pk để nhớ dòng nào được tick).
@@ -505,14 +514,21 @@ class DataTable(QTableView):
         """
         return self._copy_keys if self._copy_keys is not None else self.visible_keys()
 
-    def _rows_to_copy(self, index):
-        """Dòng nào được copy: các dòng ĐANG TICK (giữ nguyên thứ tự trong
-        bảng); chưa tick dòng nào thì lấy dòng đang trỏ tới."""
-        rows = self._model.checked_rows()
-        if rows:
-            return rows
+    def _target_rows(self, index):
+        """Dòng mà thao tác cấp DÒNG tác động lên — luật chung cho cả menu chuột
+        phải và phím tắt.
+
+        Dòng đang trỏ tới có trong nhóm tick → lấy CẢ NHÓM (giữ nguyên thứ tự
+        trong bảng); không có trong nhóm → chỉ mình nó, bỏ qua nhóm tick. Không
+        tự sửa checkbox: chuột phải chỉ đổi phạm vi thao tác, không đổi lựa chọn
+        người dùng đã tick.
+        """
         row = self._model.row_at(index.row())
-        return [row] if row is not None else []
+        if row is None:
+            return []
+        if self._model.is_row_checked(index.row()):
+            return self._model.checked_rows()
+        return [row]
 
     def _copy_rows(self, rows):
         """Đưa `rows` lên clipboard dạng TSV — dán vào Excel là trải đúng ô.
@@ -534,7 +550,7 @@ class DataTable(QTableView):
         if e.key() == Qt.Key_C and e.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier):
             idx = self.currentIndex()
             if idx.isValid():
-                self._copy_rows(self._rows_to_copy(idx))
+                self._copy_rows(self._target_rows(idx))
             return
         if e.matches(QKeySequence.Copy):
             idx = self.currentIndex()
@@ -548,17 +564,27 @@ class DataTable(QTableView):
         if not idx.isValid():
             return
         menu = QMenu(self)
-        row_id = self._model.id_at(idx.row())
-        for label, callback in self._menu_actions:
-            menu.addAction(label, lambda cb=callback: cb(row_id))
+        rows = self._target_rows(idx)
+        # Nhãn luôn kèm phạm vi (số dòng) để người dùng thấy thao tác chạy trên
+        # bao nhiêu dòng TRƯỚC khi bấm; thao tác `single` mà đang trỏ nhiều dòng
+        # thì để mờ kèm lý do, không âm thầm chạy trên một dòng bất kỳ.
+        for label, callback, opts in self._menu_actions:
+            single = opts.get("single")
+            if single and len(rows) > 1:
+                act = menu.addAction(f"{label.rstrip('…')} (pick one row)")
+                act.setEnabled(False)
+                continue
+            # Thao tác `single` luôn chạy đúng 1 dòng nên khỏi ghi số cho rườm rà.
+            text = label if single else f"{label} ({_row_count(rows)})"
+            act = menu.addAction(text, lambda cb=callback, rs=rows: cb(rs))
+            act.setEnabled(bool(rows))
         if self._menu_actions:
             menu.addSeparator()
-        act = menu.addAction("Copy", lambda: self._copy(self._model._text(idx)))
+        act = menu.addAction("Copy cell", lambda: self._copy(self._model._text(idx)))
         act.setShortcut(QKeySequence.Copy)
-        rows = self._rows_to_copy(idx)
         if rows:
-            label = "Copy row" if len(rows) == 1 else f"Copy {len(rows)} rows"
-            act = menu.addAction(label, lambda: self._copy_rows(rows))
+            act = menu.addAction(f"Copy {_row_count(rows)}",
+                                 lambda: self._copy_rows(rows))
             act.setShortcut(QKeySequence("Ctrl+Shift+C"))
         menu.exec(self.viewport().mapToGlobal(pos))
 

@@ -290,13 +290,17 @@ class _PositionCombo(widgets.ComboBox):
 
     @staticmethod
     def _label(row):
-        """'Backend Dev · IT — JD: jd_backend.pdf' (hoặc '— chưa có file JD')."""
+        """'Backend Dev · IT' (thêm '⚠ no JD file' nếu vị trí chưa gắn JD).
+
+        KHÔNG kèm tên file JD: Qt lấy bề rộng tối thiểu của combo theo option
+        DÀI NHẤT, nên một nhãn dài đẩy cả trang rộng ra — nội dung tràn khỏi
+        thẻ và sinh thanh cuộn ngang. Nhãn gọn cũng là quy ước chung của các
+        màn khác (xem candidate_db._position_options).
+        """
         title = (row["position_title"] or f"#{row['position_id']}").strip()
         dept = (row["department_name"] or "").strip()
-        jd = (row["jd_file_path"] or "").strip()
         left = f"{title} · {dept}" if dept else title
-        return f"{left}  —  JD: {os.path.basename(jd)}" if jd \
-            else f"{left}  —  ⚠ no JD file"
+        return left if (row["jd_file_path"] or "").strip() else f"{left}  —  ⚠ no JD file"
 
     def reload(self):
         keep = self.currentText()
