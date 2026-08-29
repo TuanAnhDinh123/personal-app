@@ -660,7 +660,7 @@ def _card(parent):
     """Thẻ trắng chiếm hết chỗ, có shadow — khung chung cho trang full-height."""
     card = widgets.Card(parent)
     lay = QVBoxLayout(card)
-    lay.setContentsMargins(22, 20, 22, 18)
+    lay.setContentsMargins(22, 10, 22, 18)
     lay.setSpacing(10)
     return card, lay
 
@@ -1144,24 +1144,24 @@ class _QuickEditDialog(ModalDialog):
         # Vị trí ứng tuyển CHỈ ĐỂ XEM: đổi vị trí là đổi cả luồng tuyển dụng
         # (JD, mẫu mail, các vòng đã có) nên chỉ làm ở form đầy đủ.
         v.addLayout(_labeled(box, "Applying for",
-                             _readonly(box, _txt(self._row, "position_title"))))
+                             _plain_text(box, _txt(self._row, "position_title"))))
 
-        two = QHBoxLayout()
-        two.setSpacing(12)
+        three = QHBoxLayout()
+        three.setSpacing(12)
         self.f_status = widgets.ComboBox(box)
         self.f_status.addItems([""] + cv_schema.CANDIDATE_STATUS_CHOICES)
         self.f_status.setCurrentText(_txt(self._row, "status"))
-        two.addLayout(_labeled(box, "Status", self.f_status), 1)
+        three.addLayout(_labeled(box, "Status", self.f_status), 1)
 
         self.f_result = widgets.ComboBox(box)
         self.f_result.addItems([""] + cv_schema.FINAL_STATUS_CHOICES)
         self.f_result.setCurrentText(_txt(self._row, "final_status"))
-        two.addLayout(_labeled(box, "Result", self.f_result), 1)
-        v.addLayout(two)
+        three.addLayout(_labeled(box, "Result", self.f_result), 1)
 
         self.f_ps_date = widgets.DateEdit(box)
         self.f_ps_date.set(_txt(self._row, "phone_screen_date"))
-        v.addLayout(_labeled(box, "Phone screen date", self.f_ps_date))
+        three.addLayout(_labeled(box, "Phone screen date", self.f_ps_date), 1)
+        v.addLayout(three)
 
         self.f_ps_note = widgets.TextEdit(box)
         self.f_ps_note.setAcceptRichText(False)
@@ -1276,13 +1276,13 @@ def _labeled(parent, text, widget):
     return col
 
 
-def _readonly(parent, text):
-    """Ô CHỈ ĐỂ XEM: trông như ô nhập nhưng không sửa và không nhận focus."""
-    edit = QLineEdit(text or "—", parent)
-    edit.setReadOnly(True)
-    edit.setFocusPolicy(Qt.NoFocus)
-    edit.setDisabled(True)      # dùng luôn tông chữ mờ của QSS cho ô khoá
-    return edit
+def _plain_text(parent, text):
+    """Chữ thường CHỈ ĐỂ XEM: không phải ô nhập, không khung/nền, đọc như văn bản."""
+    lbl = QLabel(text or "—", parent)
+    lbl.setObjectName("AIText")
+    lbl.setWordWrap(True)
+    lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    return lbl
 
 
 def _get_val(row, key):

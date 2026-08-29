@@ -23,6 +23,7 @@ def main():
     # hình → thấy như UI nháy 1 cái trước khi dropdown hiện ra.
     app.setEffectEnabled(Qt.UI_AnimateCombo, False)
     app.setStyleSheet(theme.build_stylesheet())   # nạp "CSS" (theme.qss) của app
+    theme.install_pointer_cursor(app)             # con trỏ tay cho mọi chỗ bấm được
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

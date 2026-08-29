@@ -179,10 +179,16 @@ QComboBox::drop-down, QDateEdit::drop-down {
     border: none;
     width: 30px;
 }
-QComboBox::down-arrow, QDateEdit::down-arrow {
+QComboBox::down-arrow {
     image: url("{{CHEVRON_ICON}}");
     width: 14px;
     height: 14px;
+}
+/* Ô ngày dùng icon lịch thay vì mũi tên, để không bị lẫn với select-box. */
+QDateEdit::down-arrow {
+    image: url("{{CALENDAR_ICON}}");
+    width: 15px;
+    height: 15px;
 }
 QComboBox QAbstractItemView {
     background: {{--card-bg}};

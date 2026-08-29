@@ -10,6 +10,9 @@ Muốn đổi toàn bộ giao diện: sửa palette bên dưới HOẶC sửa th
 """
 import os
 
+from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtWidgets import QAbstractButton, QComboBox, QDateTimeEdit
+
 # ------------------------------------------------------------------ Palette
 # Phong cách: dashboard SÁNG kiểu SaaS + sidebar TỐI làm điểm nhấn, accent indigo.
 PALETTE = {
@@ -113,4 +116,31 @@ def build_stylesheet():
         qss = qss.replace("{{" + token + "}}", value)
     qss = qss.replace("{{CHECK_ICON}}", asset("check.svg"))
     qss = qss.replace("{{CHEVRON_ICON}}", asset("chevron-down.svg"))
+    qss = qss.replace("{{CALENDAR_ICON}}", asset("calendar.svg"))
     return qss
+
+
+# --------------------------------------------------------- con trỏ hình tay
+# QSS có khai báo "cursor: pointing-hand" trong chuẩn Qt Style Sheets, nhưng
+# bản Qt6 đang dùng KHÔNG áp dụng property này (đã thử — không báo lỗi, chỉ
+# lặng lẽ không có tác dụng). Nên phải set bằng tay qua bộ lọc sự kiện toàn
+# app: mọi QAbstractButton (nút, checkbox, radio…), QComboBox và QDateTimeEdit
+# — bấm đâu trong ô cũng ra kết quả — tự động có con trỏ tay khi hover, không
+# cần sửa từng nơi tạo widget.
+_POINTER_CURSOR_TYPES = (QAbstractButton, QComboBox, QDateTimeEdit)
+
+
+class _PointerCursorFilter(QObject):
+    def eventFilter(self, obj, event):
+        if (event.type() == QEvent.Enter and obj.isEnabled()
+                and isinstance(obj, _POINTER_CURSOR_TYPES)):
+            obj.setCursor(Qt.PointingHandCursor)
+        return False
+
+
+def install_pointer_cursor(app):
+    """Gọi 1 lần sau khi tạo QApplication, ở main.py."""
+    # Giữ tham chiếu Python trên chính `app` — không thì bị GC dọn mất trong
+    # khi phía C++ (installEventFilter) vẫn còn giữ con trỏ, dễ crash.
+    app._pointer_cursor_filter = _PointerCursorFilter()
+    app.installEventFilter(app._pointer_cursor_filter)

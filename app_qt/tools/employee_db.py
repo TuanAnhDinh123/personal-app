@@ -653,7 +653,7 @@ class EmployeeDbTool(BaseTool):
         repo.init_db()
         card = widgets.Card(parent)
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(22, 20, 22, 18)
+        lay.setContentsMargins(22, 10, 22, 18)
         lay.setSpacing(10)
         self._root = card
 

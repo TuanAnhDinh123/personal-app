@@ -257,6 +257,7 @@ class _TableHeader(QHeaderView):
         self._table = table
         self.setSectionsClickable(True)
         self.setHighlightSections(False)
+        self.setCursor(Qt.PointingHandCursor)
 
     def paintSection(self, painter, rect, logical_index):
         super().paintSection(painter, rect, logical_index)
@@ -591,8 +592,12 @@ class DataTable(QTableView):
     def mouseMoveEvent(self, e):
         idx = self.indexAt(e.position().toPoint())
         self._set_hover(idx.row())
+        # Cột checkbox cũng bấm-để-đổi như link, chỉ khác là đổi tick chứ
+        # không mở gì — vẫn cần con trỏ tay để báo "bấm được".
+        clickable = self._is_link_cell(idx) or (
+            idx.isValid() and idx.column() == self._check_col)
         self.viewport().setCursor(
-            Qt.PointingHandCursor if self._is_link_cell(idx) else Qt.ArrowCursor)
+            Qt.PointingHandCursor if clickable else Qt.ArrowCursor)
         super().mouseMoveEvent(e)
 
     def leaveEvent(self, e):

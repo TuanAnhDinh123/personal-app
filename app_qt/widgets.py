@@ -9,8 +9,8 @@ Khác biệt với bản Tk: mỗi hàm nhận `parent` là QWidget CÓ SẴN la
 """
 import os
 
-from PySide6.QtCore import QDate, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap
+from PySide6.QtCore import QDate, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QImage, QMouseEvent, QPainter, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QCalendarWidget, QCheckBox, QComboBox, QDateEdit, QFileDialog, QFrame,
@@ -99,6 +99,10 @@ def calendar_qss():
     QCalendarWidget QSpinBox {{ background: {P['--input-bg']}; color: {P['--text']};
         border: 1px solid {P['--border-strong']}; border-radius: 8px;
         padding: 2px 6px; }}
+    /* Khung ngoài: không có border thì lịch nổi lên nền không rõ ràng, nhìn
+       như bị "trôi" giữa trang — viền + bo góc cho nó thành một khối rõ ràng. */
+    Calendar {{ background: {P['--card-bg']};
+        border: 1px solid {P['--border-strong']}; border-radius: 12px; }}
     """
 
 
@@ -114,10 +118,31 @@ class Calendar(QCalendarWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # QWidget ghép từ nhiều widget con (thanh điều hướng + bảng ngày) không
+        # tự vẽ nền/viền riêng của nó — phải bật cờ này thì rule "Calendar {...}"
+        # ở trên (nền + viền + bo góc) mới thực sự hiện ra.
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet(calendar_qss())
         self.setGridVisible(False)
         self.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)
         self.setHorizontalHeaderFormat(QCalendarWidget.ShortDayNames)
+
+    def sizeHint(self):
+        # QSS thêm đệm cho từng ô ngày (dễ đọc, dễ bấm hơn mặc định) nhưng
+        # sizeHint gốc của Qt không cộng phần cao thêm đó vào — khoảng nửa số
+        # tháng trong năm cần đủ 6 hàng thì hàng cuối bị lòi ra ngoài khung popup.
+        # Cộng dư hẳn một hàng để tháng nào cũng đủ chỗ.
+        size = super().sizeHint()
+        return QSize(size.width(), size.height() + 34)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        # Ô ngày chưa nhập neo ở 01/1900 (DateEdit.EMPTY) — bung lịch mà cứ hiện
+        # đúng trang đó thì phải bấm lùi hơn trăm năm mới tới hôm nay. Ô rỗng thì
+        # mở ngay tháng hiện tại; ô đã có ngày thì vẫn hiện đúng trang của ngày đó.
+        if self.selectedDate() == QDate(1900, 1, 1):
+            today = QDate.currentDate()
+            self.setCurrentPage(today.year(), today.month())
 
     def paintCell(self, painter, rect, date):
         super().paintCell(painter, rect, date)
@@ -157,6 +182,17 @@ class DateEdit(QDateEdit):
         self.setSpecialValueText(" ")
         self.setDate(self.EMPTY)
         self.setCalendarWidget(Calendar(self))
+
+    def mousePressEvent(self, e):
+        # Nút bung lịch chỉ chiếm 30px cuối bên phải (theo QSS ::drop-down) —
+        # bấm vào phần còn lại của ô lẽ ra chỉ đặt con trỏ để gõ số, không quen
+        # thuộc với kiểu ô ngày "bấm đâu cũng ra lịch". Bấm chuột trái ở bất kỳ
+        # đâu trong ô đều chuyển hướng thành bấm đúng vào nút đó.
+        if e.button() == Qt.LeftButton:
+            btn_pos = QPointF(self.width() - 15, self.height() / 2)
+            e = QMouseEvent(e.type(), btn_pos, e.globalPosition(),
+                             e.button(), e.buttons(), e.modifiers())
+        super().mousePressEvent(e)
 
     def wheelEvent(self, e):
         # Lăn chuột KHÔNG đổi ngày — để cuộn trang/modal không vô tình sửa dữ
