@@ -638,6 +638,31 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE interviews DROP COLUMN note;
         ALTER TABLE interviews DROP COLUMN summary;
     '''),
+    # Đổi cấu trúc `employees` sang khớp file Excel "Personnel Data" (SSOT).
+    # Dữ liệu nhân viên hiện có do người dùng tự xóa tay trước khi mở app với
+    # bản này — lượt này chỉ đổi CẤU TRÚC, không đụng dữ liệu.
+    #
+    # Cột bỏ so với "0001": children_birthdays, education_field,
+    # qualification_code, facility_country, facility_town, work_time_type,
+    # working_time_pct, changing_dates, local_function (không còn nguồn nào —
+    # cả Excel HC lẫn "DLVN Application Form" — cung cấp).
+    # Cột thêm: sub_function (Excel "Function (Common)" — team/nhóm con trong
+    # phòng ban, KHÔNG dùng để tra departments nữa).
+    # Vẫn giữ dù Excel HC không có: nationality, marriage_status,
+    # children_count, children_names — "DLVN Application Form" (đơn dự tuyển,
+    # AI đọc — app/core/application_form.py) đang ghi các cột này.
+    ("0003_rebuild_employees", '''
+        ALTER TABLE employees ADD COLUMN sub_function VARCHAR;
+        ALTER TABLE employees DROP COLUMN children_birthdays;
+        ALTER TABLE employees DROP COLUMN education_field;
+        ALTER TABLE employees DROP COLUMN qualification_code;
+        ALTER TABLE employees DROP COLUMN facility_country;
+        ALTER TABLE employees DROP COLUMN facility_town;
+        ALTER TABLE employees DROP COLUMN work_time_type;
+        ALTER TABLE employees DROP COLUMN working_time_pct;
+        ALTER TABLE employees DROP COLUMN changing_dates;
+        ALTER TABLE employees DROP COLUMN local_function;
+    '''),
 ]
 
 # =============================================================================
@@ -928,8 +953,7 @@ GENDER_CHOICES = ["Male", "Female", "Other"]
 # `employees.termination_date` (rỗng = Working, có ngày = Resigned).
 EMPLOYEE_STATUS_CHOICES = ["Working", "Resigned"]
 
-CONTRACT_PERMANENCY_CHOICES = ["Permanent", "Temporary"]
-WORK_TIME_TYPE_CHOICES = ["FT", "PT"]           # Full Time / Part Time
+CONTRACT_PERMANENCY_CHOICES = ["Permanent", "Temporary", "Fixed Term", "Expat"]
 DIRECT_INDIRECT_CHOICES = ["Direct", "Indirect"]
 YES_NO_CHOICES = ["Y", "N"]                     # Marriage status (Yes)
 MARITAL_STATUS_CHOICES = ["Single", "Married", "Divorced", "Widowed"]

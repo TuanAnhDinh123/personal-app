@@ -103,35 +103,34 @@ EMPLOYEE_FIELDS = [
     # thông tin cá nhân
     "date_of_birth", "gender", "place_of_birth", "native_place", "nationality",
     "religion", "marriage_status", "marital_status", "spouse_name", "spouse_dob",
-    "children_count", "children_names", "children_birthdays",
+    "children_count", "children_names",
     # liên hệ
     "phone", "email", "company_email", "address", "city", "country",
     "permanent_address", "temporary_address",
     "emergency_contact_name", "emergency_contact_phone",
     "emergency_contact_relationship",
     # học vấn
-    "education", "education_field", "major", "graduation_year", "school_name",
-    "qualification", "qualification_code",
+    "education", "major", "graduation_year", "school_name", "qualification",
     # giấy tờ · ngân hàng · thuế · bảo hiểm
     "id_no", "id_issued_date", "id_issued_place",
     "passport_no", "passport_issued_date",
     "bank_account_no", "bank_address", "tax_code", "dependants",
     "insurance_book_no",
     # tổ chức & công việc
-    "department_id", "cost_center_id", "employee_type_id", "level_id",
-    "manager_name", "job_title", "current_position", "time_in_position",
-    "facility_country", "facility_town", "local_function", "by_group",
+    "department_id", "sub_function", "cost_center_id", "employee_type_id",
+    "level_id", "manager_name", "job_title", "current_position",
+    "time_in_position", "by_group",
     "labor_type", "production_line", "operator_skill", "driving_forklift",
     "working_hours_per_week", "smart_working_eligible", "er_jrf", "is_interviewer",
     # hợp đồng & thời gian làm việc
     "date_of_employment", "seniority_date", "contract_permanency",
-    "work_time_type", "working_time_pct", "direct_indirect", "contract_type",
+    "direct_indirect", "contract_type",
     "contract_start_date", "contract_end_date", "changing_date",
     "termination_date", "leaving_reason",
     # số liệu file Excel tự tính
     "years_of_service", "length_of_service", "birth_year", "age", "age_range",
     # ghi chú
-    "changing_notes", "changing_dates", "updated_changing_date", "note",
+    "changing_notes", "updated_changing_date", "note",
 ]
 COURSE_FIELDS = ["title", "content", "date", "location", "course_type"]
 COURSE_EMPLOYEE_FIELDS = ["course_id", "employee_id", "status", "note"]

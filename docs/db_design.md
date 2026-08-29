@@ -536,7 +536,7 @@ Nạp sẵn từ `Code.xlsx` qua `SEED_DATA`, chạy một lần cho mỗi file 
 |---|---|---|
 | `department_id` | INTEGER **PK** | |
 | `department_name` | VARCHAR | Tên đầy đủ. |
-| `short_name` | VARCHAR | Mã viết tắt (FIN, IT, R&D) — khớp cột *Function (Common)* khi import nhân viên. |
+| `short_name` | VARCHAR | Mã viết tắt (FIN, IT, R&D) — khớp cột *Department (short)* khi import nhân viên. |
 | `manager_name` | VARCHAR | |
 | `description` | TEXT | |
 
@@ -617,7 +617,9 @@ Khóa `migration:*` do `cv_repository.init_db()` ghi — xem [Lịch sử thay �
 
 ### `employees` — Nhân viên
 
-Soi theo file `Master HC file.xlsx` (sheet *Master file*), import khớp **theo tên cột** chứ không theo thứ tự cột. Chú thích *(Excel)* là tiêu đề cột nguồn.
+Hai nguồn ghi vào bảng này:
+- **Import hàng loạt** từ file Excel "Personnel Data" (HR export, sheet *Personnel Data-new*) — khớp **theo tên cột**, không theo thứ tự. Chú thích *(Excel)* là tiêu đề cột nguồn — coi file này là **nguồn sự thật (SSOT)** cho cấu trúc bảng.
+- **Nhập từng người** từ "DLVN Application Form" (đơn dự tuyển nhân viên mới tự điền, AI đọc) — chỉ điền được một tập con field cá nhân cơ bản, đánh dấu *(App form)*. Xem `app/core/application_form.py`.
 
 Trạng thái làm việc **suy ra** từ `termination_date`: có ngày = đã nghỉ việc.
 
@@ -638,12 +640,12 @@ Trạng thái làm việc **suy ra** từ `termination_date`: có ngày = đã n
 | `date_of_birth` | DATE | Date of Birth |
 | `gender` | VARCHAR | Gender |
 | `place_of_birth` · `native_place` | VARCHAR | Place of birth · Native country |
-| `nationality` · `religion` | VARCHAR | Nationality · Religion |
-| `marriage_status` | VARCHAR | Marriage status (Y/N) |
-| `marital_status` | VARCHAR | Single · Married · Divorced · Widowed |
+| `nationality` · `religion` | VARCHAR | Nationality · Religion — *(App form)*, không có trong Excel |
+| `marriage_status` | VARCHAR | `Y`/`N` — suy ra tự động từ `marital_status` khi nhập đơn dự tuyển *(App form)*, không có trong Excel |
+| `marital_status` | VARCHAR | Single · Married · Divorced · Widowed — Excel: *Marital Status* |
 | `spouse_name` · `spouse_dob` | VARCHAR · DATE | Spouse Name · Spouse date |
-| `children_count` | INT | Number of children |
-| `children_names` · `children_birthdays` | TEXT | Mỗi dòng một người. |
+| `children_count` | INT | Number of children — *(App form)*, không có trong Excel |
+| `children_names` | TEXT | Mỗi dòng một người — *(App form)*, không có trong Excel |
 
 **Liên hệ**
 
@@ -651,8 +653,10 @@ Trạng thái làm việc **suy ra** từ `termination_date`: có ngày = đã n
 |---|---|---|
 | `phone` | VARCHAR | Phone Number — nhiều số ngăn `; ` |
 | `email` · `company_email` | VARCHAR | Personal Email · Company email |
-| `address` · `city` · `country` | VARCHAR | Street · City · Country |
-| `permanent_address` · `temporary_address` | VARCHAR | Thường trú · Tạm trú |
+| `address` | VARCHAR | Street (address) |
+| `city` | VARCHAR | City (address)-theo đc thường trú |
+| `country` | VARCHAR | Country (address) |
+| `permanent_address` · `temporary_address` | VARCHAR | Địa chỉ thường trú · Địa chỉ tạm trú |
 | `emergency_contact_name` | VARCHAR | Emergency Contact Name — chỉ HỌ TÊN |
 | `emergency_contact_phone` | VARCHAR | SĐT người báo tin khẩn: ô Excel gộp "tên + số ĐT", import tự tách sang đây |
 | `emergency_contact_relationship` | VARCHAR | Relationship |
@@ -661,17 +665,17 @@ Trạng thái làm việc **suy ra** từ `termination_date`: có ngày = đã n
 
 | Cột | Kiểu | Excel |
 |---|---|---|
-| `education` · `education_field` | VARCHAR | Education Level |
+| `education` | VARCHAR | Education Level |
 | `major` | VARCHAR | Major — nhiều ngành, mỗi dòng một |
 | `graduation_year` · `school_name` | VARCHAR | Year of graduated · School name |
-| `qualification` · `qualification_code` | VARCHAR | Qualification |
+| `qualification` | VARCHAR | Qualification |
 
 **Giấy tờ · ngân hàng · thuế · bảo hiểm**
 
 | Cột | Kiểu | Excel |
 |---|---|---|
 | `id_no` · `id_issued_date` · `id_issued_place` | VARCHAR · DATE · VARCHAR | ID no. (CCCD) |
-| `passport_no` · `passport_issued_date` | VARCHAR · DATE | Passport No. |
+| `passport_no` · `passport_issued_date` | VARCHAR · DATE | Passport No. · Issued date2 |
 | `bank_account_no` · `bank_address` | VARCHAR | Bank account no. |
 | `tax_code` | VARCHAR | Personal Tax Code |
 | `dependants` | INT | Dependance |
@@ -681,21 +685,21 @@ Trạng thái làm việc **suy ra** từ `termination_date`: có ngày = đã n
 
 | Cột | Kiểu | Excel / tra cứu |
 |---|---|---|
-| `department_id` | INT | Function (Common) → `departments.short_name` |
+| `department_id` | INT | Department (short) → `departments.short_name` |
+| `sub_function` | VARCHAR | Function (Common) — team/nhóm con trong phòng ban, không tra danh mục |
 | `cost_center_id` | INT | New Cost center → `cost_centers.code` |
 | `employee_type_id` | INT | IBC/DBC/WC → `employee_types.code` |
 | `level_id` | INT | Job level → `levels.level_name` |
 | `manager_name` | VARCHAR | Full name of manager |
 | `job_title` · `current_position` | VARCHAR | Job Title · Current Position |
 | `time_in_position` | VARCHAR | Time in Position |
-| `facility_country` · `facility_town` | VARCHAR | Country/Town of facility |
-| `local_function` · `by_group` | VARCHAR | Function (local) · BY GROUP |
+| `by_group` | VARCHAR | BY GROUP |
 | `labor_type` · `production_line` | VARCHAR | Type of labor · Production Line |
 | `operator_skill` · `driving_forklift` | VARCHAR | Operator skill · Driving forklift |
 | `working_hours_per_week` | VARCHAR | Working hour/week |
-| `smart_working_eligible` | VARCHAR | Smart Working Policy Eligible |
+| `smart_working_eligible` | VARCHAR | Eligible -Smart Working Policy Eligible |
 | `er_jrf` | VARCHAR | #ER/ JRF |
-| `is_interviewer` | INT | `1` = có phỏng vấn ứng viên → lọc sẵn danh sách khi nhập kết quả PV |
+| `is_interviewer` | INT | Cờ đánh dấu **tay** ở màn hình Employees — không từ Excel. `1` = có phỏng vấn ứng viên → lọc sẵn danh sách khi nhập kết quả PV |
 
 **Hợp đồng & thời gian làm việc**
 
@@ -703,8 +707,6 @@ Trạng thái làm việc **suy ra** từ `termination_date`: có ngày = đã n
 |---|---|---|
 | `date_of_employment` · `seniority_date` | DATE | Date of Employment |
 | `contract_permanency` | VARCHAR | `Permanent` · `Temporary` |
-| `work_time_type` | VARCHAR | `FT` · `PT` |
-| `working_time_pct` | VARCHAR | % working time |
 | `direct_indirect` | VARCHAR | `Direct` · `Indirect` |
 | `contract_type` | VARCHAR | Type of contract |
 | `contract_start_date` · `contract_end_date` | DATE | |
@@ -718,7 +720,7 @@ Trạng thái làm việc **suy ra** từ `termination_date`: có ngày = đã n
 |---|---|---|
 | `years_of_service` · `length_of_service` | VARCHAR | Year/Length of service |
 | `birth_year` · `age` · `age_range` | VARCHAR | Year of birthday · Age · Age range |
-| `changing_notes` · `changing_dates` | TEXT | Changing notes / lịch sử |
+| `changing_notes` | TEXT | Changing notes |
 | `updated_changing_date` | DATE | Updated changing date |
 | `note` | TEXT | Note |
 
@@ -870,3 +872,4 @@ Ba quy tắc bắt buộc:
 |---|---|---|
 | `0001_initial_schema` | *(tất cả)* | Cấu trúc ban đầu — nội dung `cv_schema.SCHEMA_SQL`. |
 | `0002_drop_interview_notes` | `interviews` | **Bỏ** `note` (nhận xét của HR) và `summary` (tổng hợp hội đồng). Nhận xét chỉ còn ở cấp từng người phỏng vấn (`interview_feedbacks`) — đó mới là thứ thực sự nhận được sau mỗi vòng. Nội dung đang có trong hai cột này **mất theo**. Dùng `ALTER TABLE … DROP COLUMN`, cần SQLite ≥ 3.35. |
+| `0003_rebuild_employees` | `employees` | **ALTER TABLE** cho khớp cấu trúc SSOT ở trên: bỏ `children_birthdays`, `education_field`, `qualification_code`, `facility_country`, `facility_town`, `work_time_type`, `working_time_pct`, `changing_dates`, `local_function`; thêm `sub_function`. Chỉ đổi cấu trúc, không đụng dữ liệu — người dùng tự xóa dữ liệu `employees` cũ trước khi chạy. |

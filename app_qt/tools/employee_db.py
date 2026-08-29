@@ -81,7 +81,6 @@ _EXCEL_HEADER_MAP = {
     "spouse date":                    "spouse_dob",
     "number of children":             "children_count",
     "children's name":                "children_names",
-    "children's birthday":            "children_birthdays",
     # ── liên hệ ──
     "phone number":                   "phone",
     "phone":                          "phone",
@@ -91,6 +90,7 @@ _EXCEL_HEADER_MAP = {
     "street (address)":               "address",
     "address":                        "address",
     "city (address)":                 "city",
+    "city (address)-theo đc thường trú": "city",
     "country (address)":              "country",
     "địa chỉ thường trú":             "permanent_address",
     "địa chỉ tạm trú":                "temporary_address",
@@ -103,16 +103,15 @@ _EXCEL_HEADER_MAP = {
     # ── học vấn ──
     "education level":                "education",
     "education":                      "education",
-    "trình độ theo lĩnh vực":         "education_field",
     "major":                          "major",
     "year of graduated":              "graduation_year",
     "school name":                    "school_name",
     "qualification":                  "qualification",
-    "qualification code":             "qualification_code",
     # ── giấy tờ · ngân hàng · thuế · bảo hiểm ──
     "id no.":                         "id_no",
     "id no":                          "id_no",
     "issued date":                    ("id_issued_date", "passport_issued_date"),
+    "issued date2":                   "passport_issued_date",
     "issued place":                   "id_issued_place",
     "passport no.":                   "passport_no",
     "passport no":                    "passport_no",
@@ -122,8 +121,9 @@ _EXCEL_HEADER_MAP = {
     "dependance":                     "dependants",
     "insurance book no.":             "insurance_book_no",
     # ── tổ chức & công việc ──
-    "function (common)":              _DEPT_TEXT,
-    "function":                       _DEPT_TEXT,
+    "department (short)":             _DEPT_TEXT,
+    "function (common)":              "sub_function",
+    "function":                       "sub_function",
     "new cost center":                _CC_TEXT,
     "cost center":                    _CC_TEXT,
     "ibc/dbc/wc":                     _ETYPE_TEXT,
@@ -132,9 +132,6 @@ _EXCEL_HEADER_MAP = {
     "job title (description)":        "job_title",
     "current position":               "current_position",
     "time in position":               "time_in_position",
-    "country of facility":            "facility_country",
-    "town of facility":               "facility_town",
-    "function (for local only)":      "local_function",
     "by group":                       "by_group",
     "type of labor":                  "labor_type",
     "production line (internal)":     "production_line",
@@ -148,9 +145,6 @@ _EXCEL_HEADER_MAP = {
     "date of employment":             "date_of_employment",
     "cột tính thâm niên":             "seniority_date",
     "permanent/temporary contract":   "contract_permanency",
-    "full time/ part time":           "work_time_type",
-    "full time/part time":            "work_time_type",
-    "% working time":                 "working_time_pct",
     "direct/indirect":                "direct_indirect",
     "type of contract":               "contract_type",
     "starting date of contract":      "contract_start_date",
@@ -163,9 +157,9 @@ _EXCEL_HEADER_MAP = {
     "year of birthday (year)":        "birth_year",
     "age":                            "age",
     "age range":                      "age_range",
-    # ── ghi chú ── ("Changing date" có 2 lần: 1 ngày đơn + 1 ô lịch sử nhiều dòng)
+    # ── ghi chú ──
     "changing notes":                 "changing_notes",
-    "changing date":                  ("changing_date", "changing_dates"),
+    "changing date":                  "changing_date",
     "updated changing date":          "updated_changing_date",
     "note":                           "note",
 }
@@ -175,7 +169,8 @@ _EXCEL_HEADER_MAP = {
 # nguồn khác nên chỉ hiển thị qua mapping bảng master thay vì lưu thẳng text.
 _EXCEL_IGNORED_HEADERS = {
     "legal entity (company)",         # cố định 1 pháp nhân, không cần lưu
-    "stt",                            # số thứ tự (=ROW())
+    "count",                          # số thứ tự (=ROW())
+    "stt",                            # số thứ tự (=ROW()), tên cột ở file khác
     "birthday",                       # =MONTH(ngày sinh)
     "level",                          # cột số phụ trợ, trùng nghĩa "Job level"
     "job title with level (no use)",  # file ghi rõ "no use"
@@ -186,6 +181,11 @@ _EXCEL_IGNORED_HEADERS = {
     "bc/wc",                          # hiển thị qua employee_types.collar
     "position status",                # suy ra từ Termination Date (xem README)
     "status",
+    "qualification (việt nam)",       # bản dịch tiếng Việt của "Qualification", không có thông tin mới
+    "manager surname (report directly to)",  # đã có "Full name of manager" gộp sẵn
+    "manager name",                   # trùng, xem trên
+    "manager middle name (only for vietnam)", # trùng, xem trên
+    "nation (dân tộc)",               # dân tộc — chưa có field tương ứng, hiện luôn rỗng
 }
 
 # Ký tự thuộc vùng Private Use Area (U+E000–U+F8FF) — font ký hiệu (Wingdings…)
@@ -287,7 +287,6 @@ EMP_COL_WIDTHS = {
     "children_count":    80,
     "dependants":        80,
     "age":               60,
-    "working_time_pct":  95,
     "job_title":         180,
     "manager_name":      160,
     "changing_notes":    220,
@@ -310,26 +309,31 @@ _EMP_COLUMN_SPECS = [
     ("middle_name",         "Middle name",        "w"),
     ("date_of_birth",       "Date of birth",      "center"),
     ("gender",              "Gender",             "center"),
-    ("education",           "Education level",    "w"),
-    ("address",             "Street (address)",   "w"),
-    ("city",                "City",               "w"),
-    ("country",             "Country",            "w"),
     ("phone",               "Phone",              "w"),
-    ("manager_name",        "Manager",            "w"),
+    ("date_of_employment",  "Date of employment", "center"),
     ("department_name",     "Function (dept.)",   "w"),
+    ("sub_function",        "Function (Common)",  "w"),
     ("cost_center_code",    "Cost center",        "center"),
     ("cost_center_group",   "CC group",           "w"),
-    ("date_of_employment",  "Date of employment", "center"),
+    ("manager_name",        "Manager",            "w"),
     ("job_title",           "Job title",          "w"),
-    ("facility_country",    "Country of facility", "w"),
-    ("facility_town",       "Town of facility",   "w"),
-    ("contract_permanency", "Perm./Temp.",        "center"),
-    ("work_time_type",      "FT/PT",              "center"),
-    ("working_time_pct",    "% working time",     "center"),
     ("direct_indirect",     "Direct/Indirect",    "center"),
+    ("collar",              "BC/WC",              "w"),
+    ("employee_type_code",  "IBC/DBC/WC",         "center"),
+    ("by_group",            "By group",           "w"),
+    ("working_hours_per_week", "Working hour/week", "center"),
+    ("production_line",     "Production line",    "w"),
+    ("level_name",          "Job level",          "center"),
+    ("operator_skill",      "Operator skill",     "w"),
+    ("contract_permanency", "Perm./Temp.",        "center"),
+    ("contract_type",       "Type of contract",   "w"),
+    ("contract_start_date", "Contract start",     "center"),
+    ("contract_end_date",   "Contract end",       "center"),
     ("termination_date",    "Termination date",   "center"),
     ("work_status",         "Status",             "center"),
     ("leaving_reason",      "Reason for leaving", "w"),
+    ("qualification",       "Qualification",      "w"),
+    ("education",           "Education level",    "w"),
     ("major",               "Major",              "w"),
     ("graduation_year",     "Year of graduated",  "center"),
     ("school_name",         "School name",        "w"),
@@ -338,6 +342,10 @@ _EMP_COLUMN_SPECS = [
     ("id_issued_date",      "ID issued date",     "center"),
     ("id_issued_place",     "ID issued place",    "w"),
     ("native_place",        "Native place",       "w"),
+    ("nationality",         "Nationality",        "w"),
+    ("address",             "Street (address)",   "w"),
+    ("city",                "City",               "w"),
+    ("country",             "Country",            "w"),
     ("bank_account_no",     "Bank account no.",   "w"),
     ("bank_address",        "Bank address",       "w"),
     ("tax_code",            "Personal tax code",  "w"),
@@ -348,46 +356,29 @@ _EMP_COLUMN_SPECS = [
     ("emergency_contact_name", "Emergency contact", "w"),
     ("emergency_contact_phone", "Emergency phone", "w"),
     ("emergency_contact_relationship", "Relationship", "w"),
-    ("email",               "Personal email",     "w"),
-    ("company_email",       "Company email",      "w"),
     ("permanent_address",   "Permanent address",  "w"),
     ("temporary_address",   "Temporary address",  "w"),
-    ("marriage_status",     "Marriage status",    "center"),
-    ("children_count",      "Children",           "center"),
-    ("children_names",      "Children's names",   "w"),
-    ("children_birthdays",  "Children's birthdays", "w"),
-    ("religion",            "Religion",           "w"),
-    ("qualification",       "Qualification",      "w"),
-    ("qualification_code",  "Qualification code", "center"),
-    ("level_name",          "Job level",          "center"),
-    ("operator_skill",      "Operator skill",     "w"),
-    ("driving_forklift",    "Driving forklift",   "center"),
-    ("working_hours_per_week", "Working hour/week", "center"),
-    ("production_line",     "Production line",    "w"),
-    ("er_jrf",              "#ER/JRF",            "w"),
-    ("contract_type",       "Type of contract",   "w"),
-    ("contract_start_date", "Contract start",     "center"),
-    ("contract_end_date",   "Contract end",       "center"),
-    ("changing_date",       "Changing date",      "center"),
+    ("email",               "Personal email",     "w"),
+    ("company_email",       "Company email",      "w"),
     ("marital_status",      "Marital status",     "w"),
+    ("marriage_status",     "Marriage status",    "center"),
     ("spouse_name",         "Spouse name",        "w"),
     ("spouse_dob",          "Spouse date",        "center"),
-    ("nationality",         "Nationality",        "w"),
+    ("children_count",      "Children",           "center"),
+    ("children_names",      "Children's names",   "w"),
+    ("religion",            "Religion",           "w"),
+    ("driving_forklift",    "Driving forklift",   "center"),
+    ("er_jrf",              "#ER/JRF",            "w"),
     ("years_of_service",    "Year of service",    "center"),
-    ("education_field",     "Education field",    "w"),
     ("birth_year",          "Year of birthday",   "center"),
-    ("collar",              "BC/WC",              "w"),
-    ("employee_type_code",  "IBC/DBC/WC",         "center"),
     ("age",                 "Age",                "center"),
     ("age_range",           "Age range",          "center"),
     ("length_of_service",   "Length of service",  "w"),
-    ("local_function",      "Function (local)",   "w"),
-    ("by_group",            "By group",           "w"),
     ("labor_type",          "Type of labor",      "w"),
     ("smart_working_eligible", "Smart working",   "center"),
     ("is_interviewer",      "Interviewer",        "center"),
     ("changing_notes",      "Changing notes",     "w"),
-    ("changing_dates",      "Changing dates",     "w"),
+    ("changing_date",       "Changing date",      "center"),
     ("updated_changing_date", "Updated changing", "center"),
     ("note",                "Note",               "w"),
     ("seniority_date",      "Seniority date",     "center"),
@@ -424,10 +415,10 @@ _EMP_COPY_COLUMNS = [
     # cá nhân · địa chỉ · liên hệ
     "date_of_birth", "gender", "education", "address", "city", "country", "phone",
     # tổ chức
-    "manager_name", "department_name", "cost_center_code", "cost_center_group",
-    "date_of_employment", "job_title", "facility_country", "facility_town",
+    "manager_name", "department_name", "sub_function", "cost_center_code",
+    "cost_center_group", "date_of_employment", "job_title",
     # hợp đồng & thời gian làm việc
-    "contract_permanency", "work_time_type", "working_time_pct", "direct_indirect",
+    "contract_permanency", "direct_indirect",
     # nghỉ việc
     "termination_date", "work_status", "leaving_reason",
     # học vấn
@@ -441,23 +432,23 @@ _EMP_COPY_COLUMNS = [
     "emergency_contact_relationship", "email", "company_email",
     "permanent_address", "temporary_address",
     # gia đình
-    "marriage_status", "children_count", "children_names", "children_birthdays",
+    "marriage_status", "children_count", "children_names",
     "religion",
     # trình độ · cấp bậc · công việc
-    "qualification", "qualification_code", "level_name", "operator_skill",
+    "qualification", "level_name", "operator_skill",
     "driving_forklift", "working_hours_per_week", "production_line", "er_jrf",
     # hợp đồng
     "contract_type", "contract_start_date", "contract_end_date", "changing_date",
     # hôn nhân · quốc tịch
     "marital_status", "spouse_name", "spouse_dob", "nationality",
     # số liệu file Excel tự tính (để trống nếu file đích có công thức sẵn)
-    "years_of_service", "education_field", "birth_year", "collar",
+    "years_of_service", "birth_year", "collar",
     "employee_type_code", "age", "age_range", "length_of_service",
     # phân loại khác
-    "local_function", "by_group", "labor_type", "smart_working_eligible",
+    "by_group", "labor_type", "smart_working_eligible",
     "is_interviewer",
     # ghi chú
-    "changing_notes", "changing_dates", "updated_changing_date", "note",
+    "changing_notes", "updated_changing_date", "note",
     "seniority_date", "time_in_position", "current_position",
 ]
 
@@ -479,51 +470,49 @@ _EMP_COLUMN_GROUPS = [
         "employee_id", "code", "global_code",
     ]),
     ("Personal info", [
-        "full_name", "surname", "middle_name", "name", "date_of_birth",
+        "full_name", "surname", "name", "middle_name", "date_of_birth",
         "gender", "place_of_birth", "native_place", "nationality", "religion",
     ]),
     ("Family", [
-        "marriage_status", "marital_status", "spouse_name", "spouse_dob",
-        "children_count", "children_names", "children_birthdays",
+        "marital_status", "marriage_status", "spouse_name", "spouse_dob",
+        "children_count", "children_names",
     ]),
     ("Contact", [
-        "phone", "email", "company_email", "address", "city", "country",
-        "permanent_address", "temporary_address", "emergency_contact_name",
+        "phone", "address", "city", "country", "emergency_contact_name",
         "emergency_contact_phone", "emergency_contact_relationship",
+        "permanent_address", "temporary_address", "email", "company_email",
     ]),
     ("Education", [
-        "education", "education_field", "major", "graduation_year",
-        "school_name", "qualification", "qualification_code",
+        "qualification", "education", "major", "graduation_year",
+        "school_name",
     ]),
     ("ID · bank · tax · insurance", [
-        "id_no", "id_issued_date", "id_issued_place", "passport_no",
-        "passport_issued_date", "bank_account_no", "bank_address", "tax_code",
-        "dependants", "insurance_book_no",
+        "id_no", "id_issued_date", "id_issued_place", "bank_account_no",
+        "bank_address", "tax_code", "dependants", "insurance_book_no",
+        "passport_no", "passport_issued_date",
     ]),
     ("Organization", [
-        "department_name", "cost_center_code", "cost_center_group",
-        "employee_type_code", "collar", "level_name", "manager_name",
-        "job_title", "current_position", "time_in_position",
-        "facility_country", "facility_town", "local_function", "by_group",
-        "labor_type", "production_line", "operator_skill", "driving_forklift",
-        "working_hours_per_week", "smart_working_eligible", "er_jrf",
-        "is_interviewer",
+        "department_name", "sub_function", "cost_center_code", "cost_center_group",
+        "manager_name", "job_title", "collar", "employee_type_code", "by_group",
+        "working_hours_per_week", "production_line", "level_name",
+        "operator_skill", "driving_forklift", "er_jrf", "labor_type",
+        "smart_working_eligible", "is_interviewer", "time_in_position",
+        "current_position",
     ]),
     ("Contract & working time", [
-        "date_of_employment", "seniority_date", "contract_permanency",
-        "work_time_type", "working_time_pct", "direct_indirect",
+        "date_of_employment", "direct_indirect", "contract_permanency",
         "contract_type", "contract_start_date", "contract_end_date",
-        "changing_date",
+        "changing_date", "seniority_date",
     ]),
     ("Termination", [
-        "work_status", "termination_date", "leaving_reason",
+        "termination_date", "work_status", "leaving_reason",
     ]),
     ("Figures (computed in the Excel file)", [
-        "years_of_service", "length_of_service", "birth_year", "age",
-        "age_range",
+        "years_of_service", "birth_year", "age", "age_range",
+        "length_of_service",
     ]),
     ("Notes", [
-        "changing_notes", "changing_dates", "updated_changing_date", "note",
+        "changing_notes", "updated_changing_date", "note",
     ]),
 ]
 
@@ -572,17 +561,46 @@ def _employee_type_options():
 
 
 # Bốn cột TEXT trong file Excel được tra sang id của bảng danh mục khi import.
-# (sentinel trong rec, field DB, hàm nạp danh mục, cột khớp, cột id, nhãn báo lỗi)
+# (sentinel trong rec, field DB, hàm nạp danh mục, cột khớp, cột id, tên cột Excel)
 _MASTER_LOOKUPS = (
     (_DEPT_TEXT, "department_id", repo.list_departments,
-     "short_name", "department_id", "Departments (short name)"),
+     "short_name", "department_id", "Department (short)"),
     (_CC_TEXT, "cost_center_id", repo.list_cost_centers,
-     "code", "cost_center_id", "Cost centers"),
+     "code", "cost_center_id", "New Cost center"),
     (_ETYPE_TEXT, "employee_type_id", repo.list_employee_types,
-     "code", "employee_type_id", "Employee types"),
+     "code", "employee_type_id", "IBC/DBC/WC"),
     (_LEVEL_TEXT, "level_id", repo.list_levels,
-     "level_name", "level_id", "Levels"),
+     "level_name", "level_id", "Job level"),
 )
+
+# Cột dạng "const" (danh sách giá trị cố định, xem cv_schema.py) — không tra
+# bảng danh mục nhưng vẫn phải khớp CHÍNH XÁC một trong các giá trị cho phép,
+# nếu không import sẽ ghi sai/lệch với UI (dropdown chỉ hiển thị đúng các giá
+# trị này). (field DB, tên cột Excel, danh sách giá trị hợp lệ)
+_CHOICE_FIELDS = (
+    ("gender", "Gender", cv_schema.GENDER_CHOICES),
+    ("marital_status", "Marital Status", cv_schema.MARITAL_STATUS_CHOICES),
+    ("contract_permanency", "Permanent/Temporary contract",
+     cv_schema.CONTRACT_PERMANENCY_CHOICES),
+    ("direct_indirect", "Direct/Indirect", cv_schema.DIRECT_INDIRECT_CHOICES),
+)
+
+# Viết tắt giới tính hay gặp trong file Excel HC ("M"/"F") — coi là hợp lệ,
+# tự chuẩn hóa về đúng giá trị trong GENDER_CHOICES trước khi validate/lưu.
+_GENDER_ALIASES = {"M": "Male", "F": "Female"}
+
+
+def _canon_choice(value, choices):
+    """Chuẩn hóa 1 giá trị về ĐÚNG CASING trong `choices` (so sánh không phân
+    biệt hoa/thường — vd "widowed"/"WIDOWED" đều về "Widowed"). Trả nguyên giá
+    trị đã strip nếu không khớp giá trị nào (để validate báo lỗi đúng chỗ).
+    """
+    v = value.strip()
+    low = v.lower()
+    for c in choices:
+        if low == c.lower():
+            return c
+    return v
 
 
 class _DuplicateCodesDialog(ModalDialog):
@@ -638,6 +656,57 @@ class _DuplicateCodesDialog(ModalDialog):
     def run(self):
         self.exec()
         return self._result
+
+
+class _InvalidValuesDialog(ModalDialog):
+    """Modal chặn import khi có ô KHÔNG khớp master data / danh sách giá trị
+    cố định (xem `_MASTER_LOOKUPS` · `_CHOICE_FIELDS`).
+
+    Không có lựa chọn "vẫn import" — bắt buộc sửa lại file Excel rồi nhập lại
+    từ đầu, vì đây là các cột lưu số/mã (khóa ngoại tới bảng danh mục hoặc giá
+    trị cố định cho dropdown), sai một ô là dữ liệu tra cứu/lọc sai lệch.
+
+    `issues` = list[dict] với khóa row (số dòng Excel), column (tên cột Excel),
+    value (giá trị gốc trong ô), reason (lý do không khớp).
+    """
+
+    def __init__(self, parent, issues):
+        super().__init__(parent, "md")
+        card, lay = self.build_shell(f"Invalid values in Excel · {len(issues)}")
+
+        desc = QLabel(
+            "These cells don't match master data or the allowed value list. "
+            "Fix them in the Excel file, then run Bulk Import again — "
+            "nothing has been imported yet.")
+        desc.setObjectName("DialogMsg")
+        desc.setWordWrap(True)
+        lay.addWidget(desc)
+
+        table = DataTable([
+            ("row", "Excel row", 90, "center"),
+            ("column", "Column", 220),
+            ("value", "Value found", 200),
+            ("reason", "Reason", 260),
+        ])
+        table.set_rows(issues)
+        table.setMinimumHeight(min(320, self.modal_h))
+        lay.addWidget(table, 1)
+        self.set_grow_region(table)
+
+        hint = QLabel("Select a cell and press Ctrl+C (or right-click → Copy) "
+                     "to copy a value.")
+        hint.setObjectName("Hint")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+
+        foot = QHBoxLayout()
+        foot.addWidget(widgets.button(card, "Close", variant="neutral",
+                                      icon="x", command=self.accept))
+        foot.addStretch(1)
+        lay.addLayout(foot)
+
+    def run(self):
+        self.exec()
 
 
 class EmployeeDbTool(BaseTool):
@@ -919,6 +988,16 @@ class EmployeeDbTool(BaseTool):
             dialogs.info(self._root, "Empty", "No valid data rows found.")
             return
 
+        # Cột TEXT (họ tên, địa chỉ, ghi chú…) đi thẳng vào DB, không cần kiểm
+        # tra gì thêm. Cột lưu SỐ — khóa ngoại tới bảng danh mục (department,
+        # cost center, employee type, level) hoặc giá trị cố định cho dropdown
+        # (gender, marital status…) — PHẢI khớp chính xác, nếu không sẽ chặn
+        # lại ở đây để người dùng sửa Excel rồi import lại, KHÔNG ghi gì cả.
+        issues = self._validate_import_rows(rows)
+        if issues:
+            _InvalidValuesDialog(self._root, issues).run()
+            return
+
         note = ""
         if unknown:
             note = ("\n\nUnrecognized columns (skipped): "
@@ -938,30 +1017,24 @@ class EmployeeDbTool(BaseTool):
                 return
             skip_codes = {_norm(d["code"]) for d in dup_rows if d["code"]}
 
-        # Tra 4 cột text sang id của bảng danh mục (bộ phận theo short_name,
-        # cost center & loại NV theo code, cấp bậc theo tên) — khớp không phân
-        # biệt hoa/thường, bỏ khoảng trắng thừa.
-        lookups = []
-        for sentinel, field, loader, match_col, id_col, label in _MASTER_LOOKUPS:
-            table = {_norm(r[match_col]): r[id_col] for r in loader()
-                     if r[match_col]}
-            lookups.append((sentinel, field, table, label, set()))
+        # Tra 4 cột text sang id của bảng danh mục — đã validate ở trên nên
+        # chắc chắn khớp, không còn khả năng "not found" ở bước này nữa.
+        lookup_tables = {
+            sentinel: {_norm(r[match_col]): r[id_col] for r in loader() if r[match_col]}
+            for sentinel, _field, loader, match_col, id_col, _label in _MASTER_LOOKUPS
+        }
 
         added = 0
         skipped = 0
         for rec in rows:
+            rec.pop("_row", None)
             if skip_codes and _norm(rec.get("code", "")) in skip_codes:
                 skipped += 1
                 continue
-            for sentinel, field, table, _label, missing in lookups:
+            for sentinel, field, _loader, _match_col, _id_col, _label in _MASTER_LOOKUPS:
                 text = rec.pop(sentinel, "")
-                if not text:
-                    continue
-                row_id = table.get(_norm(text))
-                if row_id is not None:
-                    rec[field] = row_id
-                else:
-                    missing.add(text)   # không có trong danh mục → để trống link
+                if text:
+                    rec[field] = lookup_tables[sentinel][_norm(text)]
             repo.insert_employee(rec)
             added += 1
 
@@ -969,15 +1042,41 @@ class EmployeeDbTool(BaseTool):
         msg = f"Imported {added} employees."
         if skipped:
             msg += f"\n\nSkipped {skipped} duplicate employee code(s)."
-        for _sentinel, _field, _table, label, missing in lookups:
-            if not missing:
-                continue
-            names = ", ".join(sorted(missing)[:10])
-            more = " …" if len(missing) > 10 else ""
-            msg += (f"\n\nNot found in master data · {label} "
-                    f"(link left empty): {names}{more}\nAdd them on the matching "
-                    "Master Data page and re-import if you need the link.")
         dialogs.success(self._root, "Done", msg)
+
+    @staticmethod
+    def _validate_import_rows(rows):
+        """Kiểm tra các cột lưu SỐ (tra danh mục / giá trị cố định) TRƯỚC khi
+        import — trả về list[dict] {row, column, value, reason}, rỗng nếu mọi
+        ô đều khớp. Không sửa `rows`; caller tự tra lại lúc insert.
+        """
+        issues = []
+
+        # 4 cột tra bảng danh mục (xem _MASTER_LOOKUPS).
+        for sentinel, _field, loader, match_col, _id_col, label in _MASTER_LOOKUPS:
+            table = {_norm(r[match_col]) for r in loader() if r[match_col]}
+            for rec in rows:
+                text = rec.get(sentinel)
+                if text and _norm(text) not in table:
+                    issues.append({
+                        "row": rec["_row"], "column": label, "value": text,
+                        "reason": "Not found in master data — add it there, "
+                                  "or fix the spelling in Excel",
+                    })
+
+        # Cột giá trị cố định (xem _CHOICE_FIELDS).
+        for field, label, choices in _CHOICE_FIELDS:
+            allowed = set(choices)
+            for rec in rows:
+                value = rec.get(field)
+                if value and value not in allowed:
+                    issues.append({
+                        "row": rec["_row"], "column": label, "value": value,
+                        "reason": f"Must be one of: {', '.join(choices)}",
+                    })
+
+        issues.sort(key=lambda i: (i["row"], i["column"]))
+        return issues
 
     @staticmethod
     def _read_excel(path):
@@ -1024,8 +1123,10 @@ class EmployeeDbTool(BaseTool):
                 unknown.append(str(title).strip())
 
         rows = []
-        for values in ws.iter_rows(min_row=header_row + 1, values_only=True):
-            rec = {}
+        for row_num, values in enumerate(
+                ws.iter_rows(min_row=header_row + 1, values_only=True),
+                start=header_row + 1):
+            rec = {"_row": row_num}   # số dòng Excel — chỉ để báo lỗi, không lưu DB
             for idx, key in col_key.items():
                 if idx < len(values):
                     v = _cell_str(values[idx])
@@ -1034,6 +1135,17 @@ class EmployeeDbTool(BaseTool):
                     rec[key] = v
             if rec.get("phone"):
                 rec["phone"] = _normalize_phones(rec["phone"])
+            if rec.get("gender"):
+                # "M"/"F" là viết tắt hay gặp trong file HC — coi là hợp lệ,
+                # chuẩn hóa về đúng giá trị của GENDER_CHOICES trước khi validate.
+                rec["gender"] = _GENDER_ALIASES.get(
+                    rec["gender"].strip().upper(), rec["gender"])
+            # Chuẩn hóa hoa/thường cho mọi cột giá trị cố định (_CHOICE_FIELDS)
+            # — không phân biệt hoa/thường khi so khớp, nhưng LƯU đúng casing
+            # chuẩn để khớp với dropdown trên UI.
+            for _field, _label, _choices in _CHOICE_FIELDS:
+                if rec.get(_field):
+                    rec[_field] = _canon_choice(rec[_field], _choices)
             # Ô "Emergency Contact Name" gộp "tên ⏎ số ĐT" → tách sang 2 cột
             # (dùng chung logic với lượt di trú dữ liệu cũ trong cv_schema).
             if rec.get("emergency_contact_name") and not rec.get("emergency_contact_phone"):
@@ -1203,8 +1315,6 @@ class EmployeeDbTool(BaseTool):
             {"key": "children_count", "label": "Number of children", "kind": "int"},
             {"key": "children_names", "label": "Children's names (one per line)",
              "kind": "textarea", "height": 3},
-            {"key": "children_birthdays", "label": "Children's birthdays (one per line)",
-             "kind": "textarea", "height": 3},
 
             {"kind": "section", "label": "Contact"},
             {"key": "phone", "label": 'Phone (separate multiple with "; ")', "kind": "text"},
@@ -1224,13 +1334,11 @@ class EmployeeDbTool(BaseTool):
 
             {"kind": "section", "label": "Education"},
             {"key": "education", "label": "Education level", "kind": "text"},
-            {"key": "education_field", "label": "Education field", "kind": "text"},
             {"key": "major", "label": "Major (one per line)", "kind": "textarea",
              "height": 3},
             {"key": "graduation_year", "label": "Year of graduated", "kind": "text"},
             {"key": "school_name", "label": "School name", "kind": "text"},
             {"key": "qualification", "label": "Qualification", "kind": "text"},
-            {"key": "qualification_code", "label": "Qualification code", "kind": "text"},
 
             {"kind": "section", "label": "ID · bank · tax · insurance"},
             {"key": "id_no", "label": "ID no.", "kind": "text"},
@@ -1247,8 +1355,9 @@ class EmployeeDbTool(BaseTool):
             {"key": "insurance_book_no", "label": "Insurance book no.", "kind": "text"},
 
             {"kind": "section", "label": "Organization"},
-            {"key": "department_id", "label": "Function (department)",
+            {"key": "department_id", "label": "Department",
              "kind": "dropdown", "options": _dept_options},
+            {"key": "sub_function", "label": "Function (Common)", "kind": "text"},
             {"key": "cost_center_id", "label": "New cost center",
              "kind": "dropdown", "options": _cost_center_options},
             {"key": "employee_type_id", "label": "Employee type (IBC/DBC/WC)",
@@ -1259,10 +1368,6 @@ class EmployeeDbTool(BaseTool):
             {"key": "job_title", "label": "Job title (description)", "kind": "text"},
             {"key": "current_position", "label": "Current position", "kind": "text"},
             {"key": "time_in_position", "label": "Time in position", "kind": "text"},
-            {"key": "facility_country", "label": "Country of facility", "kind": "text"},
-            {"key": "facility_town", "label": "Town of facility", "kind": "text"},
-            {"key": "local_function", "label": "Function (for local only)",
-             "kind": "text"},
             {"key": "by_group", "label": "By group", "kind": "text"},
             {"key": "labor_type", "label": "Type of labor", "kind": "text"},
             {"key": "production_line", "label": "Production line (internal)",
@@ -1287,10 +1392,6 @@ class EmployeeDbTool(BaseTool):
             {"key": "contract_permanency", "label": "Permanent/Temporary contract",
              "kind": "choice", "choices": cv_schema.CONTRACT_PERMANENCY_CHOICES,
              "allow_empty": True},
-            {"key": "work_time_type", "label": "Full time / Part time",
-             "kind": "choice", "choices": cv_schema.WORK_TIME_TYPE_CHOICES,
-             "allow_empty": True},
-            {"key": "working_time_pct", "label": "% working time", "kind": "text"},
             {"key": "direct_indirect", "label": "Direct/Indirect", "kind": "choice",
              "choices": cv_schema.DIRECT_INDIRECT_CHOICES, "allow_empty": True},
             {"key": "contract_type", "label": "Type of contract", "kind": "text"},
@@ -1316,8 +1417,6 @@ class EmployeeDbTool(BaseTool):
             {"kind": "section", "label": "Notes"},
             {"key": "changing_notes", "label": "Changing notes", "kind": "textarea",
              "height": 3},
-            {"key": "changing_dates", "label": "Changing dates (one per line)",
-             "kind": "textarea", "height": 3},
             {"key": "updated_changing_date",
              "label": "Updated changing date (dd/mm/yyyy)", "kind": "text"},
             {"key": "note", "label": "Note", "kind": "textarea", "height": 3},
