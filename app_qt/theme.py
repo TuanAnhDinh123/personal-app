@@ -43,6 +43,7 @@ PALETTE = {
     "--accent-hover":  "#5457e6",
     "--accent-press":  "#4a4dd0",
     "--accent-soft":   "#eef0fe",   # nền indigo nhạt (chip/hover trên nền sáng)
+    "--accent-soft-hi": "#e0e3fc",  # nền indigo nhạt khi hover
     "--row-hover":     "#f5f6fe",   # nền hover 1 dòng bảng
 
     # trạng thái nút
@@ -115,6 +116,7 @@ def build_stylesheet():
     for token, value in PALETTE.items():
         qss = qss.replace("{{" + token + "}}", value)
     qss = qss.replace("{{CHECK_ICON}}", asset("check.svg"))
+    qss = qss.replace("{{DASH_ICON}}", asset("dash.svg"))
     qss = qss.replace("{{CHEVRON_ICON}}", asset("chevron-down.svg"))
     qss = qss.replace("{{CALENDAR_ICON}}", asset("calendar.svg"))
     return qss

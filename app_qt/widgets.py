@@ -8,13 +8,17 @@ Khác biệt với bản Tk: mỗi hàm nhận `parent` là QWidget CÓ SẴN la
 (QVBoxLayout). Widget tự thêm mình vào layout đó — y như .pack() trước đây.
 """
 import os
+import unicodedata
 
-from PySide6.QtCore import QDate, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import (
+    QDate, QEvent, QPointF, QRectF, QSize, QSortFilterProxyModel, Qt, Signal,
+)
 from PySide6.QtGui import QColor, QIcon, QImage, QMouseEvent, QPainter, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
-    QCalendarWidget, QCheckBox, QComboBox, QDateEdit, QFileDialog, QFrame,
-    QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QVBoxLayout, QWidget,
+    QApplication, QCalendarWidget, QCheckBox, QComboBox, QCompleter, QDateEdit,
+    QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QStyle,
+    QStyleOptionComboBox, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from app_qt import theme
@@ -44,6 +48,98 @@ class ComboBox(QComboBox):
         super().showPopup()
 
 
+def fold(text):
+    """Bỏ dấu tiếng Việt + hạ chữ thường, để gõ 'phuong' vẫn tìm ra 'Phương'.
+
+    (đ/Đ phải thay tay vì NFD không tách được dấu gạch ngang của nó.)
+    """
+    s = (text or "").replace("đ", "d").replace("Đ", "D")
+    s = unicodedata.normalize("NFD", s)
+    return "".join(c for c in s if unicodedata.category(c) != "Mn").lower()
+
+
+class _FoldFilterModel(QSortFilterProxyModel):
+    """Giữ lại những dòng CHỨA chuỗi đang gõ (so sánh sau khi bỏ dấu)."""
+
+    _needle = ""
+
+    def set_needle(self, text):
+        self._needle = fold(text.strip())
+        self.invalidateFilter()
+
+    def filterAcceptsRow(self, row, parent):
+        if not self._needle:
+            return True
+        return self._needle in fold(self.sourceModel().index(row, 0, parent).data())
+
+
+class _FoldCompleter(QCompleter):
+    """Completer nhường việc lọc cho `_FoldFilterModel`.
+
+    QCompleter chỉ biết khớp trên chính chuỗi hiển thị (nguyên dấu) nên không
+    tự tìm không dấu được. `splitPath` là móc chạy mỗi lần gõ — dùng nó để nạp
+    chuỗi đang gõ vào proxy, rồi trả về tiền tố RỖNG để completer hiện đúng
+    những dòng proxy đã lọc (hợp với chế độ UnfilteredPopupCompletion).
+    """
+
+    def splitPath(self, path):
+        self.model().set_needle(path)
+        return [""]
+
+
+class SearchableComboBox(ComboBox):
+    """ComboBox GÕ ĐƯỢC để lọc — dành cho danh sách dài (nhân viên, vị trí...).
+
+    Danh sách vài chục người thì cuộn tìm bằng mắt rất chậm; ô này cho gõ vài
+    ký tự bất kỳ trong tên — khớp CHỨA, không phân biệt hoa thường và KHÔNG cần
+    gõ dấu ('phuong di' ra 'Lê Phương Di') — rồi chọn trong gợi ý bung ra.
+
+    Giá trị vẫn LUÔN là một mục có trong danh sách — gõ là để tìm, không phải
+    để nhập tự do: rời ô mà text đang dở dang thì tự khớp về mục duy nhất chứa
+    nó, không khớp được thì quay lại lựa chọn trước đó. Nhờ vậy chỗ dùng không
+    phải hứng những cái tên gõ nhầm.
+
+    Đọc/ghi giá trị bằng `.currentText()` / `.setCurrentText()` như ComboBox
+    thường (muốn chọn tên ngoài danh sách thì `addItem` tên đó trước).
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setEditable(True)
+        self.setInsertPolicy(QComboBox.NoInsert)
+        self.lineEdit().setPlaceholderText("Type to search…")
+
+        self._filter = _FoldFilterModel(self)
+        self._filter.setSourceModel(self.model())
+        comp = _FoldCompleter(self._filter, self)
+        comp.setCompletionMode(QCompleter.UnfilteredPopupCompletion)
+        comp.setCaseSensitivity(Qt.CaseInsensitive)
+        self.setCompleter(comp)
+        # Popup của completer là cửa sổ RỜI (không nằm trong combo) nên rule
+        # "QComboBox QAbstractItemView" không với tới — đặt tên để QSS bắt được.
+        comp.popup().setObjectName("ComboPopup")
+
+        self._accepted = self.currentText()
+        self.currentIndexChanged.connect(self._remember)
+        self.lineEdit().editingFinished.connect(self._settle_text)
+
+    def _remember(self, *_):
+        self._accepted = self.currentText()
+
+    def _settle_text(self):
+        """Chốt text đang gõ dở thành một mục thật khi ô mất focus."""
+        text = self.currentText().strip()
+        i = self.findText(text, Qt.MatchFixedString)
+        if i < 0 and text:
+            # 'phuong' chỉ ra đúng một người thì chọn luôn — gõ tắt là đủ.
+            hits = [n for n in range(self.count())
+                    if fold(text) in fold(self.itemText(n))]
+            i = hits[0] if len(hits) == 1 else -1
+        if i < 0:
+            i = self.findText(self._accepted, Qt.MatchFixedString)
+        self.setCurrentIndex(max(i, 0))
+
+
 class TextEdit(QTextEdit):
     """QTextEdit với Tab CHUYỂN FOCUS thay vì chèn ký tự tab.
 
@@ -54,6 +150,19 @@ class TextEdit(QTextEdit):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setTabChangesFocus(True)
+
+    def set_visible_rows(self, rows):
+        """Khoá chiều cao ô vừa đúng `rows` dòng chữ.
+
+        Đo theo font + đệm/viền thật của ô (QSS đổi padding thì chiều cao đi
+        theo) thay vì nhân một con số px đoán chừng — đúng 3 dòng là 3 dòng,
+        không dư một nửa dòng cụt.
+        """
+        self.ensurePolished()      # QSS mới quyết định đệm/viền → phải chờ nó
+        m = self.contentsMargins()  # đã gồm cả padding lẫn border của QSS
+        text = self.fontMetrics().lineSpacing() * rows
+        self.setFixedHeight(int(text + 2 * self.document().documentMargin())
+                            + m.top() + m.bottom())
 
 
 def calendar_qss():
@@ -166,6 +275,9 @@ class DateEdit(QDateEdit):
     vai "chưa nhập" và `specialValueText` cho nó hiển thị thành ô rỗng — nhờ vậy
     vòng phỏng vấn chưa diễn ra không bị điền sẵn một ngày vô nghĩa.
 
+    Ô CHỈ CHỌN, không gõ tay: ô nhập bên trong để read-only nên ngày luôn hợp
+    lệ, và bấm chuột trái ở bất kỳ đâu trong ô đều bung lịch ra.
+
     Đọc/ghi bằng `.get()` / `.set()` theo chuỗi `yyyy-mm-dd` (khớp cách SQLite
     lưu ngày trong app); chuỗi có kèm giờ thì phần giờ bị cắt bỏ.
     """
@@ -182,16 +294,60 @@ class DateEdit(QDateEdit):
         self.setSpecialValueText(" ")
         self.setDate(self.EMPTY)
         self.setCalendarWidget(Calendar(self))
+        # Read-only ở ô nhập bên trong (KHÔNG phải setReadOnly của cả widget —
+        # cái đó khoá luôn nút bung lịch): ngày chỉ đến từ lịch nên không còn
+        # cảnh gõ dở "0/2/199" thành ngày rác, mà .setDate() vẫn ghi được text.
+        self.lineEdit().setReadOnly(True)
+        # Ô nhập là widget CON phủ kín phần chữ: mọi cú click ở giữa ô rơi vào
+        # nó, không bao giờ tới mousePressEvent bên dưới — phải chặn từ đây.
+        # Con trỏ cũng phải đặt riêng cho nó (widget con không kế thừa cursor).
+        self.lineEdit().installEventFilter(self)
+        self.lineEdit().setCursor(Qt.PointingHandCursor)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def eventFilter(self, obj, e):
+        if (obj is self.lineEdit()
+                and e.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick)
+                and e.button() == Qt.LeftButton):
+            self._open_calendar()
+            return True                      # nuốt luôn, khỏi đặt con trỏ nháy
+        return super().eventFilter(obj, e)
+
+    def _open_calendar(self):
+        """Bung lịch y như vừa bấm vào nút lịch.
+
+        Qt không mở API nào cho việc này; đường duy nhất là để QDateTimeEdit tự
+        xử một cú bấm rơi đúng vào nút của nó.
+        """
+        pos = self._calendar_button_center()
+        QApplication.sendEvent(self, QMouseEvent(
+            QEvent.MouseButtonPress, pos, self.mapToGlobal(pos.toPoint()).toPointF(),
+            Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+
+    def _calendar_button_center(self):
+        """Tâm nút bung lịch, tính theo style đang chạy.
+
+        Qt chỉ mở lịch khi cú bấm rơi đúng vào nút (SC_ComboBoxArrow), mà bề
+        rộng nút do QSS ::drop-down quyết định — hỏi thẳng style thay vì đoán
+        một con số cố định thì đổi QSS cũng không làm hỏng.
+        """
+        opt = QStyleOptionComboBox()
+        opt.initFrom(self)
+        opt.editable = True
+        opt.subControls = QStyle.SC_All
+        r = self.style().subControlRect(QStyle.CC_ComboBox, opt,
+                                        QStyle.SC_ComboBoxArrow, self)
+        if r.isEmpty():
+            return QPointF(self.width() - 15, self.height() / 2)
+        return QPointF(r.center())
 
     def mousePressEvent(self, e):
-        # Nút bung lịch chỉ chiếm 30px cuối bên phải (theo QSS ::drop-down) —
-        # bấm vào phần còn lại của ô lẽ ra chỉ đặt con trỏ để gõ số, không quen
-        # thuộc với kiểu ô ngày "bấm đâu cũng ra lịch". Bấm chuột trái ở bất kỳ
-        # đâu trong ô đều chuyển hướng thành bấm đúng vào nút đó.
+        # Phần rìa ô (viền, khoảng đệm) không có widget con che nên click rơi
+        # thẳng vào đây — dời sang nút lịch để "bấm đâu cũng ra lịch".
         if e.button() == Qt.LeftButton:
-            btn_pos = QPointF(self.width() - 15, self.height() / 2)
-            e = QMouseEvent(e.type(), btn_pos, e.globalPosition(),
-                             e.button(), e.buttons(), e.modifiers())
+            e = QMouseEvent(e.type(), self._calendar_button_center(),
+                            e.globalPosition(), e.button(), e.buttons(),
+                            e.modifiers())
         super().mousePressEvent(e)
 
     def wheelEvent(self, e):

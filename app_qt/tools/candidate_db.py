@@ -792,8 +792,11 @@ class _CandidateDetailDialog(ModalDialog):
         v.setSpacing(8)
 
         # Hàng tiêu đề: tên + chip điểm / trạng thái / tình trạng trong pool
+        # Hai cột bằng nhau, cùng khoảng cách 12 như Date/Final result phía
+        # trên → ô người phỏng vấn thẳng cột với Date, cụm điểm + nút xoá thẳng
+        # cột với Final result.
         head = QHBoxLayout()
-        head.setSpacing(8)
+        head.setSpacing(12)
         name = QLabel(f"#{cid}  {_txt(row, 'full_name') or '(no name)'}", box)
         name.setObjectName("DetailName")
         head.addWidget(name, 1)
@@ -1033,17 +1036,18 @@ class _FeedbackRow(QFrame):
 
     def __init__(self, parent, interviewers, data=None):
         super().__init__(parent)
-        self.setObjectName("AIBox")
         self.feedback_id = _get_val(data, "feedback_id")
         self._people = interviewers          # tên hiển thị → employee_id
 
         col = QVBoxLayout(self)
-        col.setContentsMargins(12, 10, 12, 10)
+        # Lề 0: dòng người phỏng vấn thẳng hàng với ô Date/Final result phía trên.
+        col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(6)
 
         head = QHBoxLayout()
         head.setSpacing(8)
-        self.name = widgets.ComboBox(self)
+        # Danh sách nhân viên dài → ô gõ được để lọc nhanh theo tên.
+        self.name = widgets.SearchableComboBox(self)
         self.name.addItems([""] + list(interviewers))
         # Người đã lưu mà nay không còn trong danh sách (đã nghỉ việc, hoặc là
         # khách mời) vẫn phải hiện đúng tên → thêm vào cuối danh sách.
@@ -1051,20 +1055,22 @@ class _FeedbackRow(QFrame):
         if saved and self.name.findText(saved) < 0:
             self.name.addItem(saved)
         self.name.setCurrentText(saved)
-        head.addWidget(self.name, 3)
+        head.addWidget(self.name, 1)
 
         self.score = widgets.ComboBox(self)
         self.score.addItems([""] + cv_schema.INTERVIEW_SCORE_CHOICES)
         self.score.setCurrentText(_txt(data, "score"))
-        head.addWidget(self.score, 2)
-
-        head.addWidget(widgets.button(self, "", variant="neutral", icon="x",
-                                      command=self._remove), 0)
+        right = QHBoxLayout()
+        right.setSpacing(8)
+        right.addWidget(self.score, 1)
+        right.addWidget(widgets.button(self, "", variant="neutral", icon="x",
+                                       command=self._remove), 0)
+        head.addLayout(right, 1)
         col.addLayout(head)
 
         self.feedback = widgets.TextEdit(self)
         self.feedback.setAcceptRichText(False)
-        self.feedback.setFixedHeight(66)
+        self.feedback.set_visible_rows(3)
         self.feedback.setPlaceholderText("What did they say about the candidate?")
         self.feedback.setPlainText(_txt(data, "feedback"))
         col.addWidget(self.feedback)
@@ -1165,7 +1171,7 @@ class _QuickEditDialog(ModalDialog):
 
         self.f_ps_note = widgets.TextEdit(box)
         self.f_ps_note.setAcceptRichText(False)
-        self.f_ps_note.setFixedHeight(60)
+        self.f_ps_note.set_visible_rows(3)
         self.f_ps_note.setPlainText(_txt(self._row, "application_note"))
         v.addLayout(_labeled(box, "Phone screen note", self.f_ps_note))
         return box
@@ -1200,7 +1206,7 @@ class _QuickEditDialog(ModalDialog):
         v.addLayout(head)
 
         holder = QVBoxLayout()
-        holder.setSpacing(8)
+        holder.setSpacing(14)
         v.addLayout(holder)
         self._fb_boxes[n] = holder
         self._fb_rows[n] = []
@@ -1344,11 +1350,7 @@ class CandidateDbTool(BaseTool):
         self.ent_kw.addAction(widgets.svg_icon("search", theme.TEXT_MUTED, 16),
                               QLineEdit.LeadingPosition)
         self.ent_kw.editingFinished.connect(self._reload)
-        lay.addWidget(self.ent_kw)
 
-        # Hàng ô lọc dạng select 'nhãn nổi' — chọn 1 option là tìm luôn.
-        filters = QHBoxLayout()
-        filters.setSpacing(10)
         self.sel_pos = widgets.FilterSelect("Position")
         self.sel_dept = widgets.FilterSelect("Department")
         self.sel_status = widgets.FilterSelect("Status")
@@ -1356,13 +1358,34 @@ class CandidateDbTool(BaseTool):
         self.sel_batch = widgets.FilterSelect("Batch")
         self.sel_status.set_options(cv_schema.CANDIDATE_STATUS_CHOICES)
         self.sel_pool.set_options(cv_schema.POOL_STATUS_CHOICES)
-        for w in (self.sel_pos, self.sel_dept, self.sel_status, self.sel_pool,
-                  self.sel_batch):
-            w.changed.connect(self._reload)
+
+        # Hai hàng lọc gom trong một khối, spacing 0 — FilterSelect vốn cao 54px
+        # (chừa chỗ cho nhãn nổi) nên đã tự có khoảng đệm trên/dưới; thêm spacing
+        # nữa sẽ hở quá rộng.
+        rows = QVBoxLayout()
+        rows.setSpacing(0)
+
+        # Hàng trên: ô tìm kiếm (nửa trái) + ô lọc Vị trí (nửa phải) — vị trí là
+        # bộ lọc dùng nhiều nhất nên đứng ngang hàng với ô tìm kiếm.
+        top = QHBoxLayout()
+        top.setSpacing(10)
+        top.addWidget(self.ent_kw, 4)
+        top.addWidget(self.sel_pos, 3)
+        rows.addLayout(top)
+
+        # Hàng dưới: các ô lọc còn lại — chọn 1 option là tìm luôn.
+        filters = QHBoxLayout()
+        filters.setSpacing(10)
+        for w in (self.sel_dept, self.sel_status, self.sel_pool, self.sel_batch):
             filters.addWidget(w, 1)
         filters.addWidget(widgets.button(None, "Reset", variant="neutral",
                                          icon="eraser", command=self._clear_filters), 0)
-        lay.addLayout(filters)
+        rows.addLayout(filters)
+        lay.addLayout(rows)
+
+        for w in (self.sel_pos, self.sel_dept, self.sel_status, self.sel_pool,
+                  self.sel_batch):
+            w.changed.connect(self._reload)
 
     def _build_toolbar(self, lay):
         bar = QHBoxLayout()

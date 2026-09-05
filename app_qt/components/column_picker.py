@@ -12,7 +12,12 @@ Cách dùng:
     toolbar.addWidget(picker)
 
 `groups` = [(tên nhóm, [khóa cột…])…]. Khóa lạ bị bỏ qua; cột không nằm trong
-nhóm nào được dồn vào nhóm "Other" ở cuối nên không bao giờ bị mất.
+nhóm nào được dồn vào nhóm "Other" ở cuối nên không bao giờ bị mất. Tiêu đề mỗi
+nhóm là một checkbox bật/tắt cả nhóm (hiện trạng thái "một phần" khi nhóm mới
+tích lẻ vài cột).
+
+`keep_keys` = các cột nút "Clear all" GIỮ LẠI (bảng trống cột thì UI vỡ); mặc
+định là `min_keys` cột đầu trong `default_keys`.
 """
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -30,11 +35,13 @@ _CHECKS_PER_ROW = 3
 class _ColumnPickerDialog(ModalDialog):
     """Modal tích chọn cột, chia theo nhóm. `.run()` → list khóa đã chọn / None."""
 
-    def __init__(self, parent, groups, checked, defaults, min_keys=1):
+    def __init__(self, parent, groups, checked, defaults, min_keys=1, keep=()):
         super().__init__(parent, "lg")
         self._defaults = defaults
         self._min_keys = min_keys
+        self._keep = list(keep)
         self._boxes = {}          # khóa cột → QCheckBox
+        self._heads = []          # [(checkbox tiêu đề nhóm, [khóa cột…])…]
         self._result = None
         self._total = sum(len(cols) for _title, cols in groups)
 
@@ -71,8 +78,8 @@ class _ColumnPickerDialog(ModalDialog):
         foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
                                       command=self.reject))
         foot.addStretch(1)
-        foot.addWidget(widgets.button(card, "Show all", variant="neutral",
-                                      command=lambda: self._set_all(True)))
+        foot.addWidget(widgets.button(card, "Clear all", variant="neutral",
+                                      command=self._clear_all))
         foot.addWidget(widgets.button(card, "Reset to default", variant="neutral",
                                       icon="refresh", command=self._reset))
         lay.addLayout(foot)
@@ -83,12 +90,30 @@ class _ColumnPickerDialog(ModalDialog):
         self._sync_count()
 
     def _build_group(self, body, col, title, cols):
-        """Một nhóm = tiêu đề + lưới checkbox `_CHECKS_PER_ROW` cột."""
+        """Một nhóm = checkbox tiêu đề (bật/tắt cả nhóm) + lưới checkbox cột."""
         if title:
-            widgets.section_label(body, title)   # tự thêm vào layout của `body`
+            head = QCheckBox(title.upper(), body)   # chữ hoa cho khác hẳn tên cột
+            head.setObjectName("GroupToggle")
+            head.setTristate(True)   # chỉ để HIỂN THỊ trạng thái "một phần"
+            head.setToolTip("Check / uncheck every column in this group")
+            keys = [k for k, _ in cols]
+            # Dùng `clicked` (chỉ do người dùng bấm) + tự quyết định bật/tắt cả
+            # nhóm, nếu không tristate sẽ cho bấm sang trạng thái "một phần" —
+            # vô nghĩa với một nút chọn tất cả.
+            head.clicked.connect(lambda _=False, ks=keys: self._toggle_group(ks))
+            # Bọc thêm một lớp lấy margin trên giống widgets.section_label():
+            # tiêu đề đọc rõ là thuộc khối ngay dưới nó.
+            box_w = QWidget(body)
+            box_l = QVBoxLayout(box_w)
+            box_l.setContentsMargins(0, 12, 0, 0)
+            box_l.setSpacing(0)
+            box_l.addWidget(head)
+            col.addWidget(box_w)
+            self._heads.append((head, keys))
 
         grid = QGridLayout()
-        grid.setContentsMargins(0, 4, 0, 6)
+        # Thụt lề trái: lưới cột nhìn rõ là "con" của dải tiêu đề nhóm ngay trên.
+        grid.setContentsMargins(10, 6, 0, 6)
         grid.setHorizontalSpacing(14)
         grid.setVerticalSpacing(6)
         for i in range(_CHECKS_PER_ROW):
@@ -103,9 +128,17 @@ class _ColumnPickerDialog(ModalDialog):
         col.addLayout(grid)
 
     # -------------------------------------------------------------- hành động
-    def _set_all(self, checked):
-        for box in self._boxes.values():
-            box.setChecked(checked)
+    def _toggle_group(self, keys):
+        """Bấm tiêu đề nhóm: còn cột nào chưa tích → tích hết, ngược lại bỏ hết."""
+        turn_on = not all(self._boxes[k].isChecked() for k in keys)
+        for k in keys:
+            self._boxes[k].setChecked(turn_on)
+
+    def _clear_all(self):
+        """Bỏ tích tất cả, TRỪ các cột `keep` — bảng không còn cột thì UI vỡ."""
+        wanted = set(self._keep)
+        for key, box in self._boxes.items():
+            box.setChecked(key in wanted)
 
     def _reset(self):
         wanted = set(self._defaults)
@@ -118,6 +151,10 @@ class _ColumnPickerDialog(ModalDialog):
     def _sync_count(self):
         self._count_lbl.setText(
             f"{len(self._keys())} of {self._total} columns selected")
+        for head, keys in self._heads:
+            n = sum(self._boxes[k].isChecked() for k in keys)
+            head.setCheckState(Qt.Checked if n == len(keys) else
+                               Qt.Unchecked if n == 0 else Qt.PartiallyChecked)
 
     def _apply(self):
         keys = self._keys()
@@ -143,16 +180,22 @@ class ColumnPicker(QPushButton):
     • `on_change`    – callback(list_keys) mỗi khi người dùng đổi lựa chọn (để
                        tool tự lưu cấu hình xuống đĩa nếu muốn).
     • `min_keys`     – số cột tối thiểu phải còn hiện (không cho ẩn hết bảng).
+    • `keep_keys`    – các cột nút "Clear all" trong modal giữ lại; None = lấy
+                       `min_keys` cột đầu của `default_keys`.
     """
 
     def __init__(self, table, default_keys=None, on_change=None, parent=None,
-                 label="Columns", min_keys=1, groups=None):
+                 label="Columns", min_keys=1, groups=None, keep_keys=None):
         super().__init__(label, parent)
         self._table = table
         self._columns = table.data_columns()
         self._defaults = list(default_keys or [k for k, _ in self._columns])
         self._on_change = on_change
         self._min_keys = max(1, min_keys)
+        valid = {k for k, _ in self._columns}
+        self._keep = [k for k in (keep_keys if keep_keys is not None
+                                  else self._defaults[:self._min_keys])
+                      if k in valid]
         self._groups = self._resolve_groups(groups)
         self._keys = []
 
@@ -201,7 +244,8 @@ class ColumnPicker(QPushButton):
 
     def _open(self):
         keys = _ColumnPickerDialog(self.window(), self._groups, self._keys,
-                                   self._defaults, self._min_keys).run()
+                                   self._defaults, self._min_keys,
+                                   self._keep).run()
         if keys is not None:
             self.set_keys(keys)
 

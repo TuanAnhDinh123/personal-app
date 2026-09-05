@@ -846,7 +846,8 @@ class EmployeeDbTool(BaseTool):
             config.save(_CFG_SECTION, cfg)
 
         self.col_picker = ColumnPicker(self.table, _EMP_DEFAULT_COLUMNS,
-                                       groups=_EMP_COLUMN_GROUPS, on_change=_save)
+                                       groups=_EMP_COLUMN_GROUPS, on_change=_save,
+                                       keep_keys=["code", "full_name"])
         if saved:
             self.col_picker.set_keys(saved, notify=False)
         else:

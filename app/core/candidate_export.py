@@ -96,32 +96,9 @@ _CELL_FONT = Font(name="Tahoma", size=10)
 _CELL_ALIGN = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
 # ── Tô màu theo điều kiện ────────────────────────────────────────────────
-# (nền, chữ) — cùng bảng màu Excel dùng cho Good / Bad / Neutral.
-_GOOD = ("C6EFCE", "006100")
+# (nền, chữ) — cùng bảng màu Excel dùng cho Bad. Các cột trạng thái / kết luận
+# KHÔNG tô màu: chúng đã có ô chọn riêng, tô nữa chỉ làm bảng rối khi in.
 _BAD = ("FFC7CE", "9C0006")
-_WARN = ("FFEB9C", "9C6500")
-
-# Trạng thái đơn (cột STATUS): chỉ tô những mốc cần chú ý, không tô cả luồng.
-_STATUS_COLORS = {
-    "Ready To Hire":         _GOOD,
-    "Offer Approval":        _GOOD,
-    "Not Proceed":           _BAD,
-    "Rejected Offer":        _BAD,
-    "Fail Probation Period": _BAD,
-}
-_RESULT_COLORS = {
-    "Pass":              _GOOD,
-    "Fail":              _BAD,
-    "Withdraw":          _BAD,
-    "Not proceed":       _BAD,
-    "Could not contact": _BAD,
-    "Considering":       _WARN,
-}
-_ROUND_RESULT_COLORS = {
-    "Pass":          _GOOD,
-    "Fail":          _BAD,
-    "Consideration": _WARN,
-}
 
 
 # ═══════════════════════════ dựng workbook ══════════════════════════════
@@ -279,34 +256,14 @@ def _add_dropdowns(wb, ws, extra: dict, last_row: int) -> None:
         dv.add(f"{letter}{DATA_START_ROW}:{letter}{last_row}")
 
 
-def _text_rule(value: str, colors, priority: int) -> Rule:
-    """Luật tô màu khi ô BẰNG ĐÚNG một chuỗi (so khớp thuần, không tính toán)."""
-    bg, fg = colors
-    style = DifferentialStyle(font=Font(color=fg),
-                              fill=PatternFill(bgColor=bg, patternType="solid"))
-    return Rule(type="cellIs", operator="equal", formula=[f'"{value}"'],
-                dxf=style, stopIfTrue=True, priority=priority)
-
-
 def _add_conditional_formats(ws, last_row: int) -> None:
-    """Tô màu STATUS / Results / kết luận từng vòng, và bôi đỏ email trùng."""
-    priority = 1
-    palettes = [("status", _STATUS_COLORS), ("result", _RESULT_COLORS)]
-    palettes += [(f"r{n}_result", _ROUND_RESULT_COLORS) for n in (1, 2, 3)]
-
-    for col_key, palette in palettes:
-        letter = get_column_letter(COL[col_key])
-        span = f"{letter}{DATA_START_ROW}:{letter}{last_row}"
-        for value, colors in palette.items():
-            ws.conditional_formatting.add(span, _text_rule(value, colors, priority))
-            priority += 1
-
+    """Bôi đỏ email trùng — luật tô màu duy nhất của file."""
     # Email trùng = ứng viên đã có trong danh sách → bôi đỏ để soát bằng mắt.
     bg, fg = _BAD
     letter = get_column_letter(COL["email"])
     ws.conditional_formatting.add(
         f"{letter}{DATA_START_ROW}:{letter}{last_row}",
-        Rule(type="duplicateValues", priority=priority,
+        Rule(type="duplicateValues", priority=1,
              dxf=DifferentialStyle(font=Font(color=fg),
                                    fill=PatternFill(bgColor=bg, patternType="solid"))))
 
@@ -444,15 +401,13 @@ def _ai_evaluation(cand) -> str:
 def _interview_evaluation(feedbacks) -> str:
     """Gộp nhận xét của MỌI người phỏng vấn trong một vòng vào một ô.
 
-    Mỗi người một đoạn mở đầu bằng tên (kèm vai trò & kết luận nếu có), cách
-    nhau bằng dòng trống.
+    Mỗi người một đoạn mở đầu bằng TÊN, cách nhau bằng dòng trống. Không kèm vai
+    trò hay kết luận pass/fail — kết luận đã có cột FINAL RESULT riêng.
     """
     blocks = []
     for fb in feedbacks:
         who = _interviewer_name(fb) or "(interviewer)"
-        tags = " · ".join(t for t in (_text(_get(fb, "role")),
-                                      _text(_get(fb, "score"))) if t)
-        lines = [f"{who} ({tags}):" if tags else f"{who}:"]
+        lines = [f"{who}:"]
         for label, key in (("", "feedback"), ("Strengths", "strengths"),
                            ("Weaknesses", "weaknesses")):
             value = _text(_get(fb, key))

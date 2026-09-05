@@ -200,6 +200,32 @@ QComboBox QAbstractItemView {
     selection-color: {{--text}};
 }
 
+/* Combo box gõ được (SearchableComboBox): ô nhập nằm LỒNG trong khung của
+   combo nên phải gỡ hết khung/đệm riêng của nó, nếu không sẽ thành viền trong
+   viền và chữ bị đẩy lệch. */
+QComboBox QLineEdit {
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    padding: 0;
+}
+/* Danh sách gợi ý khi gõ tìm — cửa sổ rời của QCompleter, phải style riêng
+   cho giống popup của combo thường. */
+QListView#ComboPopup {
+    background: {{--card-bg}};
+    border: 1px solid {{--border-strong}};
+    border-radius: 10px;
+    padding: 4px;
+    outline: none;
+    color: {{--text}};
+    selection-background-color: {{--accent-soft}};
+    selection-color: {{--text}};
+}
+QListView#ComboPopup::item {
+    padding: 6px 8px;
+    border-radius: 6px;
+}
+
 /* Ô lọc 'nhãn nổi' (FilterSelect): khi ĐÃ chọn, chừa chỗ trên cho nhãn +
    viền đổi sang màu nhấn; nhãn nổi nhỏ, màu nhấn. */
 QComboBox[floated="true"] {
@@ -229,7 +255,28 @@ QCheckBox::indicator:checked {
     border: 1px solid {{--accent}};
     image: url("{{CHECK_ICON}}");
 }
+/* Trạng thái "một phần" — dùng cho checkbox bật/tắt cả một nhóm cột khi chỉ
+   vài cột trong nhóm đang được tích. */
+QCheckBox::indicator:indeterminate {
+    background: {{--accent}};
+    border: 1px solid {{--accent}};
+    image: url("{{DASH_ICON}}");
+}
 QCheckBox::indicator:hover { border: 1px solid {{--accent}}; }
+
+/* Checkbox làm TIÊU ĐỀ NHÓM (bật/tắt cả nhóm): dải nền indigo nhạt chạy hết bề
+   ngang + chữ hoa màu accent để tách khỏi lưới checkbox từng cột bên dưới. Ô
+   tích giữ nguyên kiểu chung, căn trái thẳng hàng với checkbox cột (padding
+   trái = lề trái của lưới). */
+#GroupToggle {
+    font-size: 12px; font-weight: 700; letter-spacing: 0.6px;
+    color: {{--accent}};
+    background: {{--accent-soft}};
+    border-radius: 8px;
+    padding: 6px 10px;
+    spacing: 8px;
+}
+#GroupToggle:hover { background: {{--accent-soft-hi}}; }
 
 /* ============================================================
    NÚT BẤM — biến thể qua property "variant"
