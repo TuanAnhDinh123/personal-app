@@ -316,15 +316,27 @@ Hộp thoại của Windows chỉ hỏi được có/không nên tool truyền
 `DontConfirmOverwrite` rồi tự hỏi bằng `dialogs.choose()` — helper nhiều lựa chọn
 dùng chung, đóng bằng ✕/Esc coi như Cancel.
 
-- **Master data** tách thành nhóm **Master Data** riêng ở sidebar, gồm 7 trang:
-  **Departments · Employee types · Levels · Cost centers · Positions ·
-  Mail templates · Courses** — mỗi trang là một bảng + thanh
-  *Add / Edit / Delete / Reload* (dùng chung `CrudTablePanel`), thêm/sửa/xóa
-  riêng. (Các trang này không hiện thẻ ở Trang chủ.) Bốn trang danh mục nhân sự
-  đã có **dữ liệu nạp sẵn** từ `Code.xlsx`:
-  20 bộ phận · 6 loại nhân viên · 12 cấp bậc · 42 cost center.
+- **Master data** tách thành nhóm **Master Data** riêng ở sidebar, gồm 9 trang:
+  **Departments · Employee types · Levels · Cost centers · Code lists ·
+  Positions · Mail templates · Skills · Courses** — mỗi trang là một bảng +
+  thanh *Add / Edit / Delete / Reload* (dùng chung `CrudTablePanel`),
+  thêm/sửa/xóa riêng. (Các trang này không hiện thẻ ở Trang chủ.) Các trang
+  danh mục nhân sự đã có **dữ liệu nạp sẵn** từ sheet *Code* của file HC:
+  20 bộ phận · 33 nhóm chức năng · 6 loại nhân viên · 12 cấp bậc ·
+  42 cost center · 19 giá trị code list.
   Muốn thêm/bớt cột hay ô nhập của một trang → sửa `_master_specs()` trong
   [app_qt/tools/candidate_db.py](app_qt/tools/candidate_db.py).
+- **Nhóm chức năng (`functions`) sửa ngay trong form Departments**, không có
+  trang riêng: bảng có cột *Functions* liệt kê các nhóm của phòng ban (ngăn bởi
+  dấu phẩy), form có ô nhập nhiều dòng — thêm tên là tạo, bỏ tên là xóa, tên
+  giữ nguyên thì giữ nguyên bản ghi (`repo.replace_department_functions`).
+- **Trang Code lists** gộp NHIỀU danh mục "một cột giá trị" vào một bảng
+  (`code_lists`), phân biệt bằng `type`; ô chọn phía trên quyết định đang
+  xem/sửa danh mục nào, và dòng thêm mới được điền sẵn type đó. Hiện có
+  *Qualification · Qualification (VN) · ID issued place*
+  (`cv_schema.CODE_LIST_TYPES`) — thêm danh mục một cột về sau chỉ cần thêm một
+  `type`, không phải thêm bảng và trang. Ô chọn này là tính năng chung của
+  `CrudTablePanel` (khóa `"filter"` trong spec).
 - **Mẫu mail dùng chung**: trang **Mail templates** (bảng `mail_templates`) giữ
   mọi mẫu mail — *tên · loại · CC · tiêu đề · nội dung (rich text)*. Loại lấy từ
   `MAIL_TEMPLATE_TYPE_CHOICES` (Interview Round 1/2/3 · Application Thank You ·
@@ -408,7 +420,8 @@ chung) → `positions` qua 3 cột `mail_template_r1_id / _r2_id / _r3_id`;
 ngoài ra `employees` (nhân viên) và `courses` ↔ `course_employees` (đào tạo).
 Đường dẫn file lưu thẳng vào cột — không có bảng file riêng.
 
-**Bảng `employees` bám sát `Master HC file.xlsx`** (sheet *Master file*) — gần
+**Bảng `employees` bám sát file Excel "Personnel Data"** (HR export, sheet
+*Personnel Data-new*) — gần
 như mỗi cột trong file có một cột tương ứng trong DB; chú thích
 `-- <Tiêu đề Excel>` ghi ngay cạnh từng cột trong `app/core/cv_schema.py`.
 
@@ -430,24 +443,55 @@ như mỗi cột trong file có một cột tương ứng trong DB; chú thích
   có ngày (khác rỗng) = đã nghỉ việc. Truy vấn danh sách trả thêm cột
   `work_status` ("Working"/"Resigned") để hiển thị; mặc định ẩn người đã nghỉ
   (tick *Include resigned employees* để xem cả).
-- **4 cột text được tra sang bảng danh mục**: "Function (Common)" → `departments`
-  (short_name) · "New Cost center" → `cost_centers` (code) · "IBC/DBC/WC" →
-  `employee_types` (code) · "Job level" → `levels` (level_name). Không khớp thì
-  để trống liên kết và báo lại danh sách cuối lần import.
+- **THỨ TỰ CỘT PHẢI BÁM ĐÚNG FILE EXCEL.** `_EMP_COLUMN_SPECS`
+  (`app_qt/tools/employee_db.py`) xếp theo đúng thứ tự cột của file "Personnel
+  Data"; thêm/đổi cột thì chèn vào **đúng vị trí của cột đó trong file**, không
+  nối vào cuối. Ba nơi bám theo danh sách này: thứ tự cột trên bảng, nhóm cột
+  trong modal **Columns** (`_EMP_COLUMN_SECTIONS` cắt nhóm ngay từ danh sách
+  này nên đọc dọc modal luôn ra đúng thứ tự bảng) và **Copy row**
+  (`_EMP_COPY_COLUMNS` — bố cục cột của file Excel đích).
+- **4 cột text được tra sang bảng danh mục** (lưu **id**): "Department (short)"
+  → `departments` (short_name) · "New Cost center" → `cost_centers` (code) ·
+  "IBC/DBC/WC" → `employee_types` (code) · "Job level" → `levels` (level_name).
+  Xem `_MASTER_LOOKUPS`.
+- **4 cột text khớp danh mục nhưng lưu NGUYÊN VĂN** (`_TEXT_LOOKUPS`):
+  "Function (Common)" → `functions` · "Qualification" · "Qualification
+  (Việt Nam)" · "Issued Place" → `code_lists` theo `type` tương ứng. Danh mục ở
+  đây chỉ đóng vai **người gác cổng** để mọi nhân viên viết giống nhau, giá trị
+  vẫn lưu dạng text. Danh mục rỗng thì bỏ qua kiểm tra.
+- Cả ba nhóm (thêm `_CHOICE_FIELDS` — hằng cứng trong code như Gender, Marital
+  status) đều **chặn import** nếu có ô không khớp, báo lại từng ô sai kèm số
+  dòng Excel và KHÔNG ghi gì cả. So khớp **không phân biệt hoa/thường**, nhưng
+  giá trị lưu xuống lấy đúng cách viết của danh mục.
+- **Copy row** (chuột phải → *Copy row*) trải dòng thành **82 ô TSV** đúng bố
+  cục cột A → CD của file Excel (*Legal Entity* → *Birthday*, cột hợp lệ cuối
+  cùng), chừa ô trống cho cột file có mà DB không lưu → dán thẳng vào file, bắt
+  đầu từ cột A của một dòng trống (thao tác này dùng khi THÊM nhân viên mới).
+  Cột "Department (short)" dán **mã viết tắt** (`department_short_name`), không
+  phải tên bộ phận đầy đủ. Mặc định dán **text** (kể cả ô mà file vốn để công
+  thức — Surname/Name/Middle Name, Department (short), Full name of manager:
+  dữ liệu trong DB đã là kết quả cuối). Chỉ dán **công thức** ở ô mà giá trị
+  phụ thuộc ngày hôm nay (4 cột *Figures*) hoặc app không có dữ liệu (*Count*,
+  *Birthday*); công thức viết bằng tham chiếu có cấu trúc `[@[Tên cột]]` nên dán
+  dòng nào cũng đúng.
 - Các cột **file Excel tự tính** (Age, Age range, Year of service, Length of
-  service, Year of birthday) được lưu như **ảnh chụp lúc import** — app không
-  tính lại. Các cột "Legal Entity (Company)", "Position status", "Business Unit
+  service) **không lưu trong DB** — app tính lại mỗi lần truy vấn bằng đúng
+  công thức của file (`cv_repository.EMPLOYEE_COMPUTED_SQL`) nên không bao giờ
+  cũ. Cột *Year of birthday (year)* **bỏ khỏi cả app lẫn file Excel** (công
+  thức trùng hệt cột Age). Các cột "Legal Entity (Company)", "Position status", "Business Unit
   (Department)", "BC/WC", "STT", "Birthday"… không lưu vì đã có nguồn khác hoặc
   chỉ là cột phụ trợ trong file (xem chú thích trong schema).
 - **Thanh nút** chỉ để lộ hai việc làm hằng ngày — *Enroll* (ghi danh khóa học)
   và *Import application form* (nhập đơn dự tuyển). Ba việc thi thoảng mới dùng
   — **Add · Bulk Import · Reload** — nằm trong nút **⋮** ở góc phải
   (`_build_more_button` / `_show_more_menu`). *Bulk Import* chính là nhập hàng
-  loạt từ `Master HC file.xlsx` nói ở trên.
+  loạt từ file "Personnel Data" nói ở trên.
 - Bảng ~90 cột → giao diện chỉ hiện vài cột mặc định, bật/tắt thêm ở modal
-  **Columns** — cột gom theo nhóm (Identity / Contact / Education…), lựa chọn
-  được ghi nhớ. Sửa nhóm & cột mặc định ở `_EMP_COLUMN_GROUPS` /
-  `_EMP_DEFAULT_COLUMNS` trong `app_qt/tools/employee_db.py`.
+  **Columns** — cột gom theo nhóm (Identity / Personal info / Organization…),
+  mỗi nhóm có checkbox bật/tắt cả nhóm, nút *Clear all* bỏ hết chỉ chừa Emp code
+  + Full name; lựa chọn được ghi nhớ. Sửa nhóm & cột mặc định ở
+  `_EMP_COLUMN_SECTIONS` / `_EMP_DEFAULT_COLUMNS` trong
+  `app_qt/tools/employee_db.py`.
 
 ### Nhập nhân viên từ ĐƠN DỰ TUYỂN (AI đọc form) 📄
 
@@ -480,17 +524,20 @@ logic ở [app/core/application_form.py](app/core/application_form.py).
 - Dùng chung **API key + model ở ⚙️ Settings** như các tính năng AI khác; không
   cần cài thêm gói (đã có `openpyxl` + `pymupdf`).
 
-**Bảng danh mục (master data)** — nạp sẵn dữ liệu từ file `Code.xlsx`:
-`departments` (tên + mã viết tắt), `employee_types` (WC/WCA/IBC/IBCA/DBC/DBCA +
-nhóm Blue/White Collar), `cost_centers` (mã VN1001… + Group Function
-VNPlant/Corporate/R&D — dùng để gom nhân viên theo nhóm khi tính chi phí vận
-hành), `levels` (Director, Manager, Officer…).
+**Bảng danh mục (master data)** — nạp sẵn dữ liệu từ sheet *Code* của file HC:
+`departments` (tên + mã viết tắt), `functions` (nhóm chức năng, gắn vào phòng
+ban), `employee_types` (WC/WCA/IBC/IBCA/DBC/DBCA + nhóm Blue/White Collar),
+`cost_centers` (mã VN1001… + Group Function VNPlant/Corporate/R&D — dùng để gom
+nhân viên theo nhóm khi tính chi phí vận hành), `levels` (Director, Manager,
+Officer…), `code_lists` (Qualification · Qualification (VN) · ID issued place).
 
 > **Dữ liệu khởi tạo**: khai báo ở `SEED_DATA` (cv_schema.py), nạp bởi
 > `_seed_master_data()` — mỗi khối chỉ chạy **một lần** cho mỗi file .db (đánh
 > dấu ở bảng `app_meta`), và bỏ qua dòng đã tồn tại nên không tạo bản ghi trùng.
 > Muốn nạp lại: xóa khóa `seed:<bảng>:v1` trong `app_meta`. Bổ sung danh mục về
-> sau: thêm dòng vào `rows` rồi tăng `version`.
+> sau: thêm dòng vào `rows` rồi tăng `version`. Khối có khóa `lookup` (vd
+> `functions`) thì ô khóa ngoại ghi bằng **tên**, seeder tra sang id lúc nạp —
+> bảng được tra phải khai **trước** trong `SEED_DATA`.
 
 > **Bảng `job_descriptions` đã bị bỏ**: JD nằm trong `positions`. Khi mở tool
 > trên DB cũ, `init_db()` **xóa hẳn** bảng đó — dữ liệu JD cũ **không** được

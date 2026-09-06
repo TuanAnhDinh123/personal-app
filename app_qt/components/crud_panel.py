@@ -8,6 +8,11 @@ nhân bản dòng đang chọn rồi mở luôn form sửa bản sao.
 
 Spec có "link_keys" (tập khóa cột) + "on_link" (callable(panel, row, key)) thì
 các cột đó hiển thị dạng link bấm được — vd cột "JD file" ở trang Positions.
+
+Spec có "filter" = {"title", "field", "options"} thì phía trên bảng có thêm một
+ô chọn: bảng chỉ hiện các dòng thuộc lựa chọn đang chọn (`list_fn` nhận thêm
+tham số này), và dòng THÊM MỚI được điền sẵn `field` = lựa chọn đó. Dùng cho
+trang gộp nhiều danh mục vào một bảng — vd "Code lists" chọn theo `type`.
 """
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
@@ -25,6 +30,22 @@ class CrudTablePanel(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(10)
+
+        # Ô chọn "đang xem danh mục nào" — để RIÊNG một dòng phía trên thanh nút
+        # vì nó cao hơn nút (54px, có nhãn nổi) nên xếp chung sẽ lệch hàng.
+        self.filter_select = None
+        fspec = self.spec.get("filter")
+        if fspec:
+            opts = fspec["options"]() if callable(fspec["options"]) else fspec["options"]
+            self.filter_select = widgets.FilterSelect(fspec["title"], self,
+                                                      allow_all=False)
+            self.filter_select.setFixedWidth(240)
+            self.filter_select.set_options(list(opts))
+            self.filter_select.changed.connect(self.reload)
+            row = QHBoxLayout()
+            row.addWidget(self.filter_select, 0)
+            row.addStretch(1)
+            lay.addLayout(row)
 
         bar = QHBoxLayout()
         bar.setSpacing(6)
@@ -53,7 +74,10 @@ class CrudTablePanel(QWidget):
         self.reload()
 
     def reload(self):
-        self.table.set_rows(self.spec["list_fn"]())
+        if self.filter_select is None:
+            self.table.set_rows(self.spec["list_fn"]())
+        else:
+            self.table.set_rows(self.spec["list_fn"](self.filter_select.value()))
 
     def _link_clicked(self, row, key):
         """Bấm ô link trong bảng → gọi handler của spec; panel truyền theo để
@@ -72,8 +96,13 @@ class CrudTablePanel(QWidget):
         return rid
 
     def _add(self):
+        # Có ô chọn danh mục → dòng mới mặc định thuộc danh mục ĐANG XEM, khỏi
+        # phải chọn lại (vẫn đổi được trong form nếu muốn xếp sang mục khác).
+        preset = None
+        if self.filter_select is not None:
+            preset = {self.spec["filter"]["field"]: self.filter_select.value()}
         FormDialog(
-            self, "Add " + self.spec["title"], self.spec["form"], None,
+            self, "Add " + self.spec["title"], self.spec["form"], preset,
             on_save=lambda data: (self.spec["insert"](data), self._changed()),
             size=self.spec.get("modal_size", "sm")
         ).run()

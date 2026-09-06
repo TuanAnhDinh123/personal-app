@@ -24,7 +24,9 @@ CÁCH SỬA CẤU TRÚC VỀ SAU — chỉ có MỘT đường duy nhất: `MIGR
 ────────────────────────────────────────────────────────────────────────────
 SƠ ĐỒ QUAN HỆ (mềm, không ràng buộc FK)
 
-  DANH MỤC        departments · levels · employee_types · cost_centers
+  DANH MỤC        departments ──1:N──> functions  (nhóm nhỏ trong phòng ban)
+                  levels · employee_types · cost_centers
+                  code_lists  (nhiều danh mục một cột, phân biệt bằng `type`)
                   skills · mail_templates · app_meta
 
   TUYỂN DỤNG      positions  ──1:N──> position_requirements  (JD đã bóc tách)
@@ -663,7 +665,97 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE employees DROP COLUMN changing_dates;
         ALTER TABLE employees DROP COLUMN local_function;
     '''),
+    # Bỏ `address` (Excel "Street (address)"): cột này nằm lạc ở tận cùng file
+    # Excel, sau mấy ô header trống, và HR xác nhận không dùng tới — cột hợp lệ
+    # cuối cùng của file là "Birthday". Địa chỉ vẫn còn đủ ở `permanent_address`
+    # / `temporary_address` (+ `city`, `country`). Dữ liệu trong cột này MẤT theo.
+    ("0004_drop_employees_address", '''
+        ALTER TABLE employees DROP COLUMN address;
+    '''),
+    # Bỏ 5 cột "số liệu file Excel tự tính": chúng là CÔNG THỨC bên file (Age =
+    # YEAR(NOW())-YEAR(ngày sinh), Year of service = (TODAY()-ngày vào)/365, hai
+    # cột phân khoảng suy ra từ hai số đó) nên lưu lại chỉ là ảnh chụp lúc
+    # import, càng để lâu càng sai. Bốn cột được tính động ngay trong câu truy
+    # vấn (`EMPLOYEE_COMPUTED_SQL`) — giống cách `work_status` suy từ
+    # termination_date. Riêng `birth_year` (file: "Year of birthday (year)") BỎ
+    # HẲN, không tính lại: công thức của nó trong file trùng hệt cột Age nên đó
+    # là cột dư, tiêu đề chỉ gây hiểu nhầm.
+    ("0005_drop_employees_excel_figures", '''
+        ALTER TABLE employees DROP COLUMN years_of_service;
+        ALTER TABLE employees DROP COLUMN length_of_service;
+        ALTER TABLE employees DROP COLUMN birth_year;
+        ALTER TABLE employees DROP COLUMN age;
+        ALTER TABLE employees DROP COLUMN age_range;
+    '''),
+    # Ba danh mục cuối cùng của sheet "Code" trong file HC còn nằm ngoài app —
+    # nhân viên nhập tay nên sai chính tả không ai chặn. Đưa hết vào DB:
+    #
+    #   • `functions` — Excel "Function (Common)": nhóm nhỏ BÊN TRONG phòng ban
+    #     (Production có PD, R&D có HHS · MOB · SOL…), nên gắn thẳng vào
+    #     departments thay vì làm một danh mục phẳng nữa. CRUD nằm ngay màn hình
+    #     Departments (mỗi phòng ban một ô nhập nhiều dòng).
+    #
+    #   • `code_lists` — gom NHIỀU danh mục MỘT CỘT vào chung một bảng, phân
+    #     biệt bằng `type` (xem CODE_LIST_TYPES). Ba thứ đầu tiên (Qualification ·
+    #     Qualification (VN) · ID issued place) chỉ là một danh sách chuỗi; tách
+    #     mỗi thứ một bảng + một màn hình là nhân bản y hệt nhau ba lần. Danh mục
+    #     một cột về sau chỉ cần thêm một `type`, không phải thêm bảng.
+    #
+    #   • `employees.qualification_vn` — Excel "Qualification (Việt Nam)". Trước
+    #     đây bỏ qua khi import vì tưởng là bản dịch của "Qualification", nhưng
+    #     sheet "Code" cho thấy hai cột là hai danh mục RIÊNG (8 giá trị so với
+    #     7, cách chia bậc học khác nhau) nên lưu lại đúng như file.
+    ("0006_functions_and_code_lists", '''
+        CREATE TABLE IF NOT EXISTS functions (
+            function_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            department_id INT,             -- → departments.department_id
+            function_name VARCHAR,
+            description   TEXT,
+            created_at    DATETIME DEFAULT (datetime('now', 'localtime')),
+            updated_at    DATETIME DEFAULT (datetime('now', 'localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_functions_dept ON functions(department_id);
+
+        CREATE TABLE IF NOT EXISTS code_lists (
+            code_list_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type         VARCHAR,          -- nhóm giá trị — xem CODE_LIST_TYPES
+            value        VARCHAR,          -- giá trị, ghi y hệt file Excel
+            sort_order   INT,              -- nhỏ hơn hiện trước
+            description  TEXT,
+            created_at   DATETIME DEFAULT (datetime('now', 'localtime')),
+            updated_at   DATETIME DEFAULT (datetime('now', 'localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_code_lists_type ON code_lists(type);
+
+        ALTER TABLE employees ADD COLUMN qualification_vn VARCHAR;
+    '''),
 ]
+
+# =============================================================================
+#  DANH MỤC MỘT CỘT (bảng `code_lists`)
+#
+#  Mỗi `type` là MỘT danh sách giá trị người dùng tự bảo trì ở Master Data →
+#  "Code lists". Khác `CANDIDATE_STATUS_CHOICES` & các hằng ở cuối file: những
+#  hằng đó là giá trị app dựa vào để chạy logic nên phải cố định trong code,
+#  còn ba danh mục này thuần dữ liệu HR — sửa là chuyện thường ngày, để trong
+#  DB thì thêm/bớt không cần dựng lại app.
+#
+#  Hằng dưới đây chỉ liệt kê CÁC LOẠI (giá trị nằm trong DB). Thêm một danh mục
+#  một cột về sau = thêm một hằng `CODE_TYPE_*` + một dòng ở `CODE_LIST_TYPES`,
+#  không phải thêm bảng.
+#
+#  Khai ở ĐÂY (trước SEED_DATA) vì khối seed `code_lists` dùng tới.
+# =============================================================================
+CODE_TYPE_QUALIFICATION = "Qualification"            # Excel: "Qualification"
+CODE_TYPE_QUALIFICATION_VN = "Qualification (VN)"    # Excel: "Qualification (Việt Nam)"
+CODE_TYPE_ID_ISSUED_PLACE = "ID issued place"        # Excel: "Issued Place" (CCCD nơi cấp)
+
+CODE_LIST_TYPES = [
+    CODE_TYPE_QUALIFICATION,
+    CODE_TYPE_QUALIFICATION_VN,
+    CODE_TYPE_ID_ISSUED_PLACE,
+]
+
 
 # =============================================================================
 #  SEED — DỮ LIỆU KHỞI TẠO cho các bảng danh mục (nguồn: file Code.xlsx).
@@ -674,6 +766,10 @@ MIGRATIONS: list[tuple[str, str]] = [
 #    • Trong một lần nạp, dòng đã có sẵn (trùng theo cột ở `match`) bị bỏ qua
 #      → không tạo bản ghi trùng và KHÔNG đụng dữ liệu người dùng tự nhập.
 #    • Bổ sung danh mục về sau: thêm dòng vào `rows` rồi TĂNG `version`.
+#    • Khối có `lookup` = {cột: (bảng, cột khớp, cột id)} thì ô tương ứng trong
+#      `rows` ghi bằng TÊN (dễ đọc, dễ sửa) và seeder tra sang id lúc nạp — id
+#      tự tăng nên không thể viết thẳng vào đây. Bảng được tra phải nằm TRƯỚC
+#      trong SEED_DATA (dict giữ nguyên thứ tự khai báo) để nó đã có dữ liệu.
 # =============================================================================
 SEED_DATA: dict[str, dict] = {
     "departments": {
@@ -701,6 +797,60 @@ SEED_DATA: dict[str, dict] = {
             ("Local COM",                        "COM"),
             ("Global COM",                       "GCOM"),
             ("Purchasing/Indirect Material",     "Gpr"),
+        ],
+    },
+    # Nhóm nhỏ bên trong phòng ban (Excel "Function (Common)"). Cột thứ hai ghi
+    # TÊN phòng ban, seeder tra sang department_id (xem `lookup`).
+    #
+    # Phòng ban của từng function suy ra từ chính file HC: ba sheet dữ liệu cũ
+    # ("Termination", "trước update", "Truoc upda Jobtitle 24.Nov.20", ~1.700
+    # dòng) ghép sẵn cặp "Business Unit (Department)" × "Function (Common)" →
+    # 25/33 function có bằng chứng thực tế, lấy phòng ban áp đảo. `GCOM` khớp
+    # short_name của Global COM. Bảy function còn lại (Test Automation Framework
+    # · DC Testing · IA Testing · SOL Test · Annotation · Hardware · Project
+    # Coordinator) không xuất hiện ở dòng dữ liệu nào — xếp vào R&D cho cùng họ
+    # với các nhóm test đã có bằng chứng thuộc R&D, sửa lại được ở màn hình
+    # Departments nếu chưa đúng.
+    "functions": {
+        "version": 1,
+        "columns": ("function_name", "department_id"),
+        "match": ("function_name",),
+        "lookup": {"department_id": ("departments", "department_name", "department_id")},
+        "rows": [
+            ("FC",    "Facilities Control"),
+            ("FIN",   "Finance"),
+            ("BOM",   "Global Operations"),
+            ("PD",    "Production"),
+            ("ME",    "Manufacturing Engineering"),
+            ("PL",    "Production Planning"),
+            ("LG",    "Logistics"),
+            ("QA",    "Quality Assurance"),
+            ("HRA",   "Human Resource & Administration"),
+            ("GP",    "Global Planning"),
+            ("GL",    "Global Logistics"),
+            ("COM",   "Local COM"),
+            ("GCOM",  "Global COM"),
+            ("MM",    "Materials Management"),
+            ("GMM",   "Materials Management"),
+            ("IT",    "Information Technology"),
+            ("GPr",   "Global Procurement"),
+            ("TS",    "Sales SEA"),
+            # R&D — các nhóm sản phẩm & nhóm kiểm thử.
+            ("R&D",                       "Research & Development"),
+            ("HHS",                       "Research & Development"),
+            ("MOB",                       "Research & Development"),
+            ("FRS",                       "Research & Development"),
+            ("SIS",                       "Research & Development"),
+            ("SOL",                       "Research & Development"),
+            ("Global Testing",            "Research & Development"),
+            ("Data capture Testing",      "Research & Development"),
+            ("Test Automation Framework", "Research & Development"),
+            ("DC Testing",                "Research & Development"),
+            ("IA Testing",                "Research & Development"),
+            ("SOL Test",                  "Research & Development"),
+            ("Annotation",                "Research & Development"),
+            ("Hardware",                  "Research & Development"),
+            ("Project Coordinator",       "Research & Development"),
         ],
     },
     # WC/WCA = White Collar · IBC/IBCA (Indirect) & DBC/DBCA (Direct) = Blue Collar.
@@ -755,6 +905,39 @@ SEED_DATA: dict[str, dict] = {
             ("Operator",          10),
             ("Technician Lead",   11),
             ("Team Leader",       12),
+        ],
+    },
+    # Các danh mục MỘT CỘT, phân biệt bằng `type` (xem CODE_LIST_TYPES).
+    # `sort_order` giữ đúng thứ tự các giá trị trong sheet "Code" để dropdown
+    # trên app đọc ra giống hệt dropdown HR đang dùng bên Excel.
+    "code_lists": {
+        "version": 1,
+        "columns": ("type", "value", "sort_order"),
+        "match": ("type", "value"),
+        "rows": [
+            (CODE_TYPE_QUALIFICATION, "University",           1),
+            (CODE_TYPE_QUALIFICATION, "Master",               2),
+            (CODE_TYPE_QUALIFICATION, "High School",          3),
+            (CODE_TYPE_QUALIFICATION, "Vocational Training",  4),
+            (CODE_TYPE_QUALIFICATION, "College",              5),
+            (CODE_TYPE_QUALIFICATION, "Secondary school",     6),
+            (CODE_TYPE_QUALIFICATION, "PhD",                  7),
+
+            (CODE_TYPE_QUALIFICATION_VN, "Tiến sĩ",    1),
+            (CODE_TYPE_QUALIFICATION_VN, "Thạc sĩ",    2),
+            (CODE_TYPE_QUALIFICATION_VN, "Đại Học",    3),
+            (CODE_TYPE_QUALIFICATION_VN, "Cao đẳng",   4),
+            (CODE_TYPE_QUALIFICATION_VN, "Trung cấp",  5),
+            (CODE_TYPE_QUALIFICATION_VN, "THPT",       6),
+            (CODE_TYPE_QUALIFICATION_VN, "THCS",       7),
+            (CODE_TYPE_QUALIFICATION_VN, "Khác",       8),
+
+            (CODE_TYPE_ID_ISSUED_PLACE,
+             "Cục Cảnh sát quản lý hành chính về trật tự xã hội.", 1),
+            (CODE_TYPE_ID_ISSUED_PLACE,
+             "Cục trưởng cục cảnh sát ĐKQL cư trú và DLQG về dân cư", 2),
+            (CODE_TYPE_ID_ISSUED_PLACE, "Bộ công an",  3),
+            (CODE_TYPE_ID_ISSUED_PLACE, "Cục cản sát", 4),
         ],
     },
 }

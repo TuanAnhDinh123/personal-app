@@ -424,15 +424,20 @@ def _copy_chip(parent, value):
 # ═══════════════════════════ MASTER DATA specs ══════════════════════════
 def _master_specs():
     return {
+        # Nhóm chức năng (bảng `functions`, Excel "Function (Common)") KHÔNG có
+        # trang riêng: cái nào cũng thuộc một phòng ban nên sửa ngay tại đây —
+        # cột "Functions" liệt kê, ô nhập nhiều dòng trong form đặt lại cả cụm
+        # (xem repo.replace_department_functions).
         "department": {
             "title": "department", "pk": "department_id",
-            "list_fn": repo.list_departments,
-            "get": repo.get_department, "insert": repo.insert_department,
+            "list_fn": repo.list_departments_with_functions,
+            "get": repo.get_department_form, "insert": repo.insert_department,
             "update": repo.update_department, "delete": repo.delete_department,
             "columns": [
                 ("department_id", "ID", 50),
                 ("department_name", "Department name", 200),
                 ("short_name", "Short code", 100),
+                ("functions", "Functions", 260),
                 ("manager_name", "Manager", 150),
                 ("description", "Description", 220),
             ],
@@ -442,6 +447,12 @@ def _master_specs():
                 {"key": "short_name", "label": "Short code (e.g. FIN, IT, R&D)",
                  "kind": "text"},
                 {"key": "manager_name", "label": "Manager", "kind": "text"},
+                {"key": "functions", "label": "Functions", "kind": "textarea",
+                 "height": 5,
+                 "hint": "One function per line (commas also work), e.g. HHS, "
+                         "MOB, SOL. These are the \"Function (Common)\" values "
+                         "of the employee Excel file. Adding a name creates it, "
+                         "removing a name deletes it from this department."},
                 {"key": "description", "label": "Description", "kind": "textarea", "height": 3},
             ],
         },
@@ -581,6 +592,39 @@ def _master_specs():
                  "kind": "textarea", "height": 3},
             ],
         },
+        # Nhiều danh mục "một cột giá trị" dùng CHUNG một bảng + một trang, ô
+        # chọn phía trên quyết định đang xem/sửa danh mục nào (xem `filter` ở
+        # CrudTablePanel). Thêm một danh mục mới = thêm một type ở
+        # cv_schema.CODE_LIST_TYPES, không phải thêm bảng và trang.
+        "code_list": {
+            "title": "value", "pk": "code_list_id",
+            "filter": {"title": "Code list", "field": "type",
+                       "options": lambda: cv_schema.CODE_LIST_TYPES},
+            "list_fn": repo.list_code_lists,
+            "get": repo.get_code_list, "insert": repo.insert_code_list,
+            "update": repo.update_code_list, "delete": repo.delete_code_list,
+            "columns": [
+                ("code_list_id", "ID", 50),
+                ("value", "Value", 340),
+                ("sort_order", "Order", 70, "center"),
+                ("description", "Description", 260),
+            ],
+            "form": [
+                {"key": "type", "label": "Code list (*)", "kind": "choice",
+                 "choices": cv_schema.CODE_LIST_TYPES,
+                 "hint": "Which list this value belongs to. Change it to move "
+                         "the value to another list."},
+                {"key": "value", "label": "Value (*)", "kind": "text",
+                 "required": True,
+                 "hint": "Type it exactly as it appears in the employee Excel "
+                         "file — Bulk Import rejects any cell that doesn't "
+                         "match one of these values."},
+                {"key": "sort_order", "label": "Display order (smaller = higher)",
+                 "kind": "int"},
+                {"key": "description", "label": "Description",
+                 "kind": "textarea", "height": 3},
+            ],
+        },
         "level": {
             "title": "level", "pk": "level_id",
             "list_fn": repo.list_levels,
@@ -713,6 +757,15 @@ class CostCenterTool(_MasterPageTool):
     icon = "🏦"
     order = 16
     spec_key = "cost_center"
+
+
+class CodeListTool(_MasterPageTool):
+    name = "Code lists"
+    description = ("Plain value lists taken from the HC file: Qualification, "
+                   "Qualification (VN), ID issued place — pick a list at the top.")
+    icon = "🔠"
+    order = 18
+    spec_key = "code_list"
 
 
 class PositionTool(_MasterPageTool):

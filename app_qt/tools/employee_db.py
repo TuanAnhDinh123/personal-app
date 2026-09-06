@@ -87,8 +87,6 @@ _EXCEL_HEADER_MAP = {
     "personal email address":         "email",
     "email":                          "email",
     "company email":                  "company_email",
-    "street (address)":               "address",
-    "address":                        "address",
     "city (address)":                 "city",
     "city (address)-theo đc thường trú": "city",
     "country (address)":              "country",
@@ -107,6 +105,8 @@ _EXCEL_HEADER_MAP = {
     "year of graduated":              "graduation_year",
     "school name":                    "school_name",
     "qualification":                  "qualification",
+    "qualification (việt nam)":       "qualification_vn",
+    "qualification (viet nam)":       "qualification_vn",
     # ── giấy tờ · ngân hàng · thuế · bảo hiểm ──
     "id no.":                         "id_no",
     "id no":                          "id_no",
@@ -151,12 +151,6 @@ _EXCEL_HEADER_MAP = {
     "ending date of contract":        "contract_end_date",
     "termination date":               "termination_date",
     "reason for leaving":             "leaving_reason",
-    # ── số liệu file Excel tự tính ──
-    "year of service":                "years_of_service",
-    "length of service":              "length_of_service",
-    "year of birthday (year)":        "birth_year",
-    "age":                            "age",
-    "age range":                      "age_range",
     # ── ghi chú ──
     "changing notes":                 "changing_notes",
     "changing date":                  "changing_date",
@@ -179,9 +173,17 @@ _EXCEL_IGNORED_HEADERS = {
     "business unit",
     "department",
     "bc/wc",                          # hiển thị qua employee_types.collar
+    # 5 cột "Figures" là CÔNG THỨC bên file, app tự tính lại mỗi lần truy vấn
+    # (cv_repository.EMPLOYEE_COMPUTED_SQL) nên không nhận giá trị từ file nữa.
+    "year of service",
+    "length of service",
+    "year of birthday (year)",
+    "age",
+    "age range",
+    "street (address)",               # cột lạc ở cuối file, HR xác nhận không dùng
+    "address",                        # tên cột này ở file khác, cùng nghĩa
     "position status",                # suy ra từ Termination Date (xem README)
     "status",
-    "qualification (việt nam)",       # bản dịch tiếng Việt của "Qualification", không có thông tin mới
     "manager surname (report directly to)",  # đã có "Full name of manager" gộp sẵn
     "manager name",                   # trùng, xem trên
     "manager middle name (only for vietnam)", # trùng, xem trên
@@ -235,13 +237,11 @@ _HEADER_MIN_MATCHES = 3    # số cột khớp tối thiểu để coi 1 dòng l
 _KNOWN_HEADERS = set(_EXCEL_HEADER_MAP) | _EXCEL_IGNORED_HEADERS
 
 
-def _find_header_row(ws):
-    """Trả về SỐ THỨ TỰ dòng chứa tên cột thật (1-based).
+def _scan_header(ws):
+    """(dòng header, số cột khớp) của một sheet.
 
     Quét `_HEADER_SCAN_ROWS` dòng đầu, chọn dòng có nhiều ô khớp tên cột đã
-    biết (`_EXCEL_HEADER_MAP`/`_EXCEL_IGNORED_HEADERS`) nhất. Không dòng nào đạt
-    tối thiểu `_HEADER_MIN_MATCHES` → coi dòng 1 là header (hành vi cũ, để
-    không vỡ với file đơn giản không có phần tiêu đề thừa phía trên).
+    biết (`_EXCEL_HEADER_MAP`/`_EXCEL_IGNORED_HEADERS`) nhất.
     """
     best_row, best_score = 1, -1
     for row_idx, row in enumerate(
@@ -249,7 +249,39 @@ def _find_header_row(ws):
         score = sum(1 for v in row if v and _norm(v) in _KNOWN_HEADERS)
         if score > best_score:
             best_row, best_score = row_idx, score
-    return best_row if best_score >= _HEADER_MIN_MATCHES else 1
+    return best_row, best_score
+
+
+def _find_header_row(ws):
+    """Dòng chứa tên cột thật (1-based). Không dòng nào đạt tối thiểu
+    `_HEADER_MIN_MATCHES` → coi dòng 1 là header (hành vi cũ, để không vỡ với
+    file đơn giản không có phần tiêu đề thừa phía trên).
+    """
+    row, score = _scan_header(ws)
+    return row if score >= _HEADER_MIN_MATCHES else 1
+
+
+def _pick_sheet(wb):
+    """(sheet dữ liệu nhân viên, dòng header) — KHÔNG dùng `wb.active`.
+
+    File HC thật có cả chục sheet (Code, Termination, Draft, print…) và sheet
+    đang mở lúc lưu file mới là sheet "active" — file mẫu nhận được active là
+    sheet `Code`, import thẳng vào đó thì nuốt nhầm bảng danh mục. Nên:
+      1) ưu tiên sheet có tên chứa "personnel data" (tên có thể thừa dấu cách),
+      2) không có thì chấm điểm từng sheet theo số cột khớp tên cột đã biết,
+      3) vẫn không sheet nào đạt → quay về sheet active như trước.
+    """
+    for ws in wb.worksheets:
+        if "personnel data" in _norm(ws.title):
+            return ws, _find_header_row(ws)
+    best = None
+    for ws in wb.worksheets:
+        row, score = _scan_header(ws)
+        if score >= _HEADER_MIN_MATCHES and (best is None or score > best[2]):
+            best = (ws, row, score)
+    if best:
+        return best[0], best[1]
+    return wb.active, _find_header_row(wb.active)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -273,7 +305,6 @@ EMP_COL_WIDTHS = {
     "company_email":     210,
     "level_name":        90,
     "department_name":   140,
-    "address":           200,
     "permanent_address": 200,
     "temporary_address": 200,
     "city":              110,
@@ -295,10 +326,22 @@ EMP_COL_WIDTHS = {
 
 _W = EMP_COL_WIDTHS
 
-# Cột bảng NHÂN VIÊN: (khóa, tiêu đề, canh lề) — xếp THEO ĐÚNG THỨ TỰ cột của
-# "Master HC file.xlsx" để dễ đối chiếu với file gốc. Cột lấy từ bảng danh mục
-# (department_name/level_name/cost_center_code/employee_type_code/collar) và cột
-# suy ra (work_status) đứng ở đúng chỗ của cột Excel tương ứng.
+# Cột bảng NHÂN VIÊN: (khóa, tiêu đề, canh lề).
+#
+# THỨ TỰ Ở ĐÂY LÀ BẮT BUỘC: xếp ĐÚNG THỨ TỰ CỘT của file Excel "Personnel Data"
+# (sheet *Personnel Data-new*) — file này là nguồn sự thật cho cả cấu trúc lẫn
+# thứ tự cột (xem docs/db_design.md). Thêm/đổi cột thì chèn vào ĐÚNG vị trí của
+# cột đó trong file, đừng nối vào cuối. Ba nơi bám theo danh sách này:
+#   • bảng trên UI (thứ tự cột hiển thị),
+#   • modal Columns (_EMP_COLUMN_SECTIONS cắt nhóm từ chính danh sách này),
+#   • Copy row (_EMP_COPY_COLUMNS — bố cục cột của file Excel đích).
+#
+# Cột lấy từ bảng danh mục (department_name/level_name/cost_center_code/
+# employee_type_code/collar) và cột suy ra (work_status) đứng ở đúng chỗ của cột
+# Excel tương ứng. Cột chỉ app mới có (employee_id, cost_center_group,
+# nationality, emergency_contact_phone, marriage_status, children_count,
+# children_names, is_interviewer) chèn cạnh cột cùng chủ đề.
+
 _EMP_COLUMN_SPECS = [
     ("employee_id",         "ID",                 "center"),
     ("code",                "Emp code",           "w"),
@@ -333,6 +376,7 @@ _EMP_COLUMN_SPECS = [
     ("work_status",         "Status",             "center"),
     ("leaving_reason",      "Reason for leaving", "w"),
     ("qualification",       "Qualification",      "w"),
+    ("qualification_vn",    "Qualification (VN)", "w"),
     ("education",           "Education level",    "w"),
     ("major",               "Major",              "w"),
     ("graduation_year",     "Year of graduated",  "center"),
@@ -343,7 +387,6 @@ _EMP_COLUMN_SPECS = [
     ("id_issued_place",     "ID issued place",    "w"),
     ("native_place",        "Native place",       "w"),
     ("nationality",         "Nationality",        "w"),
-    ("address",             "Street (address)",   "w"),
     ("city",                "City",               "w"),
     ("country",             "Country",            "w"),
     ("bank_account_no",     "Bank account no.",   "w"),
@@ -370,7 +413,6 @@ _EMP_COLUMN_SPECS = [
     ("driving_forklift",    "Driving forklift",   "center"),
     ("er_jrf",              "#ER/JRF",            "w"),
     ("years_of_service",    "Year of service",    "center"),
-    ("birth_year",          "Year of birthday",   "center"),
     ("age",                 "Age",                "center"),
     ("age_range",           "Age range",          "center"),
     ("length_of_service",   "Length of service",  "w"),
@@ -395,61 +437,132 @@ _EMP_COLUMNS = [(key, title, _W.get(key, EMP_COL_WIDTH_DEFAULT), align)
 #
 #  Đây là danh sách ĐỘC LẬP với cột hiển thị: dữ liệu lấy thẳng từ kết quả
 #  truy vấn (repo.search_employees), nên người dùng ẩn/hiện cột trên UI KHÔNG
-#  làm đổi số cột hay thứ tự cột được copy — dán sang "Master HC file.xlsx"
-#  luôn khớp bố cục cố định của file.
+#  làm đổi số cột hay thứ tự cột được copy — dán sang file Excel "Personnel
+#  Data" (sheet *Personnel Data-new*) luôn khớp bố cục cố định của file.
 #
-#  Mỗi phần tử là KHÓA cột trong dòng dữ liệu: field của bảng `employees`, hoặc
-#  cột nối bảng/suy ra (department_name · level_name · cost_center_code ·
-#  cost_center_group · employee_type_code · collar · work_status).
-#  Dùng `None` để chừa MỘT Ô TRỐNG — cần cho các cột file Excel tự tính bằng
-#  công thức (STT, Birthday, Position status…) hoặc cột file có mà DB không
-#  lưu: có ô trống giữ chỗ thì các cột phía sau mới dán đúng vị trí.
+#  Mỗi phần tử là một trong ba dạng (xem DataTable._copy_rows):
+#    • KHÓA cột trong dòng dữ liệu — field của `employees` hoặc cột nối bảng/suy
+#      ra (department_short_name · level_name · cost_center_code ·
+#      employee_type_code · collar) → dán GIÁ TRỊ;
+#    • `None` → ô trống giữ chỗ cho cột file có mà DB không lưu, nhờ đó các cột
+#      phía sau vẫn dán đúng vị trí;
+#    • chuỗi mở đầu bằng "=" → dán CÔNG THỨC của chính file Excel.
 #
-#  Thứ tự dưới đây theo _EMP_COLUMN_SPECS (đã xếp theo cột của Master HC file),
-#  BỎ `employee_id` vì đó là id nội bộ của SQLite, file Excel không có cột này.
+#  DÁN CÔNG THỨC HAY DÁN TEXT? Mặc định dán TEXT — kể cả ô mà file vốn để công
+#  thức (Surname/Name/Middle Name tách từ "Full name", "Department (short)"
+#  VLOOKUP, "Full name of manager" CONCATENATE): dữ liệu trong DB đã là kết quả
+#  cuối, dán thẳng text vào file không sai đi đâu được. Chỉ dán CÔNG THỨC ở hai
+#  loại ô:
+#    • giá trị phụ thuộc NGÀY HÔM NAY (4 cột "Figures": Year of service · Age ·
+#      Age range · Length of service) — dán text thì sang năm số trong file sai;
+#    • ô app KHÔNG có dữ liệu để dán ("Count" = số thứ tự dòng, "Birthday" =
+#      tháng sinh) — để trống thì mất luôn cột đó ở dòng vừa thêm.
+#
+#  Công thức viết bằng THAM CHIẾU CÓ CẤU TRÚC (`[@[Tên cột]]`) như file đang dùng
+#  ở cột "Department (short)" — không phụ thuộc số dòng, dán ở dòng nào cũng
+#  đúng; điều kiện là dán vào trong phạm vi bảng Table77 (dán vào dòng ngay dưới
+#  bảng thì Excel tự nới bảng ra). Tên hàm bỏ tiền tố `_xlfn.` mà file lưu nội
+#  bộ, vì dán qua clipboard là Excel đọc như người gõ tay.
+#
+#  DÁN BẮT ĐẦU TỪ CỘT A, dòng trống đầu tiên. Danh sách phủ ĐÚNG 82 cột của file
+#  (A → CD, "Legal Entity (Company)" → "Birthday" — cột hợp lệ CUỐI CÙNG; sau nó
+#  chỉ còn mấy ô header trống, không dùng tới). File KHÔNG còn cột "Year of
+#  birthday (year)" — công thức của nó trùng hệt cột Age nên đã bỏ ở cả hai bên.
+#
+#  Cột file Excel KHÔNG có nên KHÔNG copy: cost_center_group · work_status ·
+#  nationality · emergency_contact_phone (file gộp chung ô "Emergency Contact
+#  Name", chỉ tách ra khi import) · marriage_status · children_count ·
+#  children_names · is_interviewer · employee_id.
 # ─────────────────────────────────────────────────────────────────────────
 _EMP_COPY_COLUMNS = [
-    # định danh + họ tên
-    "none",
-    "code", "global_code", "full_name", "surname", "name", "middle_name",
-    # cá nhân · địa chỉ · liên hệ
-    "date_of_birth", "gender", "education", "address", "city", "country", "phone",
-    # tổ chức
-    "manager_name", "department_name", "sub_function", "cost_center_code",
-    "cost_center_group", "date_of_employment", "job_title",
-    # hợp đồng & thời gian làm việc
-    "contract_permanency", "direct_indirect",
-    # nghỉ việc
-    "termination_date", "work_status", "leaving_reason",
-    # học vấn
-    "major", "graduation_year", "school_name",
-    # giấy tờ · ngân hàng · thuế · bảo hiểm
-    "place_of_birth", "id_no", "id_issued_date", "id_issued_place", "native_place",
-    "bank_account_no", "bank_address", "tax_code", "dependants",
-    "insurance_book_no", "passport_no", "passport_issued_date",
-    # liên hệ khẩn cấp · email · địa chỉ
-    "emergency_contact_name", "emergency_contact_phone",
-    "emergency_contact_relationship", "email", "company_email",
-    "permanent_address", "temporary_address",
-    # gia đình
-    "marriage_status", "children_count", "children_names",
-    "religion",
-    # trình độ · cấp bậc · công việc
-    "qualification", "level_name", "operator_skill",
-    "driving_forklift", "working_hours_per_week", "production_line", "er_jrf",
-    # hợp đồng
-    "contract_type", "contract_start_date", "contract_end_date", "changing_date",
-    # hôn nhân · quốc tịch
-    "marital_status", "spouse_name", "spouse_dob", "nationality",
-    # số liệu file Excel tự tính (để trống nếu file đích có công thức sẵn)
-    "years_of_service", "birth_year", "collar",
-    "employee_type_code", "age", "age_range", "length_of_service",
-    # phân loại khác
-    "by_group", "labor_type", "smart_working_eligible",
-    "is_interviewer",
-    # ghi chú
-    "changing_notes", "updated_changing_date", "note",
-    "seniority_date", "time_in_position", "current_position",
+    None,                       # Legal Entity (Company) — cố định 1 pháp nhân
+    "=ROW()-6",                 # Count — số thứ tự (dòng dữ liệu đầu là dòng 7)
+    "code",                     # EC
+    "global_code",              # GlobalEmpCode
+    "full_name",                # Full name
+    "surname",                  # Surname
+    "name",                     # Name
+    "middle_name",              # Middle Name (only for vietnam)
+    "date_of_birth",            # Date of Birth
+    "gender",                   # Gender
+    "phone",                    # Phone Number
+    "date_of_employment",       # Date of Employment
+    None,                       # Business Unit (Department) — suy ra từ bộ phận
+    "department_short_name",    # Department (short) — MÃ VIẾT TẮT, không phải tên đầy đủ
+    "sub_function",             # Function (Common)
+    "cost_center_code",         # New Cost center
+    "manager_name",             # Full name of manager
+    None,                       # Manager Surname (report directly to)
+    None,                       # Manager Name
+    None,                       # Manager Middle Name (only for vietnam)
+    "job_title",                # Job Title (Description)
+    "direct_indirect",          # Direct/Indirect
+    "collar",                   # BC/WC — lấy từ employee_types.collar
+    "employee_type_code",       # IBC/DBC/WC
+    "by_group",                 # BY GROUP
+    "working_hours_per_week",   # Working hour/week
+    "production_line",          # Production Line (Internal)
+    "level_name",               # Job level
+    "operator_skill",           # Operator skill
+    "contract_permanency",      # Permanent/Temporary contract
+    "contract_type",            # Type of contract
+    "contract_start_date",      # Starting date of contract
+    "contract_end_date",        # Ending date of contract
+    "termination_date",         # Termination Date
+    "leaving_reason",           # Reason for leaving
+    "qualification",            # Qualification
+    "qualification_vn",         # Qualification (Việt Nam)
+    "education",                # Education Level
+    "major",                    # Major
+    "graduation_year",          # Year of graduated
+    "school_name",              # School name
+    "place_of_birth",           # Place of birth
+    "id_no",                    # ID no.
+    "id_issued_date",           # Issued date
+    "id_issued_place",          # Issued Place
+    "native_place",             # Native country
+    "city",                     # City (address)
+    "country",                  # Country (address)
+    "bank_account_no",          # Bank account no.
+    "bank_address",             # Bank address
+    "tax_code",                 # Personal Tax Code
+    "dependants",               # Dependance
+    "insurance_book_no",        # Insurance Book No.
+    "passport_no",              # Passport No.
+    "passport_issued_date",     # Issued date2
+    "emergency_contact_name",   # Emergency Contact Name
+    "emergency_contact_relationship",   # Relationship
+    "permanent_address",        # Địa chỉ thường trú
+    "temporary_address",        # Địa chỉ tạm trú
+    "email",                    # Personal Email address
+    "company_email",            # Company email
+    "marital_status",           # Marital Status
+    "spouse_name",              # Spouse Name
+    "spouse_dob",               # Spouse date
+    None,                       # Nation (dân tộc) — chưa có field tương ứng
+    "religion",                 # Religion
+    "driving_forklift",         # Driving forklift
+    "er_jrf",                   # #ER/JRF
+    # 4 cột "Figures" — dán CÔNG THỨC vì giá trị của chúng phụ thuộc NGÀY HÔM
+    # NAY: dán text thì sang năm số trong file sai. App hiển thị cũng bằng đúng
+    # các công thức này (xem cv_repository.EMPLOYEE_COMPUTED_SQL).
+    "=(TODAY()-[@[Date of Employment]])/365",           # Year of service
+    "=YEAR(NOW())-YEAR([@[Date of Birth]])",            # Age
+    ('=IF([@Age]>50,"Over 50",IF([@Age]>=41,"41-50",'
+     'IF([@Age]>=31,"31 - 40",IF([@Age]>=21,"21 - 30","Under 21"))))'),
+    ('=IF([@[Year of service]]>5,"5 and more",IF([@[Year of service]]>3,'
+     '"3 - 5 years",IF([@[Year of service]]>=2,"2 - 3 years",'
+     'IF([@[Year of service]]>=1,"1- 2 years","less than 1"))))'),
+    "labor_type",               # Type of labor
+    "smart_working_eligible",   # Eligible - Smart Working Policy
+    "changing_notes",           # Changing notes
+    "changing_date",            # Changing date
+    "updated_changing_date",    # Updated changing date
+    "note",                     # Note
+    "seniority_date",           # Cột tính thâm niên
+    "time_in_position",         # Time in Position
+    "current_position",         # Current Position
+    "=MONTH([@[Date of Birth]])",   # Birthday — tháng sinh, để lọc sinh nhật
 ]
 
 # Bảng có ~90 cột → UI KHÔNG hiện hết. Đây là các cột hiện MẶC ĐỊNH; người dùng
@@ -460,61 +573,48 @@ _EMP_DEFAULT_COLUMNS = [
     "cost_center_code", "job_title",
 ]
 
-# Nhóm cột cho modal chọn cột: (tên nhóm, [khóa cột…]) — thứ tự nhóm & tên nhóm
-# soi theo các mục của bảng `employees` trong cv_schema.py (nhưng bằng tiếng Anh
-# vì đây là text người dùng NHÌN THẤY). Cột không nằm trong nhóm nào tự dồn vào
-# nhóm "Other" ở cuối (xem ColumnPicker._resolve_groups) nên thêm cột mới vào
-# _EMP_COLUMN_SPECS mà quên khai ở đây thì vẫn không bị mất cột.
-_EMP_COLUMN_GROUPS = [
-    ("Identity", [
-        "employee_id", "code", "global_code",
-    ]),
-    ("Personal info", [
-        "full_name", "surname", "name", "middle_name", "date_of_birth",
-        "gender", "place_of_birth", "native_place", "nationality", "religion",
-    ]),
-    ("Family", [
-        "marital_status", "marriage_status", "spouse_name", "spouse_dob",
-        "children_count", "children_names",
-    ]),
-    ("Contact", [
-        "phone", "address", "city", "country", "emergency_contact_name",
-        "emergency_contact_phone", "emergency_contact_relationship",
-        "permanent_address", "temporary_address", "email", "company_email",
-    ]),
-    ("Education", [
-        "qualification", "education", "major", "graduation_year",
-        "school_name",
-    ]),
-    ("ID · bank · tax · insurance", [
-        "id_no", "id_issued_date", "id_issued_place", "bank_account_no",
-        "bank_address", "tax_code", "dependants", "insurance_book_no",
-        "passport_no", "passport_issued_date",
-    ]),
-    ("Organization", [
-        "department_name", "sub_function", "cost_center_code", "cost_center_group",
-        "manager_name", "job_title", "collar", "employee_type_code", "by_group",
-        "working_hours_per_week", "production_line", "level_name",
-        "operator_skill", "driving_forklift", "er_jrf", "labor_type",
-        "smart_working_eligible", "is_interviewer", "time_in_position",
-        "current_position",
-    ]),
-    ("Contract & working time", [
-        "date_of_employment", "direct_indirect", "contract_permanency",
-        "contract_type", "contract_start_date", "contract_end_date",
-        "changing_date", "seniority_date",
-    ]),
-    ("Termination", [
-        "termination_date", "work_status", "leaving_reason",
-    ]),
-    ("Figures (computed in the Excel file)", [
-        "years_of_service", "birth_year", "age", "age_range",
-        "length_of_service",
-    ]),
-    ("Notes", [
-        "changing_notes", "updated_changing_date", "note",
-    ]),
+# Nhóm cột cho modal chọn cột. Khai báo là (tên nhóm, KHÓA CỘT MỞ ĐẦU nhóm):
+# nhóm được CẮT TRỰC TIẾP từ _EMP_COLUMN_SPECS, mỗi nhóm là một đoạn LIỀN NHAU
+# của bảng. Nhờ vậy đọc dọc modal ra ĐÚNG thứ tự cột trên bảng (và do đó đúng
+# thứ tự file Excel), còn cột thêm mới vào _EMP_COLUMN_SPECS tự rơi vào nhóm
+# chứa nó, không phải khai hai nơi và không bao giờ lệch nhau nữa.
+#
+# Tên nhóm gọi theo NỘI DUNG của đoạn đó trong file Excel, không phải theo các
+# mục của cv_schema.py — file xếp xen kẽ chủ đề (vd "Place of birth" nằm giữa
+# khối học vấn và khối giấy tờ) nên nhóm phải bám file mới liền mạch được.
+_EMP_COLUMN_SECTIONS = [
+    ("Identity",                             "employee_id"),
+    ("Personal info",                        "full_name"),
+    ("Organization & job",                   "date_of_employment"),
+    ("Contract",                             "contract_permanency"),
+    ("Termination",                          "termination_date"),
+    ("Education",                            "qualification"),
+    ("Origin & ID card",                     "place_of_birth"),
+    ("Address",                              "city"),
+    ("Bank · tax · insurance · passport",    "bank_account_no"),
+    ("Contact",                              "emergency_contact_name"),
+    ("Family · religion",                    "marital_status"),
+    ("Job attributes",                       "driving_forklift"),
+    ("Figures (computed by the app)",        "years_of_service"),
+    ("Classification",                       "labor_type"),
+    ("Notes",                                "changing_notes"),
+    ("Seniority & position",                 "seniority_date"),
 ]
+
+
+def _build_column_groups():
+    """[(tên nhóm, [khóa cột…])…] — cắt _EMP_COLUMN_SPECS theo các mốc mở đầu
+    khai ở _EMP_COLUMN_SECTIONS. Mốc không tìm thấy (đổi tên cột mà quên sửa)
+    bị bỏ qua: nhóm liền trước nuốt luôn đoạn đó thay vì làm mất cột.
+    """
+    keys = [key for key, _title, _align in _EMP_COLUMN_SPECS]
+    marks = sorted((keys.index(first), title)
+                   for title, first in _EMP_COLUMN_SECTIONS if first in keys)
+    return [(title, keys[i:marks[n + 1][0] if n + 1 < len(marks) else len(keys)])
+            for n, (i, title) in enumerate(marks)]
+
+
+_EMP_COLUMN_GROUPS = _build_column_groups()
 
 # Section cấu hình để nhớ tập cột người dùng đã chọn (%APPDATA%/…/config.json).
 _CFG_SECTION = "employee_db"
@@ -583,6 +683,22 @@ _CHOICE_FIELDS = (
     ("contract_permanency", "Permanent/Temporary contract",
      cv_schema.CONTRACT_PERMANENCY_CHOICES),
     ("direct_indirect", "Direct/Indirect", cv_schema.DIRECT_INDIRECT_CHOICES),
+)
+
+# Cột LƯU TEXT nhưng giá trị phải nằm trong một DANH MỤC ĐỘNG (bảng DB người
+# dùng tự sửa ở Master Data). Khác hai nhóm trên: `_MASTER_LOOKUPS` đổi text
+# sang id rồi mới lưu, `_CHOICE_FIELDS` so với hằng cứng trong code — còn ở đây
+# text được lưu NGUYÊN VĂN, danh mục chỉ đóng vai người gác cổng để mọi nhân
+# viên viết giống nhau (lọc/nhóm mới gom đúng).
+# (field DB, tên cột Excel, hàm trả danh sách giá trị hợp lệ)
+_TEXT_LOOKUPS = (
+    ("sub_function", "Function (Common)", repo.list_function_names),
+    ("qualification", "Qualification",
+     lambda: repo.list_code_values(cv_schema.CODE_TYPE_QUALIFICATION)),
+    ("qualification_vn", "Qualification (Việt Nam)",
+     lambda: repo.list_code_values(cv_schema.CODE_TYPE_QUALIFICATION_VN)),
+    ("id_issued_place", "Issued Place",
+     lambda: repo.list_code_values(cv_schema.CODE_TYPE_ID_ISSUED_PLACE)),
 )
 
 # Viết tắt giới tính hay gặp trong file Excel HC ("M"/"F") — coi là hợp lệ,
@@ -659,12 +775,12 @@ class _DuplicateCodesDialog(ModalDialog):
 
 
 class _InvalidValuesDialog(ModalDialog):
-    """Modal chặn import khi có ô KHÔNG khớp master data / danh sách giá trị
-    cố định (xem `_MASTER_LOOKUPS` · `_CHOICE_FIELDS`).
+    """Modal chặn import khi có ô KHÔNG khớp danh mục / danh sách giá trị cố
+    định (xem `_MASTER_LOOKUPS` · `_CHOICE_FIELDS` · `_TEXT_LOOKUPS`).
 
     Không có lựa chọn "vẫn import" — bắt buộc sửa lại file Excel rồi nhập lại
-    từ đầu, vì đây là các cột lưu số/mã (khóa ngoại tới bảng danh mục hoặc giá
-    trị cố định cho dropdown), sai một ô là dữ liệu tra cứu/lọc sai lệch.
+    từ đầu: sai một ô ở các cột này là dữ liệu tra cứu/lọc sai lệch, mà lọt vào
+    DB rồi thì phải dò lại từng dòng mới thấy.
 
     `issues` = list[dict] với khóa row (số dòng Excel), column (tên cột Excel),
     value (giá trị gốc trong ô), reason (lý do không khớp).
@@ -989,11 +1105,12 @@ class EmployeeDbTool(BaseTool):
             dialogs.info(self._root, "Empty", "No valid data rows found.")
             return
 
-        # Cột TEXT (họ tên, địa chỉ, ghi chú…) đi thẳng vào DB, không cần kiểm
-        # tra gì thêm. Cột lưu SỐ — khóa ngoại tới bảng danh mục (department,
-        # cost center, employee type, level) hoặc giá trị cố định cho dropdown
-        # (gender, marital status…) — PHẢI khớp chính xác, nếu không sẽ chặn
-        # lại ở đây để người dùng sửa Excel rồi import lại, KHÔNG ghi gì cả.
+        # Cột TEXT tự do (họ tên, địa chỉ, ghi chú…) đi thẳng vào DB. Cột nào
+        # có TẬP GIÁ TRỊ HỢP LỆ thì phải khớp: khóa ngoại tới bảng danh mục
+        # (department, cost center, employee type, level), giá trị cố định cho
+        # dropdown (gender, marital status…), và các cột tra danh mục động
+        # (function, qualification, nơi cấp CCCD). Sai một ô là chặn lại ở đây
+        # để người dùng sửa Excel rồi import lại, KHÔNG ghi gì cả.
         issues = self._validate_import_rows(rows)
         if issues:
             _InvalidValuesDialog(self._root, issues).run()
@@ -1047,9 +1164,12 @@ class EmployeeDbTool(BaseTool):
 
     @staticmethod
     def _validate_import_rows(rows):
-        """Kiểm tra các cột lưu SỐ (tra danh mục / giá trị cố định) TRƯỚC khi
-        import — trả về list[dict] {row, column, value, reason}, rỗng nếu mọi
-        ô đều khớp. Không sửa `rows`; caller tự tra lại lúc insert.
+        """Kiểm tra mọi cột có TẬP GIÁ TRỊ HỢP LỆ trước khi import — trả về
+        list[dict] {row, column, value, reason}, rỗng nếu mọi ô đều khớp.
+
+        Ba nhóm: `_MASTER_LOOKUPS` (lưu id của bảng danh mục) · `_CHOICE_FIELDS`
+        (hằng cứng trong code) · `_TEXT_LOOKUPS` (lưu text, khớp danh mục động).
+        Không sửa `rows`; caller tự tra lại lúc insert.
         """
         issues = []
 
@@ -1076,6 +1196,23 @@ class EmployeeDbTool(BaseTool):
                         "reason": f"Must be one of: {', '.join(choices)}",
                     })
 
+        # Cột text phải khớp danh mục động (xem _TEXT_LOOKUPS). Danh mục rỗng
+        # (người dùng xóa sạch) thì BỎ QUA — chặn cả file vì một danh mục chưa
+        # có dòng nào là vô lý, cứ để import rồi khai danh mục sau.
+        for field, label, loader in _TEXT_LOOKUPS:
+            values = loader()
+            if not values:
+                continue
+            allowed = {_norm(v) for v in values}
+            for rec in rows:
+                value = rec.get(field)
+                if value and _norm(value) not in allowed:
+                    issues.append({
+                        "row": rec["_row"], "column": label, "value": value,
+                        "reason": "Not in the list — add it in Master Data, "
+                                  "or fix the spelling in Excel",
+                    })
+
         issues.sort(key=lambda i: (i["row"], i["column"]))
         return issues
 
@@ -1093,13 +1230,12 @@ class EmployeeDbTool(BaseTool):
         là tuple, lần xuất hiện thứ n lấy phần tử thứ n (phần tử cuối dùng lại
         nếu file có nhiều lần hơn).
 
-        Dòng header KHÔNG chắc luôn ở dòng 1 — file gốc thường có vài dòng tiêu
-        đề/logo/ghi chú phía trên (có thể bị ẨN) trước khi tới dòng tên cột thật
-        → dò tìm dòng đó bằng `_find_header_row` thay vì đinh cứng dòng 1.
+        SHEET và DÒNG HEADER đều phải dò (xem `_pick_sheet`): file HC thật có
+        cả chục sheet và sheet "active" lúc lưu file thường không phải sheet dữ
+        liệu; phía trên dòng tên cột còn vài dòng tiêu đề/logo (có thể bị ẨN).
         """
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        ws = wb.active
-        header_row = _find_header_row(ws)
+        ws, header_row = _pick_sheet(wb)
         header = next(
             ws.iter_rows(min_row=header_row, max_row=header_row, values_only=True), None)
         if not header:
@@ -1122,6 +1258,11 @@ class EmployeeDbTool(BaseTool):
                 col_key[idx] = key
             elif norm_title not in _EXCEL_IGNORED_HEADERS:
                 unknown.append(str(title).strip())
+
+        # {field: {giá trị chuẩn hóa → cách viết chuẩn}} — nạp MỘT LẦN cho cả
+        # file (mỗi danh mục là một câu truy vấn, không lặp theo từng dòng).
+        text_lookups = {field: {_norm(v): v for v in loader()}
+                        for field, _label, loader in _TEXT_LOOKUPS}
 
         rows = []
         for row_num, values in enumerate(
@@ -1147,6 +1288,12 @@ class EmployeeDbTool(BaseTool):
             for _field, _label, _choices in _CHOICE_FIELDS:
                 if rec.get(_field):
                     rec[_field] = _canon_choice(rec[_field], _choices)
+            # Tương tự cho các cột tra danh mục động: khớp không phân biệt
+            # hoa/thường, nhưng LƯU đúng cách viết của danh mục để mọi nhân
+            # viên đồng nhất. Không khớp thì giữ nguyên cho validate báo lỗi.
+            for _field, _table in text_lookups.items():
+                if rec.get(_field):
+                    rec[_field] = _table.get(_norm(rec[_field]), rec[_field])
             # Ô "Emergency Contact Name" gộp "tên ⏎ số ĐT" → tách sang 2 cột
             # (dùng chung logic với lượt di trú dữ liệu cũ trong cv_schema).
             if rec.get("emergency_contact_name") and not rec.get("emergency_contact_phone"):
@@ -1321,7 +1468,6 @@ class EmployeeDbTool(BaseTool):
             {"key": "phone", "label": 'Phone (separate multiple with "; ")', "kind": "text"},
             {"key": "email", "label": "Personal email", "kind": "text"},
             {"key": "company_email", "label": "Company email", "kind": "text"},
-            {"key": "address", "label": "Street (address)", "kind": "text"},
             {"key": "city", "label": "City (address)", "kind": "text"},
             {"key": "country", "label": "Country (address)", "kind": "text"},
             {"key": "permanent_address", "label": "Permanent address", "kind": "text"},
@@ -1340,6 +1486,8 @@ class EmployeeDbTool(BaseTool):
             {"key": "graduation_year", "label": "Year of graduated", "kind": "text"},
             {"key": "school_name", "label": "School name", "kind": "text"},
             {"key": "qualification", "label": "Qualification", "kind": "text"},
+            {"key": "qualification_vn", "label": "Qualification (VN)",
+             "kind": "text"},
 
             {"kind": "section", "label": "ID · bank · tax · insurance"},
             {"key": "id_no", "label": "ID no.", "kind": "text"},
@@ -1407,13 +1555,6 @@ class EmployeeDbTool(BaseTool):
             {"key": "termination_date", "label": "Termination date (dd/mm/yyyy)",
              "kind": "text"},
             {"key": "leaving_reason", "label": "Reason for leaving", "kind": "text"},
-
-            {"kind": "section", "label": "Figures (computed in the Excel file)"},
-            {"key": "years_of_service", "label": "Year of service", "kind": "text"},
-            {"key": "length_of_service", "label": "Length of service", "kind": "text"},
-            {"key": "birth_year", "label": "Year of birthday", "kind": "text"},
-            {"key": "age", "label": "Age", "kind": "text"},
-            {"key": "age_range", "label": "Age range", "kind": "text"},
 
             {"kind": "section", "label": "Notes"},
             {"key": "changing_notes", "label": "Changing notes", "kind": "textarea",

@@ -535,12 +535,20 @@ class DataTable(QTableView):
         """Đưa `rows` lên clipboard dạng TSV — dán vào Excel là trải đúng ô.
 
         Giá trị lấy THẲNG TỪ DỮ LIỆU DÒNG (kết quả truy vấn), không qua
-        formatter hiển thị của bảng. Khóa `None` trong `copy_keys` → ô trống,
-        dùng để chừa chỗ cho cột công thức bên file Excel đích.
+        formatter hiển thị của bảng. Ba dạng phần tử trong `copy_keys`:
+          • khóa cột → giá trị của ô đó;
+          • `None` → ô trống, chừa chỗ cho cột bên file Excel đích;
+          • chuỗi mở đầu bằng "=" → CÔNG THỨC EXCEL, dán nguyên văn. Không khóa
+            cột nào mở đầu bằng "=" nên không nhập nhằng. Công thức KHÔNG bọc
+            nháy kép như ô text (ô mở đầu bằng nháy kép dễ bị Excel hiểu thành
+            chuỗi thay vì công thức); bản thân công thức không chứa tab/xuống
+            dòng nên để trần vẫn đúng khuôn TSV.
         """
         keys = self._copy_columns()
         text = "\n".join(
-            "\t".join(_tsv_cell(_cell(row, key) if key else "") for key in keys)
+            "\t".join(key if key and key.startswith("=")
+                      else _tsv_cell(_cell(row, key) if key else "")
+                      for key in keys)
             for row in rows)
         QApplication.clipboard().setText(text)
         QToolTip.showText(QCursor.pos(),

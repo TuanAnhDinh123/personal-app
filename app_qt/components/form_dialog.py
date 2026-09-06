@@ -7,6 +7,8 @@ Dựng field từ danh sách `specs`. Mỗi spec là dict {"key","label","kind"[
   - file:     "filetypes" = list[(nhãn, "*.ext *.ext2")].
   - section:  chỉ hiện tiêu đề nhóm.
   - "required": True → bắt buộc nhập.
+  - "hint":     dòng chữ nhỏ mờ ngay dưới ô — giải thích cách nhập cho những ô
+                mà nhìn thôi không đoán ra quy ước (vd ô nhập nhiều dòng).
 """
 from PySide6.QtWidgets import (
     QFileDialog, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout,
@@ -195,6 +197,13 @@ class FormDialog(ModalDialog):
                 self._form_col.addWidget(combo)
                 self._getters[key] = lambda c=combo: (None if c.currentText() == _NONE
                                                       else c.currentText())
+
+            if spec.get("hint"):
+                hint = QLabel(spec["hint"], form)
+                hint.setObjectName("Hint")
+                hint.setWordWrap(True)
+                hint.setContentsMargins(0, 2, 0, 0)
+                self._form_col.addWidget(hint)
 
     # ------------------------------------------------------------- lưu
     def _save(self):

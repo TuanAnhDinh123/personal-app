@@ -13,6 +13,8 @@ flowchart LR
     subgraph MASTER ["DANH MỤC"]
         direction TB
         departments["departments<br/><small>phòng ban</small>"]
+        functions["functions<br/><small>nhóm chức năng trong phòng ban</small>"]
+        codelists["code_lists<br/><small>danh mục một cột (theo type)</small>"]
         levels["levels<br/><small>cấp bậc</small>"]
         emptypes["employee_types<br/><small>loại nhân viên</small>"]
         costcenters["cost_centers<br/><small>trung tâm chi phí</small>"]
@@ -43,6 +45,7 @@ flowchart LR
         courseemp["course_employees<br/><small>ghi danh</small>"]
     end
 
+    departments --> functions
     departments --> positions
     departments --> employees
     levels --> employees
@@ -540,6 +543,54 @@ Nạp sẵn từ `Code.xlsx` qua `SEED_DATA`, chạy một lần cho mỗi file 
 | `manager_name` | VARCHAR | |
 | `description` | TEXT | |
 
+### `functions` — Nhóm chức năng trong phòng ban
+
+Cột *Function (Common)* của file HC: nhóm nhỏ **bên trong** một phòng ban
+(Production có `PD`, R&D có `HHS` · `MOB` · `SOL`…). Một phòng ban có một hoặc
+nhiều nhóm.
+
+Không có màn hình riêng — sửa ngay ở form **Departments**: một ô nhập nhiều
+dòng, mỗi dòng một tên. Thêm tên là tạo bản ghi, bỏ tên là xóa bản ghi; tên giữ
+nguyên thì giữ nguyên `function_id` (xem `cv_repository.replace_department_functions`).
+Xóa phòng ban thì xóa luôn các nhóm của nó.
+
+| Cột | Kiểu | Mô tả |
+|---|---|---|
+| `function_id` | INTEGER **PK** | |
+| `department_id` | INT | → `departments.department_id` |
+| `function_name` | VARCHAR | `PD` · `HHS` · `Global Testing`… — khớp cột *Function (Common)* khi import nhân viên. |
+| `description` | TEXT | |
+
+Lưu vào `employees.sub_function` dưới dạng **text**, không phải id — bảng này
+chỉ đóng vai người gác cổng lúc import để mọi nhân viên viết giống nhau.
+
+### `code_lists` — Danh mục một cột
+
+Gom **nhiều** danh mục "chỉ có một cột giá trị" vào chung một bảng, phân biệt
+bằng `type`. Tách mỗi thứ một bảng + một màn hình là nhân bản y hệt CRUD nhiều
+lần, nên thêm một danh mục mới về sau chỉ cần thêm một `type` ở
+`cv_schema.CODE_LIST_TYPES` — không phải thêm bảng.
+
+| Cột | Kiểu | Mô tả |
+|---|---|---|
+| `code_list_id` | INTEGER **PK** | |
+| `type` | VARCHAR | Thuộc danh mục nào — xem `cv_schema.CODE_LIST_TYPES`. |
+| `value` | VARCHAR | Giá trị, ghi y hệt file Excel. |
+| `sort_order` | INT | Nhỏ hơn hiện trước. |
+| `description` | TEXT | |
+
+Ba `type` hiện có, đều lấy từ sheet *Code* của file HC và đều gác cổng cho một
+cột của `employees` khi import:
+
+| `type` | Cột Excel | Cột `employees` |
+|---|---|---|
+| `Qualification` | Qualification | `qualification` |
+| `Qualification (VN)` | Qualification (Việt Nam) | `qualification_vn` |
+| `ID issued place` | Issued Place | `id_issued_place` |
+
+Màn hình **Master Data → Code lists**: một ô chọn phía trên quyết định đang
+xem/sửa danh mục nào.
+
 ### `levels` — Cấp bậc
 
 | Cột | Kiểu | Mô tả |
@@ -619,6 +670,7 @@ Khóa `migration:*` do `cv_repository.init_db()` ghi — xem [Lịch sử thay �
 
 Hai nguồn ghi vào bảng này:
 - **Import hàng loạt** từ file Excel "Personnel Data" (HR export, sheet *Personnel Data-new*) — khớp **theo tên cột**, không theo thứ tự. Chú thích *(Excel)* là tiêu đề cột nguồn — coi file này là **nguồn sự thật (SSOT)** cho cấu trúc bảng.
+  - File này cũng là SSOT cho **thứ tự cột**: bảng nhân viên trên UI, nhóm cột trong modal *Columns* và *Copy row* đều xếp theo đúng thứ tự cột của file (`_EMP_COLUMN_SPECS` trong `app_qt/tools/employee_db.py`). Thêm cột mới thì chèn vào đúng vị trí của nó trong file, đừng nối vào cuối.
 - **Nhập từng người** từ "DLVN Application Form" (đơn dự tuyển nhân viên mới tự điền, AI đọc) — chỉ điền được một tập con field cá nhân cơ bản, đánh dấu *(App form)*. Xem `app/core/application_form.py`.
 
 Trạng thái làm việc **suy ra** từ `termination_date`: có ngày = đã nghỉ việc.
@@ -653,7 +705,6 @@ Trạng thái làm việc **suy ra** từ `termination_date`: có ngày = đã n
 |---|---|---|
 | `phone` | VARCHAR | Phone Number — nhiều số ngăn `; ` |
 | `email` · `company_email` | VARCHAR | Personal Email · Company email |
-| `address` | VARCHAR | Street (address) |
 | `city` | VARCHAR | City (address)-theo đc thường trú |
 | `country` | VARCHAR | Country (address) |
 | `permanent_address` · `temporary_address` | VARCHAR | Địa chỉ thường trú · Địa chỉ tạm trú |
@@ -668,7 +719,8 @@ Trạng thái làm việc **suy ra** từ `termination_date`: có ngày = đã n
 | `education` | VARCHAR | Education Level |
 | `major` | VARCHAR | Major — nhiều ngành, mỗi dòng một |
 | `graduation_year` · `school_name` | VARCHAR | Year of graduated · School name |
-| `qualification` | VARCHAR | Qualification |
+| `qualification` | VARCHAR | Qualification — khớp `code_lists` type `Qualification` |
+| `qualification_vn` | VARCHAR | Qualification (Việt Nam) — danh mục RIÊNG, không phải bản dịch của cột trên (8 giá trị so với 7, chia bậc học khác nhau). Khớp `code_lists` type `Qualification (VN)`. |
 
 **Giấy tờ · ngân hàng · thuế · bảo hiểm**
 
@@ -686,7 +738,7 @@ Trạng thái làm việc **suy ra** từ `termination_date`: có ngày = đã n
 | Cột | Kiểu | Excel / tra cứu |
 |---|---|---|
 | `department_id` | INT | Department (short) → `departments.short_name` |
-| `sub_function` | VARCHAR | Function (Common) — team/nhóm con trong phòng ban, không tra danh mục |
+| `sub_function` | VARCHAR | Function (Common) — nhóm nhỏ trong phòng ban. Lưu **text**, nhưng phải khớp một dòng của `functions` (xem bảng đó) |
 | `cost_center_id` | INT | New Cost center → `cost_centers.code` |
 | `employee_type_id` | INT | IBC/DBC/WC → `employee_types.code` |
 | `level_id` | INT | Job level → `levels.level_name` |
@@ -714,15 +766,64 @@ Trạng thái làm việc **suy ra** từ `termination_date`: có ngày = đã n
 | `termination_date` | DATE | **Có giá trị = đã nghỉ việc** |
 | `leaving_reason` | VARCHAR | Reason for leaving |
 
-**Số liệu Excel tự tính** (chụp lại lúc import) · **Ghi chú**
+**Ghi chú**
 
 | Cột | Kiểu | Excel |
 |---|---|---|
-| `years_of_service` · `length_of_service` | VARCHAR | Year/Length of service |
-| `birth_year` · `age` · `age_range` | VARCHAR | Year of birthday · Age · Age range |
 | `changing_notes` | TEXT | Changing notes |
 | `updated_changing_date` | DATE | Updated changing date |
 | `note` | TEXT | Note |
+
+**Số liệu Excel tự tính — KHÔNG lưu trong DB.** `years_of_service` ·
+`length_of_service` · `age` · `age_range` là công thức bên file Excel; app tính
+lại ngay trong câu truy vấn bằng **đúng công thức đó**
+(`cv_repository.EMPLOYEE_COMPUTED_SQL`, xem bảng dưới) nên số liệu không bao giờ
+cũ và không lệch với file. Import BỎ QUA các cột này. Cột *Year of birthday
+(year)* **bỏ khỏi cả app lẫn file Excel**: công thức của nó trùng hệt cột *Age*
+nên là cột dư, chỉ tiêu đề gây hiểu nhầm.
+
+#### Công thức của file Excel nguồn
+
+Chép lại từ file mẫu `Regular HC- file.xlsx` (sheet **`Personnel Data-new `** —
+CÓ dấu cách ở cuối tên sheet; tiêu đề ở **dòng 6**, dữ liệu từ **dòng 7**). Giữ
+lại đây vì file đó không nằm trong repo. Ô tham chiếu `7` = dòng dữ liệu đầu
+tiên, `E`/`I`/`L` = Full name / Date of Birth / Date of Employment.
+
+Chữ cột dưới đây theo bố cục **sau khi bỏ cột *Year of birthday (year)*** — file
+còn **82 cột A→CD**, cột hợp lệ cuối là *Birthday*, sau đó chỉ còn ô header
+trống. (Bản file mẫu ban đầu có 83 cột A→CE: *Year of birthday* ở `BR`, mọi cột
+từ đó về sau lùi một chữ.)
+
+| Cột | Tiêu đề | Công thức | App xử lý |
+|---|---|---|---|
+| `B` | Count | `=ROW()-6` | bỏ qua khi import |
+| `F` | Surname | `=TEXTBEFORE(TRIM(E7)," ")` | import lấy giá trị; thiếu thì tự tách từ `full_name` |
+| `G` | Name | `=TEXTAFTER(TRIM(E7)," ",-1)` | nt |
+| `H` | Middle Name | `=IFERROR(TEXTBEFORE(TEXTAFTER(TRIM(E7)," ")," ",-1),"")` | nt |
+| `N` | Department (short) | `=VLOOKUP([Business Unit (Department)],Code!$B$1:$C$24,2,0)` | tra `departments.short_name`; cột M bỏ qua |
+| `Q` | Full name of manager | `=CONCATENATE(R7," ",T7," ",S7)` — họ + tên đệm + tên | lưu `manager_name`; R/S/T bỏ qua |
+| `BQ` | Year of service | `=(TODAY()-$L7)/365` | **app tự tính lại** (không lưu DB) |
+| `BR` | Age | `=YEAR(NOW())-YEAR(I7)` — theo NĂM SINH, không xét ngày/tháng | **app tự tính lại** (không lưu DB) |
+| `BS` | Age range | `=IF(Age>50,"Over 50",IF(Age>=41,"41-50",IF(Age>=31,"31 - 40",IF(Age>=21,"21 - 30","Under 21"))))` | **app tự tính lại** (không lưu DB) |
+| `BT` | Length of service | `=IF(YoS>5,"5 and more",IF(YoS>3,"3 - 5 years",IF(YoS>=2,"2 - 3 years",IF(YoS>=1,"1- 2 years","less than 1"))))` — `YoS` = *Year of service* | **app tự tính lại** (không lưu DB) |
+| `CD` | Birthday | `=MONTH(I7)` — tháng sinh, để lọc sinh nhật | bỏ qua khi import |
+
+Cột *Year of birthday (year)* (`BR` ở bản file cũ) — công thức
+`=YEAR(NOW())-YEAR(I7)`, **trùng hệt cột Age** — đã bỏ khỏi cả app lẫn file.
+
+Dropdown (data validation) của file — lưu ý khác với giá trị app đang dùng:
+
+| Cột | Giá trị cho phép trong file |
+|---|---|
+| `V` Direct/Indirect | `Indirect` · `Direct` |
+| `W` BC/WC | `White Collard` · `Blue Collard` *(sai chính tả trong file; app dùng `White Collar` / `Blue Collar` ở `employee_types.collar`)* |
+| `X` IBC/DBC/WC | `WC` · `IBC` · `DBC` |
+| `Y` BY GROUP | `R&D` · `Corporate` · `VN Plant` *(app lưu `by_group` dạng text tự do; `cost_centers.group_function` lại dùng `VNPlant` liền)* |
+
+Sheet **`Code`** của file là nguồn master data (đã seed sẵn qua `SEED_DATA`):
+cột `A` New Cost center · `B` Department · `C` Department short *(vùng
+`B1:C24` chính là bảng tra của công thức cột N)* · `D` Function ·
+`E` Qualification (Việt Nam).
 
 ```sql
 CREATE INDEX idx_emp_name        ON employees(full_name);
@@ -851,6 +952,16 @@ Ba cột phải khớp nhau, nếu không mỗi màn hình lại đọc ra một
 | `courses.course_type` | `0` inhouse · `1` external · `2` funded |
 | `course_employees.status` | `Not started` · `Completed` |
 
+Ba cột dưới đây **không** nằm ở đây: giá trị hợp lệ của chúng là **dữ liệu**,
+người dùng tự thêm/bớt trên UI, xem `code_lists` và `functions` ở mục B.
+
+| Cột | Danh mục | Sửa ở |
+|---|---|---|
+| `employees.qualification` | `code_lists` type `Qualification` | Master Data → Code lists |
+| `employees.qualification_vn` | `code_lists` type `Qualification (VN)` | Master Data → Code lists |
+| `employees.id_issued_place` | `code_lists` type `ID issued place` | Master Data → Code lists |
+| `employees.sub_function` | `functions` | Master Data → Departments (ô *Functions*) |
+
 ---
 
 ## Lịch sử thay đổi cấu trúc (migrations)
@@ -873,3 +984,6 @@ Ba quy tắc bắt buộc:
 | `0001_initial_schema` | *(tất cả)* | Cấu trúc ban đầu — nội dung `cv_schema.SCHEMA_SQL`. |
 | `0002_drop_interview_notes` | `interviews` | **Bỏ** `note` (nhận xét của HR) và `summary` (tổng hợp hội đồng). Nhận xét chỉ còn ở cấp từng người phỏng vấn (`interview_feedbacks`) — đó mới là thứ thực sự nhận được sau mỗi vòng. Nội dung đang có trong hai cột này **mất theo**. Dùng `ALTER TABLE … DROP COLUMN`, cần SQLite ≥ 3.35. |
 | `0003_rebuild_employees` | `employees` | **ALTER TABLE** cho khớp cấu trúc SSOT ở trên: bỏ `children_birthdays`, `education_field`, `qualification_code`, `facility_country`, `facility_town`, `work_time_type`, `working_time_pct`, `changing_dates`, `local_function`; thêm `sub_function`. Chỉ đổi cấu trúc, không đụng dữ liệu — người dùng tự xóa dữ liệu `employees` cũ trước khi chạy. |
+| `0004_drop_employees_address` | `employees` | **Bỏ** `address` (Excel *Street (address)*) — cột nằm lạc ở cuối file Excel, sau mấy ô header trống, HR xác nhận không dùng; cột hợp lệ cuối cùng của file là *Birthday*. Địa chỉ vẫn đủ ở `permanent_address` / `temporary_address` (+ `city`, `country`). Dữ liệu trong cột **mất theo**. |
+| `0005_drop_employees_excel_figures` | `employees` | **Bỏ** `years_of_service`, `length_of_service`, `birth_year`, `age`, `age_range` — đều là **công thức** bên file Excel nên lưu lại chỉ là ảnh chụp lúc import, càng để lâu càng sai. Bốn cột đầu tính động trong câu truy vấn (`cv_repository.EMPLOYEE_COMPUTED_SQL`) từ `date_of_birth` / `date_of_employment`, giữ đúng công thức của file; `birth_year` bỏ hẳn không tính lại (trùng `age`). Dữ liệu trong 5 cột **mất theo** (không tiếc: tính lại được). |
+| `0006_functions_and_code_lists` | `functions` · `code_lists` · `employees` | **Thêm** hai bảng danh mục và một cột. `functions` — cột Excel *Function (Common)*, gắn vào `departments` (một phòng ban nhiều nhóm), sửa ngay trong form phòng ban. `code_lists` — gom nhiều danh mục một cột vào chung một bảng, phân biệt bằng `type` (Qualification · Qualification (VN) · ID issued place), có màn hình riêng *Master Data → Code lists*. `employees.qualification_vn` — cột *Qualification (Việt Nam)* trước đây bỏ qua khi import vì tưởng là bản dịch của *Qualification*; sheet *Code* của file HC cho thấy đó là danh mục riêng nên lưu lại. Bulk Import nay **chặn** cả bốn cột này nếu giá trị không có trong danh mục. |

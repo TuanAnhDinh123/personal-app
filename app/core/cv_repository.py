@@ -27,6 +27,8 @@ DEPARTMENT_FIELDS = ["department_name", "short_name", "manager_name", "descripti
 EMPLOYEE_TYPE_FIELDS = ["code", "collar", "description"]
 COST_CENTER_FIELDS = ["code", "group_function", "name", "description"]
 LEVEL_FIELDS = ["level_name", "sort_order", "description"]
+FUNCTION_FIELDS = ["department_id", "function_name", "description"]
+CODE_LIST_FIELDS = ["type", "value", "sort_order", "description"]
 SKILL_FIELDS = ["name", "aliases", "category", "description"]
 MAIL_TEMPLATE_FIELDS = ["name", "type", "mail_cc", "mail_subject", "mail_body"]
 
@@ -105,12 +107,13 @@ EMPLOYEE_FIELDS = [
     "religion", "marriage_status", "marital_status", "spouse_name", "spouse_dob",
     "children_count", "children_names",
     # liên hệ
-    "phone", "email", "company_email", "address", "city", "country",
+    "phone", "email", "company_email", "city", "country",
     "permanent_address", "temporary_address",
     "emergency_contact_name", "emergency_contact_phone",
     "emergency_contact_relationship",
     # học vấn
     "education", "major", "graduation_year", "school_name", "qualification",
+    "qualification_vn",
     # giấy tờ · ngân hàng · thuế · bảo hiểm
     "id_no", "id_issued_date", "id_issued_place",
     "passport_no", "passport_issued_date",
@@ -127,8 +130,6 @@ EMPLOYEE_FIELDS = [
     "direct_indirect", "contract_type",
     "contract_start_date", "contract_end_date", "changing_date",
     "termination_date", "leaving_reason",
-    # số liệu file Excel tự tính
-    "years_of_service", "length_of_service", "birth_year", "age", "age_range",
     # ghi chú
     "changing_notes", "updated_changing_date", "note",
 ]
@@ -138,6 +139,8 @@ COURSE_EMPLOYEE_FIELDS = ["course_id", "employee_id", "status", "note"]
 # PK của mỗi bảng (dùng cho update/delete generic).
 _PK = {
     "departments": "department_id",
+    "functions": "function_id",
+    "code_lists": "code_list_id",
     "employee_types": "employee_type_id",
     "cost_centers": "cost_center_id",
     "levels": "level_id",
@@ -271,6 +274,9 @@ def _seed_master_data(conn: sqlite3.Connection) -> None:
     • Ngay trong lần nạp, dòng nào đã tồn tại (so theo các cột ở `match`, bỏ
       hoa/thường & khoảng trắng thừa) sẽ được bỏ qua → không tạo bản ghi trùng
       với dữ liệu người dùng đã tự nhập trước đó.
+    • Khối có `lookup` = {cột: (bảng, cột khớp, cột id)} thì ô tương ứng trong
+      `rows` ghi bằng TÊN — id tự tăng nên không viết thẳng vào SEED_DATA được.
+      Tra không ra tên nào thì BỎ QUA dòng đó (thà thiếu còn hơn gắn sai chỗ).
     • Muốn nạp lại: xóa dòng tương ứng trong app_meta (hoặc tăng `version` ở
       SEED_DATA khi bổ sung danh mục mới).
     """
@@ -282,6 +288,13 @@ def _seed_master_data(conn: sqlite3.Connection) -> None:
             continue
         cols = list(spec["columns"])
         match = list(spec.get("match") or cols)
+        lookup = spec.get("lookup") or {}
+        # {cột: {tên viết thường → id}} — nạp một lần cho cả khối.
+        maps = {
+            col: {str(r[0]).strip().lower(): r[1] for r in conn.execute(
+                f"SELECT {name_col}, {id_col} FROM {ref} WHERE {name_col} IS NOT NULL")}
+            for col, (ref, name_col, id_col) in lookup.items()
+        }
         placeholders = ", ".join("?" for _ in cols)
         where = " AND ".join(
             f"LOWER(TRIM(COALESCE({c}, ''))) = LOWER(TRIM(?))" for c in match)
@@ -289,7 +302,11 @@ def _seed_master_data(conn: sqlite3.Connection) -> None:
                f"WHERE NOT EXISTS (SELECT 1 FROM {table} WHERE {where})")
         for row in spec["rows"]:
             values = dict(zip(cols, row))
-            conn.execute(sql, list(row) + [values[c] for c in match])
+            for col, table_map in maps.items():
+                values[col] = table_map.get(str(values[col]).strip().lower())
+            if any(values[c] is None for c in lookup):
+                continue
+            conn.execute(sql, [values[c] for c in cols] + [values[c] for c in match])
         conn.execute(
             "INSERT OR REPLACE INTO app_meta (key, value) VALUES "
             "(?, datetime('now', 'localtime'))", (key,))
@@ -363,20 +380,144 @@ def list_departments():
             "SELECT * FROM departments ORDER BY department_name").fetchall()
 
 
+def list_departments_with_functions():
+    """Phòng ban kèm cột `functions` — tên các nhóm chức năng của phòng ban đó
+    nối bằng ", " (bảng ở màn hình Departments hiển thị cột này)."""
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT d.*, ("
+            "  SELECT GROUP_CONCAT(function_name, ', ') FROM ("
+            "    SELECT function_name FROM functions"
+            "     WHERE department_id = d.department_id"
+            "       AND TRIM(COALESCE(function_name, '')) <> ''"
+            "     ORDER BY function_name)"
+            ") AS functions "
+            "FROM departments d ORDER BY d.department_name").fetchall()
+
+
 def get_department(dept_id):
     return _get("departments", dept_id)
 
 
+def get_department_form(dept_id):
+    """Một phòng ban dưới dạng dict, kèm khóa "functions" = danh sách nhóm chức
+    năng nối bằng ", " — form sửa phòng ban đổ thẳng vào ô nhập nhiều dòng."""
+    row = _get("departments", dept_id)
+    if row is None:
+        return None
+    data = dict(row)
+    data["functions"] = department_functions_text(dept_id)
+    return data
+
+
 def insert_department(data: dict) -> int:
-    return _insert("departments", DEPARTMENT_FIELDS, data)
+    """Thêm phòng ban. Khóa "functions" (nếu form có gửi) là ô nhập nhiều dòng
+    — tách ra ghi sang bảng `functions`, không phải cột của `departments`."""
+    data = dict(data)
+    functions = data.pop("functions", None)
+    dept_id = _insert("departments", DEPARTMENT_FIELDS, data)
+    if functions is not None:
+        replace_department_functions(dept_id, parse_function_names(functions))
+    return dept_id
 
 
 def update_department(dept_id, data: dict) -> None:
+    data = dict(data)
+    functions = data.pop("functions", None)
     _update("departments", DEPARTMENT_FIELDS, dept_id, data)
+    if functions is not None:
+        replace_department_functions(dept_id, parse_function_names(functions))
 
 
 def delete_department(dept_id) -> None:
+    """Xóa phòng ban KÈM các nhóm chức năng của nó: function chỉ hiện ra qua
+    phòng ban chứa nó, để lại là thành bản ghi không màn hình nào sửa được."""
+    with get_connection() as conn:
+        conn.execute("DELETE FROM functions WHERE department_id = ?", (dept_id,))
     _delete("departments", dept_id)
+
+
+# ────────────── NHÓM CHỨC NĂNG TRONG PHÒNG BAN (functions) ───────────────
+# Cột "Function (Common)" của file HC. KHÔNG có màn hình riêng: mỗi function
+# đều thuộc một phòng ban nên CRUD nằm ngay trong form phòng ban (một ô nhập
+# nhiều dòng) — tách ra hai chỗ chỉ làm người dùng phải nhớ vào đâu trước.
+
+_FUNCTION_SPLIT_RE = re.compile(r"[,;\n]+")
+
+
+def parse_function_names(text) -> list[str]:
+    """Ô nhập nhiều dòng → danh sách tên function.
+
+    Nhận cả xuống dòng lẫn dấu phẩy/chấm phẩy để dán thẳng từ Excel vào cũng
+    được. Bỏ tên trùng (không phân biệt hoa/thường), giữ nguyên thứ tự đã gõ.
+    """
+    out, seen = [], set()
+    for part in _FUNCTION_SPLIT_RE.split(str(text or "")):
+        name = part.strip()
+        if name and name.lower() not in seen:
+            seen.add(name.lower())
+            out.append(name)
+    return out
+
+
+def list_functions(department_id=None):
+    """Nhóm chức năng, kèm tên phòng ban. `department_id` = None → lấy tất cả."""
+    sql = ("SELECT f.*, d.department_name FROM functions f "
+           "LEFT JOIN departments d ON d.department_id = f.department_id")
+    args = []
+    if department_id is not None:
+        sql += " WHERE f.department_id = ?"
+        args.append(department_id)
+    sql += " ORDER BY d.department_name, f.function_name"
+    with get_connection() as conn:
+        return conn.execute(sql, args).fetchall()
+
+
+def list_function_names() -> list[str]:
+    """Tên mọi nhóm chức năng — dùng để kiểm tra cột "Function (Common)" lúc
+    import nhân viên."""
+    with get_connection() as conn:
+        return [r[0] for r in conn.execute(
+            "SELECT function_name FROM functions "
+            "WHERE TRIM(COALESCE(function_name, '')) <> '' "
+            "ORDER BY function_name")]
+
+
+def department_functions_text(department_id) -> str:
+    """Các nhóm chức năng của một phòng ban, nối bằng ", "."""
+    return ", ".join(r["function_name"] for r in list_functions(department_id)
+                     if r["function_name"])
+
+
+def replace_department_functions(department_id, names) -> None:
+    """Đặt lại danh sách nhóm chức năng của một phòng ban cho khớp `names`.
+
+    Chỉ đụng phần chênh lệch: tên mới thì thêm, tên bị xóa khỏi ô nhập thì xóa
+    bản ghi, tên còn nguyên thì GIỮ id cũ (chỉ cập nhật lại cách viết hoa
+    thường nếu người dùng sửa). Nhờ vậy sửa một dòng trong ô nhập không xóa
+    trắng rồi tạo lại cả cụm — `description` của các function khác vẫn còn.
+    """
+    wanted = {n.lower(): n for n in names}
+    with get_connection() as conn:
+        current = conn.execute(
+            "SELECT function_id, function_name FROM functions WHERE department_id = ?",
+            (department_id,)).fetchall()
+        for row in current:
+            low = (row["function_name"] or "").strip().lower()
+            if low not in wanted:
+                conn.execute("DELETE FROM functions WHERE function_id = ?",
+                             (row["function_id"],))
+                continue
+            if wanted[low] != row["function_name"]:
+                conn.execute(
+                    "UPDATE functions SET function_name = ?, "
+                    "updated_at = datetime('now', 'localtime') "
+                    "WHERE function_id = ?", (wanted[low], row["function_id"]))
+            wanted.pop(low)
+        for name in wanted.values():
+            conn.execute(
+                "INSERT INTO functions (department_id, function_name) VALUES (?, ?)",
+                (department_id, name))
 
 
 def list_employee_types():
@@ -464,6 +605,45 @@ def update_level(level_id, data: dict) -> None:
 
 def delete_level(level_id) -> None:
     _delete("levels", level_id)
+
+
+# ───────────────── DANH MỤC MỘT CỘT (code_lists) ─────────────────────────
+# Nhiều danh mục "chỉ có một cột giá trị" nằm chung một bảng, phân biệt bằng
+# `type` (xem cv_schema.CODE_LIST_TYPES). Một màn hình + một ô chọn type phục
+# vụ hết, thay vì nhân bản y hệt CRUD cho mỗi danh mục một lần.
+
+def list_code_lists(code_type: str = ""):
+    """Giá trị của một danh mục (hoặc tất cả nếu bỏ trống `code_type`), theo
+    sort_order — dòng chưa đặt thứ tự xếp xuống cuối."""
+    sql = "SELECT * FROM code_lists"
+    args = []
+    if code_type:
+        sql += " WHERE type = ?"
+        args.append(code_type)
+    sql += " ORDER BY type, COALESCE(sort_order, 9999), value"
+    with get_connection() as conn:
+        return conn.execute(sql, args).fetchall()
+
+
+def list_code_values(code_type: str) -> list[str]:
+    """Các giá trị của MỘT danh mục — đổ vào dropdown và kiểm tra lúc import."""
+    return [r["value"] for r in list_code_lists(code_type) if r["value"]]
+
+
+def get_code_list(code_list_id):
+    return _get("code_lists", code_list_id)
+
+
+def insert_code_list(data: dict) -> int:
+    return _insert("code_lists", CODE_LIST_FIELDS, data)
+
+
+def update_code_list(code_list_id, data: dict) -> None:
+    _update("code_lists", CODE_LIST_FIELDS, code_list_id, data)
+
+
+def delete_code_list(code_list_id) -> None:
+    _delete("code_lists", code_list_id)
 
 
 # ───────────────────────────── KỸ NĂNG (skills) ──────────────────────────
@@ -1667,7 +1847,7 @@ def _tidy_phone(text: str) -> str:
 EMPLOYEE_SEARCH_FIELDS = [
     "e.code", "e.global_code", "e.full_name", "e.surname", "e.name",
     "e.middle_name", "e.education", "e.phone", "e.email", "e.company_email",
-    "e.address", "e.city", "e.job_title", "e.id_no",
+    "e.city", "e.job_title", "e.id_no",
 ]
 
 # Trạng thái làm việc là cột SUY RA, không lưu trong DB: `termination_date` có
@@ -1676,6 +1856,53 @@ EMPLOYEE_SEARCH_FIELDS = [
 EMPLOYEE_WORK_STATUS_SQL = (
     "CASE WHEN COALESCE(TRIM(e.termination_date), '') = '' "
     "THEN 'Working' ELSE 'Resigned' END")
+
+# ───────────────────────────── SỐ LIỆU TỰ TÍNH ──────────────────────────────
+# Các cột "Figures" của file Excel HC là CÔNG THỨC bên file, không lưu trong DB —
+# tính lại mỗi lần truy vấn để không bao giờ cũ (xem migration 0005). Giữ ĐÚNG
+# công thức của file để số liệu app khớp số liệu HR đang đọc trên Excel:
+#     Year of service = (TODAY() - Date of Employment) / 365
+#     Age             = YEAR(NOW()) - YEAR(Date of Birth)
+#     Age range / Length of service = phân khoảng từ hai số trên
+#
+# Cột "Year of birthday (year)" của file KHÔNG có ở đây: công thức của nó trong
+# file trùng hệt cột Age (tiêu đề gây hiểu nhầm) nên là cột dư, app bỏ hẳn.
+#
+# Ngày trong DB là CHUỖI "dd/mm/yyyy" (xem employee_db._cell_str); các hàm ngày
+# của SQLite chỉ hiểu ISO nên phải đổi dạng trước. Ô rỗng → trả NULL (ra ô trống
+# trên bảng) chứ không phải 0.
+
+def _sql_iso_date(col):
+    """Biểu thức SQL: chuỗi ngày "dd/mm/yyyy" → "yyyy-mm-dd" (đã ISO thì giữ)."""
+    return (f"CASE WHEN COALESCE(TRIM({col}), '') = '' THEN NULL "
+            f"WHEN substr({col}, 3, 1) = '/' "
+            f"THEN substr({col}, 7, 4) || '-' || substr({col}, 4, 2) || '-' "
+            f"|| substr({col}, 1, 2) ELSE {col} END")
+
+
+_DOB_ISO = _sql_iso_date("e.date_of_birth")
+_HIRE_ISO = _sql_iso_date("e.date_of_employment")
+# Tuổi theo NĂM (không xét ngày/tháng) — đúng như công thức của file Excel.
+_AGE_SQL = f"CAST(strftime('%Y', 'now') AS INTEGER) - CAST(strftime('%Y', {_DOB_ISO}) AS INTEGER)"
+# Thâm niên theo năm, lẻ tới 1 chữ số thập phân (file để số thực thô rất dài).
+_SERVICE_SQL = f"ROUND((julianday('now') - julianday({_HIRE_ISO})) / 365.0, 1)"
+
+EMPLOYEE_COMPUTED_SQL = [
+    (f"{_SERVICE_SQL}", "years_of_service"),
+    (f"{_AGE_SQL}", "age"),
+    (f"""CASE WHEN {_AGE_SQL} IS NULL THEN NULL
+              WHEN {_AGE_SQL} > 50 THEN 'Over 50'
+              WHEN {_AGE_SQL} >= 41 THEN '41-50'
+              WHEN {_AGE_SQL} >= 31 THEN '31 - 40'
+              WHEN {_AGE_SQL} >= 21 THEN '21 - 30'
+              ELSE 'Under 21' END""", "age_range"),
+    (f"""CASE WHEN {_SERVICE_SQL} IS NULL THEN NULL
+              WHEN {_SERVICE_SQL} > 5 THEN '5 and more'
+              WHEN {_SERVICE_SQL} > 3 THEN '3 - 5 years'
+              WHEN {_SERVICE_SQL} >= 2 THEN '2 - 3 years'
+              WHEN {_SERVICE_SQL} >= 1 THEN '1- 2 years'
+              ELSE 'less than 1' END""", "length_of_service"),
+]
 
 # GLOBAL SCOPE: mọi nghiệp vụ đọc danh sách nhân viên (list/search/count) MẶC
 # ĐỊNH bỏ qua người đã nghỉ việc (termination_date có giá trị) — trừ khi gọi với
@@ -1686,10 +1913,15 @@ _EXCLUDE_RESIGNED_SQL = "COALESCE(TRIM(e.termination_date), '') = ''"
 # danh mục (bộ phận · cấp bậc · cost center · loại nhân viên) để bảng hiển thị
 # TEXT thay vì id, và cột suy ra `work_status`.
 _EMPLOYEE_SELECT = [
-    "SELECT e.*, d.department_name, l.level_name,",
+    # `department_short_name`: mã viết tắt của bộ phận (FIN, IT…) — bảng hiển
+    # thị tên đầy đủ, nhưng cột "Department (short)" bên file Excel lưu mã viết
+    # tắt nên Copy row phải dán mã này thì import ngược lại mới khớp.
+    "SELECT e.*, d.department_name, d.short_name AS department_short_name,",
+    "       l.level_name,",
     "       cc.code AS cost_center_code, cc.group_function AS cost_center_group,",
     "       et.code AS employee_type_code, et.collar,",
-    f"      {EMPLOYEE_WORK_STATUS_SQL} AS work_status",
+    f"      {EMPLOYEE_WORK_STATUS_SQL} AS work_status,",
+    ",".join(f" {expr} AS {alias}" for expr, alias in EMPLOYEE_COMPUTED_SQL),
     "FROM employees e",
     "LEFT JOIN departments d     ON d.department_id = e.department_id",
     "LEFT JOIN levels l          ON l.level_id = e.level_id",
