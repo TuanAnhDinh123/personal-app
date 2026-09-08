@@ -482,11 +482,13 @@ như mỗi cột trong file có một cột tương ứng trong DB; chú thích
   thức trùng hệt cột Age). Các cột "Legal Entity (Company)", "Position status", "Business Unit
   (Department)", "BC/WC", "STT", "Birthday"… không lưu vì đã có nguồn khác hoặc
   chỉ là cột phụ trợ trong file (xem chú thích trong schema).
-- **Thanh nút** chỉ để lộ hai việc làm hằng ngày — *Enroll* (ghi danh khóa học)
-  và *Import application form* (nhập đơn dự tuyển). Ba việc thi thoảng mới dùng
-  — **Add · Bulk Import · Reload** — nằm trong nút **⋮** ở góc phải
-  (`_build_more_button` / `_show_more_menu`). *Bulk Import* chính là nhập hàng
-  loạt từ file "Personnel Data" nói ở trên.
+- **Thanh nút** chỉ để lộ việc làm hằng ngày — *Import application form* (nhập
+  đơn dự tuyển). Ba việc thi thoảng mới dùng — **Add · Bulk Import · Reload** —
+  nằm trong nút **⋮** ở góc phải (`_build_more_button` / `_show_more_menu`).
+  *Bulk Import* chính là nhập hàng loạt từ file "Personnel Data" nói ở trên.
+  *Enroll to course* (ghi danh khóa học) vào bằng **chuột phải trên bảng**
+  (`menu_actions` của `DataTable`): thao tác luôn gắn với dòng nên phạm vi là
+  dòng chuột phải, hoặc cả nhóm tick nếu dòng đó đang được tick.
 - Bảng ~90 cột → giao diện chỉ hiện vài cột mặc định, bật/tắt thêm ở modal
   **Columns** — cột gom theo nhóm (Identity / Personal info / Organization…),
   mỗi nhóm có checkbox bật/tắt cả nhóm, nút *Clear all* bỏ hết chỉ chừa Emp code

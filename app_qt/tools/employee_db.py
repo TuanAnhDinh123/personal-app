@@ -849,7 +849,9 @@ class EmployeeDbTool(BaseTool):
         # nhưng thêm vào layout SAU để thứ tự hiển thị vẫn là: nút → bảng.
         self.table = DataTable(_EMP_COLUMNS, pk="employee_id",
                                stretch_key="email", on_double=self._edit,
-                               checkable=True, copy_keys=_EMP_COPY_COLUMNS)
+                               checkable=True, copy_keys=_EMP_COPY_COLUMNS,
+                               menu_actions=[
+                                   ("Enroll to course", self._enroll_to_course)])
         self._build_toolbar(lay)
         lay.addWidget(self.table, 1)
 
@@ -908,14 +910,13 @@ class EmployeeDbTool(BaseTool):
         lay.addLayout(filters)
 
     def _build_toolbar(self, lay):
-        """Thanh nút: chỉ để LỘ hai việc làm hằng ngày (ghi danh khóa học · nhập
-        đơn dự tuyển); ba việc thi thoảng mới dùng (Add · Bulk Import · Reload)
-        gom vào nút ⋮ bên phải cho thanh nút đỡ rối."""
+        """Thanh nút: chỉ để LỘ việc làm hằng ngày (nhập đơn dự tuyển); ba việc
+        thi thoảng mới dùng (Add · Bulk Import · Reload) gom vào nút ⋮ bên phải
+        cho thanh nút đỡ rối. Ghi danh khóa học vào bằng CHUỘT PHẢI trên bảng
+        (xem menu_actions của DataTable) vì nó luôn thao tác trên dòng."""
         bar = QHBoxLayout()
         bar.setSpacing(6)
         B = widgets.button
-        bar.addWidget(B(None, "Enroll", variant="info", icon="award",
-                        command=self._enroll_to_course))
         bar.addWidget(B(None, "Import application form", variant="primary",
                         icon="file-text", command=self._import_forms))
         bar.addStretch(1)
@@ -1011,13 +1012,12 @@ class EmployeeDbTool(BaseTool):
         return eid
 
     # -------------------------------------------- ghi danh vào khóa học (Enroll)
-    # Tick chọn nhiều nhân viên → chọn 1 khóa học trong modal → OK: thêm TẤT CẢ
-    # người đã tick vào bảng course_employees (bỏ qua người đã ghi danh trước đó).
-    def _enroll_to_course(self):
-        rows = self.table.checked_rows()
+    # Chuột phải trên bảng → chọn 1 khóa học trong modal → OK: thêm TẤT CẢ dòng
+    # trong phạm vi vào bảng course_employees (bỏ qua người đã ghi danh trước đó).
+    def _enroll_to_course(self, rows):
+        """`rows` do bảng giải sẵn: dòng chuột phải nếu nó chưa tick, cả nhóm
+        tick nếu nó nằm trong nhóm (xem DataTable._target_rows)."""
         if not rows:
-            dialogs.info(self._root, "Nothing selected",
-                         "Tick at least one employee to enroll in a course.")
             return
         courses = repo.list_courses()
         if not courses:
@@ -1052,7 +1052,8 @@ class EmployeeDbTool(BaseTool):
         dlg = ModalDialog(self._root, "sm")
         card, lay = dlg.build_shell("Enroll to course")
 
-        info = QLabel(f"Enroll {n_selected} selected employees in a course:")
+        plural = "s" if n_selected > 1 else ""
+        info = QLabel(f"Enroll {n_selected} employee{plural} in a course:")
         info.setObjectName("DialogMsg")
         info.setWordWrap(True)
         lay.addWidget(info)

@@ -240,7 +240,7 @@ submitted it — and handles both realities:
 
 ## Slide 15 — Training records
 
-- **Enroll** employees onto a course from the employee list.
+- **Enroll** employees onto a course from the employee list (right-click the rows).
 - **Course Manager** shows enrolments and learning status.
 - The attendance sheet problem: we print the roster, everyone signs it by hand, and the
   whole stack is scanned into one PDF. The app splits that PDF page by page, reads which
