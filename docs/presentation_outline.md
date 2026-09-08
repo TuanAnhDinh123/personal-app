@@ -209,7 +209,7 @@ generated instead of maintained."
 - Emergency contact is one messy cell in the source file (name and phone number mixed, in
   every possible format); the app splits it into a name and a phone number on import.
 - Working / resigned is derived from the termination date, so it can never disagree with it.
-  Resigned colleagues are hidden by default; one tick shows them.
+  Working colleagues are listed by default; one tick switches to the resigned list.
 - 90 columns would be unreadable, so the table shows a sensible default set and you switch
   the rest on in **Columns**, grouped as Identity · Contact · Education · and so on. Your
   choice is remembered.

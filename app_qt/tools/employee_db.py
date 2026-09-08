@@ -920,11 +920,12 @@ class EmployeeDbTool(BaseTool):
                         icon="file-text", command=self._import_forms))
         bar.addStretch(1)
 
-        # GLOBAL SCOPE (xem cv_repository._EXCLUDE_RESIGNED_SQL): mặc định ẨN
-        # người đã nghỉ việc. Tick vào đây mới gỡ scope, xem luôn cả họ.
-        self.chk_include_resigned = QCheckBox("Include resigned employees")
-        self.chk_include_resigned.toggled.connect(self._reload)
-        bar.addWidget(self.chk_include_resigned, 0, Qt.AlignVCenter)
+        # GLOBAL SCOPE (xem cv_repository._status_scope_sql): mặc định chỉ hiện
+        # người ĐANG LÀM VIỆC. Tick vào đây thì ĐẢO danh sách — chỉ còn người đã
+        # nghỉ việc, không phải gộp cả hai.
+        self.chk_resigned_only = QCheckBox("Only resigned employees")
+        self.chk_resigned_only.toggled.connect(self._reload)
+        bar.addWidget(self.chk_resigned_only, 0, Qt.AlignVCenter)
 
         bar.addWidget(self._build_column_picker())
         bar.addWidget(self._build_more_button())
@@ -981,23 +982,26 @@ class EmployeeDbTool(BaseTool):
         self.sel_level.set_options(level_opts.keys())
         level_id = level_opts.get(self.sel_level.value())
 
-        include_resigned = self.chk_include_resigned.isChecked()
+        resigned_only = self.chk_resigned_only.isChecked()
         rows = repo.search_employees(
             self.ent_kw.text(), department_id=dept_id,
             gender=self.sel_gender.value(), level_id=level_id,
             codes=self.ent_codes.text().split(),
-            include_resigned=include_resigned)
+            resigned_only=resigned_only)
         self.table.set_rows(rows)
+        # Bảng chỉ chứa MỘT trạng thái nên nói rõ đang đếm nhóm nào, tránh hiểu
+        # "Total in DB" là tổng toàn bộ nhân viên.
+        scope = "resigned" if resigned_only else "working"
         self.count_lbl.setText(
-            f"Showing {len(rows)} employees · Total in DB: "
-            f"{repo.count_employees(include_resigned=include_resigned)}")
+            f"Showing {len(rows)} {scope} employees · Total {scope} in DB: "
+            f"{repo.count_employees(resigned_only=resigned_only)}")
 
     def _clear_filters(self):
         self.ent_kw.clear()
         self.ent_codes.clear()
         for w in (self.sel_dept, self.sel_gender, self.sel_level):
             w.clear()
-        self.chk_include_resigned.setChecked(False)
+        self.chk_resigned_only.setChecked(False)
         self._reload()
 
     def _selected_id(self):

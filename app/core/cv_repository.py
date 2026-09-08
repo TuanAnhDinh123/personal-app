@@ -1679,7 +1679,7 @@ def list_interviewers():
             "FROM employees e LEFT JOIN departments d "
             "  ON d.department_id = e.department_id "
             "WHERE COALESCE(e.is_interviewer, 0) = 1 "
-            f"  AND {_EXCLUDE_RESIGNED_SQL} "
+            f"  AND {_WORKING_SQL} "
             "ORDER BY e.full_name").fetchall()
         if marked:
             return marked
@@ -1687,7 +1687,7 @@ def list_interviewers():
             "SELECT e.employee_id, e.full_name, e.job_title, d.department_name "
             "FROM employees e LEFT JOIN departments d "
             "  ON d.department_id = e.department_id "
-            f"WHERE {_EXCLUDE_RESIGNED_SQL} "
+            f"WHERE {_WORKING_SQL} "
             "ORDER BY e.full_name").fetchall()
 
 
@@ -1905,9 +1905,16 @@ EMPLOYEE_COMPUTED_SQL = [
 ]
 
 # GLOBAL SCOPE: mọi nghiệp vụ đọc danh sách nhân viên (list/search/count) MẶC
-# ĐỊNH bỏ qua người đã nghỉ việc (termination_date có giá trị) — trừ khi gọi với
-# include_resigned=True (vd màn hình Employees khi tick "Include resigned").
-_EXCLUDE_RESIGNED_SQL = "COALESCE(TRIM(e.termination_date), '') = ''"
+# ĐỊNH chỉ lấy người ĐANG LÀM VIỆC (termination_date rỗng). Gọi với
+# resigned_only=True thì ĐẢO scope: chỉ lấy người ĐÃ NGHỈ (vd màn hình Employees
+# khi tick "Only resigned employees"). Hai nhánh loại trừ nhau — không có chế độ
+# xem lẫn cả hai, nên mọi danh sách luôn thuần một trạng thái.
+_WORKING_SQL = "COALESCE(TRIM(e.termination_date), '') = ''"
+_RESIGNED_SQL = "COALESCE(TRIM(e.termination_date), '') <> ''"
+
+
+def _status_scope_sql(resigned_only: bool) -> str:
+    return _RESIGNED_SQL if resigned_only else _WORKING_SQL
 
 # Phần SELECT + JOIN dùng chung cho list/search nhân viên: kèm tên của 4 bảng
 # danh mục (bộ phận · cấp bậc · cost center · loại nhân viên) để bảng hiển thị
@@ -1930,17 +1937,16 @@ _EMPLOYEE_SELECT = [
 ]
 
 
-def list_employees(include_resigned=False):
+def list_employees(resigned_only=False):
     sql = list(_EMPLOYEE_SELECT)
-    if not include_resigned:
-        sql.append(f"WHERE {_EXCLUDE_RESIGNED_SQL}")
+    sql.append(f"WHERE {_status_scope_sql(resigned_only)}")
     sql.append("ORDER BY e.full_name")
     with get_connection() as conn:
         return conn.execute(" ".join(sql)).fetchall()
 
 
 def search_employees(keyword: str = "", department_id=None, gender: str = "",
-                     level_id=None, codes=None, include_resigned=False):
+                     level_id=None, codes=None, resigned_only=False):
     """Tìm nhân viên: từ khóa quét MỌI cột text; lọc theo bộ phận / giới tính /
     level (các ô select).
 
@@ -1952,14 +1958,13 @@ def search_employees(keyword: str = "", department_id=None, gender: str = "",
     XÁC những nhân viên có `code` nằm trong danh sách (khớp không phân biệt hoa
     thường + bỏ khoảng trắng thừa).
 
-    `include_resigned`: mặc định False → áp GLOBAL SCOPE, bỏ người đã nghỉ việc
-    (`termination_date` có giá trị — xem `_EXCLUDE_RESIGNED_SQL`). True → bỏ áp
-    scope, lấy luôn cả người đã nghỉ.
+    `resigned_only`: mặc định False → GLOBAL SCOPE, chỉ người đang làm việc
+    (`termination_date` rỗng). True → đảo scope, CHỈ người đã nghỉ việc (xem
+    `_status_scope_sql`).
     """
     sql = _EMPLOYEE_SELECT + ["WHERE 1=1"]
     params: list = []
-    if not include_resigned:
-        sql.append(f"AND {_EXCLUDE_RESIGNED_SQL}")
+    sql.append(f"AND {_status_scope_sql(resigned_only)}")
     kw = (keyword or "").strip()
     if kw:
         ors = " OR ".join(f"{col} LIKE ?" for col in EMPLOYEE_SEARCH_FIELDS)
@@ -1985,10 +1990,9 @@ def search_employees(keyword: str = "", department_id=None, gender: str = "",
         return conn.execute(" ".join(sql), params).fetchall()
 
 
-def count_employees(include_resigned=False) -> int:
-    sql = "SELECT COUNT(*) FROM employees e"
-    if not include_resigned:
-        sql += f" WHERE {_EXCLUDE_RESIGNED_SQL}"
+def count_employees(resigned_only=False) -> int:
+    sql = ("SELECT COUNT(*) FROM employees e "
+           f"WHERE {_status_scope_sql(resigned_only)}")
     with get_connection() as conn:
         return conn.execute(sql).fetchone()[0]
 

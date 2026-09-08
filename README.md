@@ -441,8 +441,9 @@ như mỗi cột trong file có một cột tương ứng trong DB; chú thích
   Việc tách **chỉ chạy lúc import** — dữ liệu đã nằm trong DB không bị đụng tới.
 - **Trạng thái làm việc suy ra từ `termination_date`** (không có cột `status`):
   có ngày (khác rỗng) = đã nghỉ việc. Truy vấn danh sách trả thêm cột
-  `work_status` ("Working"/"Resigned") để hiển thị; mặc định ẩn người đã nghỉ
-  (tick *Include resigned employees* để xem cả).
+  `work_status` ("Working"/"Resigned") để hiển thị; mặc định chỉ hiện người đang
+  làm việc (tick *Only resigned employees* để đảo sang danh sách người đã nghỉ —
+  hai danh sách tách riêng, không có chế độ xem gộp).
 - **THỨ TỰ CỘT PHẢI BÁM ĐÚNG FILE EXCEL.** `_EMP_COLUMN_SPECS`
   (`app_qt/tools/employee_db.py`) xếp theo đúng thứ tự cột của file "Personnel
   Data"; thêm/đổi cột thì chèn vào **đúng vị trí của cột đó trong file**, không
