@@ -16,11 +16,11 @@ import os
 import re
 import unicodedata
 
-from PySide6.QtCore import QDate, QDateTime, QTime, Qt
+from PySide6.QtCore import QDate, QDateTime, QPoint, QTime, Qt
 from PySide6.QtGui import QCursor, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout,
-    QLabel, QLineEdit, QToolTip, QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QMenu, QToolTip, QVBoxLayout, QWidget,
 )
 
 from app.core import candidate_export
@@ -1378,9 +1378,17 @@ class CandidateDbTool(BaseTool):
                                link_keys={"cv_file_path"}, on_link=self._on_file_link,
                                checkable=True,
                                menu_actions=[
+                                   # Ba nhóm, ngăn bằng đường kẻ: SỬA DỮ LIỆU
+                                   # hồ sơ · GỬI RA NGOÀI · chỉ XEM.
                                    ("Update feedback", self._quick_edit,
                                     {"single": True}),
-                                   ("Update source", self._bulk_source)])
+                                   ("Update status", self._bulk_status),
+                                   ("Update source", self._bulk_source),
+                                   None,
+                                   ("Send email", self._send_mail),
+                                   ("Export to Excel", self._export_excel),
+                                   None,
+                                   ("View details", self._show_details)])
         lay.addWidget(self.table, 1)
 
         self.count_lbl = QLabel("")
@@ -1412,55 +1420,77 @@ class CandidateDbTool(BaseTool):
         self.sel_status.set_options(cv_schema.CANDIDATE_STATUS_CHOICES)
         self.sel_pool.set_options(cv_schema.POOL_STATUS_CHOICES)
 
-        # Hai hàng lọc gom trong một khối, spacing 0 — FilterSelect vốn cao 54px
-        # (chừa chỗ cho nhãn nổi) nên đã tự có khoảng đệm trên/dưới; thêm spacing
-        # nữa sẽ hở quá rộng.
+        # KHOẢNG HỞ NHÌN THẤY giữa hai hàng lọc = 9 + spacing + 9: `FilterSelect`
+        # cao cố định 54px nhưng ô combo bên trong chỉ 36px và được canh giữa,
+        # nên mỗi ô lọc TỰ CÓ 9px trống trên và dưới. Để spacing 10 như các hàng
+        # khác thì hở 28px, rộng hơn hẳn màn hình Employees (19px) — gom hai hàng
+        # vào khối riêng spacing 1 để ra đúng 19px.
         rows = QVBoxLayout()
-        rows.setSpacing(0)
+        rows.setContentsMargins(0, 0, 0, 0)
+        rows.setSpacing(1)
 
-        # Hàng trên: ô tìm kiếm (nửa trái) + ô lọc Vị trí (nửa phải) — vị trí là
+        # Hàng trên: ô tìm kiếm (giãn hết chỗ trống) + ô lọc Vị trí — vị trí là
         # bộ lọc dùng nhiều nhất nên đứng ngang hàng với ô tìm kiếm.
         top = QHBoxLayout()
         top.setSpacing(10)
-        top.addWidget(self.ent_kw, 4)
-        top.addWidget(self.sel_pos, 3)
+        # Ô free-text cao 36px, ô lọc chiếm băng 54px → canh giữa theo chiều dọc
+        # mới thẳng hàng nhau (giống Employees).
+        top.addWidget(self.ent_kw, 1, Qt.AlignVCenter)
+        top.addWidget(self.sel_pos, 0)
         rows.addLayout(top)
 
-        # Hàng dưới: các ô lọc còn lại — chọn 1 option là tìm luôn.
+        # Hàng dưới: các ô lọc còn lại — chọn 1 option là tìm luôn. Nút Reset đẩy
+        # sát mép phải, đúng mốc của nút Reset bên Employees.
         filters = QHBoxLayout()
         filters.setSpacing(10)
         for w in (self.sel_dept, self.sel_status, self.sel_pool, self.sel_batch):
-            filters.addWidget(w, 1)
+            filters.addWidget(w, 0)
+        filters.addStretch(1)
         filters.addWidget(widgets.button(None, "Reset", variant="neutral",
                                          icon="eraser", command=self._clear_filters), 0)
         rows.addLayout(filters)
         lay.addLayout(rows)
 
+        # Bề rộng ô lọc CỐ ĐỊNH & bằng nhau như Employees: để layout tự giãn thì
+        # mỗi ô một cỡ theo option dài nhất (Department nuốt chỗ của Batch).
         for w in (self.sel_pos, self.sel_dept, self.sel_status, self.sel_pool,
                   self.sel_batch):
+            w.setFixedWidth(180)
             w.changed.connect(self._reload)
 
     def _build_toolbar(self, lay):
+        """Thanh nút chỉ còn NÚT ⋮ — hai việc cấp trang (Add · Reload) nằm trong
+        đó, giống màn hình Employees.
+
+        Mọi thao tác trên hồ sơ (View details · Update status/feedback/source ·
+        Send email · Export to Excel) vào bằng CHUỘT PHẢI trên bảng (xem
+        menu_actions của DataTable): chúng luôn cần biết chạy trên dòng nào nên
+        đặt ngay tại dòng thì phạm vi rõ hơn nút rời trên toolbar. "Add" nằm
+        trong ⋮ vì hồ sơ chủ yếu vào DB qua tool Quét CV bằng AI — nhập tay chỉ
+        còn là trường hợp lẻ (ứng viên walk-in, giới thiệu nội bộ).
+        """
         bar = QHBoxLayout()
         bar.setSpacing(6)
-        B = widgets.button
-        # Toolbar chia hai vùng: BÊN TRÁI là thao tác trên các hồ sơ đang tick,
-        # BÊN PHẢI (sau stretch) là thao tác cấp trang. "Add" nằm bên phải, tông
-        # neutral vì hồ sơ chủ yếu vào DB qua tool Quét CV bằng AI — nhập tay chỉ
-        # còn là trường hợp lẻ (ứng viên walk-in, giới thiệu nội bộ).
-        bar.addWidget(B(None, "View details", variant="info", icon="sparkles",
-                        command=self._show_details))
-        bar.addWidget(B(None, "Update status", variant="primary", icon="check",
-                        command=self._bulk_status))
-        bar.addWidget(B(None, "Send email", variant="info", icon="mail",
-                        command=self._send_mail))
-        self._btn_export = B(None, "Export to Excel", variant="warning", icon="save",
-                             command=self._export_excel)
-        bar.addWidget(self._btn_export)
         bar.addStretch(1)
-        bar.addWidget(B(None, "Add", variant="neutral", icon="plus", command=self._add))
-        bar.addWidget(B(None, "Reload", variant="neutral", icon="refresh", command=self._reload))
+        bar.addWidget(self._build_more_button())
         lay.addLayout(bar)
+
+    def _build_more_button(self):
+        """Nút ⋮ (vuông, không chữ) mở menu các thao tác ít dùng — giống Employees."""
+        self.btn_more = widgets.button(None, "", variant="neutral", icon="more",
+                                       command=self._show_more_menu)
+        self.btn_more.setFixedWidth(36)
+        self.btn_more.setToolTip("More actions")
+        return self.btn_more
+
+    def _show_more_menu(self):
+        """Menu ⋮ — bung ra ngay dưới nút, canh mép PHẢI (nút nằm sát mép phải)."""
+        menu = QMenu(self._root)
+        menu.addAction("Add", self._add)
+        menu.addSeparator()
+        menu.addAction("Reload", self._reload)
+        corner = self.btn_more.mapToGlobal(self.btn_more.rect().bottomRight())
+        menu.exec(corner - QPoint(menu.sizeHint().width(), -4))
 
     # -------------------------------------------------------------- dữ liệu
     def _reload(self):
@@ -1519,11 +1549,11 @@ class CandidateDbTool(BaseTool):
             dialogs.info(self._root, "Nothing selected", "Please select a candidate in the table.")
         return cid
 
-    def _show_details(self):
-        rows = self.table.checked_rows()
+    # `rows` do bảng giải sẵn: dòng chuột phải nếu nó chưa tick, cả nhóm tick nếu
+    # nó nằm trong nhóm (xem DataTable._target_rows) — luật chung cho mọi thao tác
+    # vào từ menu chuột phải bên dưới.
+    def _show_details(self, rows):
         if not rows:
-            dialogs.info(self._root, "Nothing selected",
-                         "Tick at least one candidate in the table to view details.")
             return
         _CandidateDetailDialog(self._root, rows).exec()
 
@@ -1551,11 +1581,8 @@ class CandidateDbTool(BaseTool):
             return None
         return next(iter(groups))
 
-    def _bulk_status(self):
-        rows = self.table.checked_rows()
+    def _bulk_status(self, rows):
         if not rows:
-            dialogs.info(self._root, "Nothing selected",
-                         "Tick at least one candidate in the table to update status.")
             return
         rows = self._rows_with_application(rows, "Updating status")
         if not rows:
@@ -1725,16 +1752,12 @@ class CandidateDbTool(BaseTool):
     #   • Thư CẢM ƠN ĐÃ ỨNG TUYỂN → mẫu chọn thẳng trong modal (không gắn theo vị
     #     trí), mở cửa sổ MAIL THƯỜNG: không hỏi giờ, không tạo lịch.
     # Cả hai đều thay placeholder {name}{possion}{date}{time} trước khi mở cửa sổ.
-    def _send_mail(self):
+    def _send_mail(self, rows):
         if not outlook.available():
             dialogs.warning(self._root, "Outlook required",
                             "Sending email needs Outlook on Windows (pywin32).")
             return
-        rows = self.table.checked_rows()
         if not rows:
-            dialogs.warning(
-                self._root, "Nothing selected",
-                "Tick at least one candidate in the table to send an email.")
             return
 
         # "Do Not Contact" là hàng rào CỨNG — chặn ngay tại đây, không chỉ ẩn
@@ -2235,15 +2258,12 @@ class CandidateDbTool(BaseTool):
     # Sheet "Candidates" được dựng thẳng bằng code (app.core.candidate_export),
     # không đọc file .xlsx mẫu nào. Tên file MỚI → tạo mới; tên file ĐÃ CÓ → hỏi
     # ghi nối tiếp hay ghi đè (xem _ask_overwrite).
-    def _export_excel(self):
+    def _export_excel(self, rows):
         if not _OPENPYXL_OK:
             dialogs.error(self._root, "Missing library",
                           "openpyxl is required to export Excel:\n  pip install openpyxl")
             return
-        rows = self.table.checked_rows()
         if not rows:
-            dialogs.info(self._root, "Nothing selected",
-                         "Tick at least one candidate in the table to export.")
             return
         # DontConfirmOverwrite: hộp thoại của Windows chỉ hỏi được có/không, mà ở
         # đây có tới ba lối đi (nối tiếp · ghi đè · hủy) nên tự hỏi lấy.
@@ -2305,19 +2325,19 @@ class CandidateDbTool(BaseTool):
         return choice == "append"
 
     def _set_export_loading(self, loading):
-        """Bật/tắt trạng thái 'đang xuất' cho nút Xuất Excel (khóa nút + đổi chữ).
+        """Bật/tắt dấu hiệu 'đang xuất': con trỏ chờ + dòng đếm dưới bảng.
 
-        Xuất chạy đồng bộ trên luồng chính; ép vẽ lại ngay để nút hiện trạng thái
-        loading TRƯỚC khi bắt đầu ghi file (thao tác nặng làm UI đứng một chút).
+        Xuất chạy đồng bộ trên luồng chính (UI đứng một lúc) nên phải ép vẽ lại
+        ngay để dấu hiệu kịp hiện TRƯỚC khi bắt đầu ghi file. Thao tác vào bằng
+        menu chuột phải nên không còn nút nào để khóa như trước.
         """
-        btn = self._btn_export
         if loading:
-            self._export_label = btn.text()
-            btn.setEnabled(False)
-            btn.setText("Exporting…")
+            self._count_text = self.count_lbl.text()
+            self.count_lbl.setText("Exporting…")
+            QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
         else:
-            btn.setText(getattr(self, "_export_label", "Export to Excel"))
-            btn.setEnabled(True)
+            QApplication.restoreOverrideCursor()
+            self.count_lbl.setText(getattr(self, "_count_text", ""))
         QApplication.processEvents()
 
     # ------------------------------------------------------------- form specs

@@ -194,21 +194,38 @@ viên + danh mục tuyển dụng, lưu bằng **SQLite** ngay trên máy
 (`%APPDATA%\PersonalToolbox\candidates.sqlite`).
 
 Màn hình chính (ỨNG VIÊN) gồm **ô tìm kiếm toàn văn**, hàng lọc *Position ·
-Department · Status · Batch*, **bảng kết quả** có cột tick chọn, và toolbar:
+Department · Status · Pool · Batch*, **bảng kết quả** có cột tick chọn, và
+toolbar chỉ còn **nút ⋮** ở mép phải — hai việc **cấp trang** nằm trong đó:
+**Add** (thêm hồ sơ nhập tay) và **Reload** (tải lại bảng). Bố cục này giống hệt
+màn hình *Employees*: ô lọc rộng cố định 180px, nút *Reset* và nút **⋮** cùng
+một mốc mép phải, các hàng cách đều 10px.
 
-| Nút | Cần tick hồ sơ? | Việc |
-|-----|-----------------|------|
-| **View details** | có (1 hoặc nhiều) | mở modal xem chi tiết từng hồ sơ |
-| **Update status** | có | đổi trạng thái hàng loạt (xem bên dưới) |
-| **Send email** | có | mời phỏng vấn / gửi thư cảm ơn qua Outlook (xem bên dưới) |
-| **Export to Excel** | có | xuất các hồ sơ đã tick ra `.xlsx` (tên file trùng thì **hỏi nối thêm hay ghi đè**) |
-| **Add** | không | thêm hồ sơ nhập tay |
-| **Reload** | không | tải lại bảng |
+Mọi thao tác **trên hồ sơ** vào bằng **chuột phải trên bảng** (ngoài *Copy* /
+*Copy row* dùng chung): chúng luôn cần biết chạy trên dòng nào, đặt ngay tại
+dòng thì phạm vi rõ hơn nút rời trên toolbar.
 
-**Chuột phải trên bảng** có thêm hai mục (ngoài *Copy* / *Copy row* dùng chung):
+Menu chia **ba nhóm** ngăn bằng đường kẻ — *sửa dữ liệu hồ sơ* · *gửi ra ngoài*
+· *chỉ xem*:
 
-**① Quick edit (interview feedback)…** — làm trên **đúng dòng vừa bấm**, không
-cần tick. Đây là chỗ **nhập nhận xét phỏng vấn**: form sửa hồ sơ đầy đủ có ~30 ô
+| Mục chuột phải | Việc |
+|----------------|------|
+| **Update feedback** | nhập nhận xét phỏng vấn — **chỉ 1 dòng** (xem ① bên dưới) |
+| **Update status** | đổi trạng thái hàng loạt (xem bên dưới) |
+| **Update source** | điền sàn cung cấp CV (xem ② bên dưới) |
+| — | |
+| **Send email** | mời phỏng vấn / gửi thư cảm ơn qua Outlook (xem bên dưới) |
+| **Export to Excel** | xuất ra `.xlsx` (tên file trùng thì **hỏi nối thêm hay ghi đè**) |
+| — | |
+| **View details** | mở modal xem chi tiết từng hồ sơ |
+
+**Phạm vi thao tác** — luật chung `DataTable._target_rows`: chuột phải vào dòng
+**chưa tick** thì chạy đúng dòng đó (không cần tick gì); vào dòng **đang tick**
+thì chạy **cả nhóm tick**. Nhãn menu luôn kèm số dòng (*Update status (3 rows)*)
+để thấy phạm vi TRƯỚC khi bấm; mục chỉ làm được trên 1 dòng thì để mờ kèm lý do
+khi đang trỏ nhiều dòng.
+
+**① Update feedback** — chỉ làm trên **1 dòng**. Đây là chỗ **nhập nhận xét
+phỏng vấn**: form sửa hồ sơ đầy đủ có ~30 ô
 (thông tin cá nhân · hồ sơ nghề nghiệp · nguyện vọng · đơn ứng tuyển) nên quá dài
 cho việc làm thường xuyên nhất sau mỗi buổi phỏng vấn. Hộp này chỉ giữ **đúng các
 ô có trong file Excel xuất ra**:
@@ -242,8 +259,8 @@ khỏi form là xoá luôn nhận xét của họ (`repo.save_interview_feedback
 hai chiều). Các cột do máy sinh — *Batch* · *ID* (bóc từ tên file CV) · *Score* &
 *AI Evaluation* (AI chấm) — **không cho sửa tay**, sửa là hỏng lịch sử đánh giá.
 
-**② Update source…** — mở popup nhỏ, chọn **sàn cung cấp CV** rồi ghi một lượt
-cho **mọi hồ sơ đang tick**. Ô chọn **gõ tay được** nên sàn mới chưa có trong
+**② Update source** — mở popup nhỏ, chọn **sàn cung cấp CV** rồi ghi một lượt
+cho **mọi hồ sơ trong phạm vi**. Ô chọn **gõ tay được** nên sàn mới chưa có trong
 `cv_schema.CANDIDATE_SOURCE_CHOICES` vẫn điền thẳng; các hồ sơ đang cùng một
 nguồn thì popup điền sẵn nguồn đó.
 
@@ -258,15 +275,14 @@ nguồn thì popup điền sẵn nguồn đó.
 > `repo.set_candidate_source()` ghi **cả ba** trong một lượt (đơn đang hiển thị
 > trên dòng + bản CV `latest_cv_id`), tránh mỗi màn hình đọc ra một giá trị khác.
 
-*Add* nằm ở **cụm bên phải cạnh Reload**, tông neutral: toolbar chia hai vùng —
-trái là thao tác trên **các hồ sơ đang tick**, phải là thao tác **cấp trang**.
-Hồ sơ giờ chủ yếu vào DB qua tool *Quét CV bằng AI*, nhập tay chỉ còn là trường
-hợp lẻ. **Sửa** một hồ sơ: **double-click vào dòng**; **xóa**: mở form sửa rồi
+*Add* nằm trong **nút ⋮** cạnh *Reload*: hồ sơ giờ chủ yếu vào DB qua tool *Quét
+CV bằng AI*, nhập tay chỉ còn là trường hợp lẻ nên không đáng chiếm một nút
+riêng. **Sửa** một hồ sơ: **double-click vào dòng**; **xóa**: mở form sửa rồi
 bấm *Delete* trong đó — cả hai không có nút riêng trên toolbar.
 
 - **Chống trùng**: khi thêm mới (hoặc sửa) ứng viên, nếu **trùng email hoặc SĐT**
   với người đã có, tool cảnh báo và cho quyết định vẫn lưu hay không.
-### Xuất Excel (nút *Export to Excel*)
+### Xuất Excel (chuột phải → *Export to Excel*)
 
 Sheet **Candidates** được **dựng thẳng bằng code**
 ([app/core/candidate_export.py](app/core/candidate_export.py)), **không đọc file
@@ -341,7 +357,7 @@ dùng chung, đóng bằng ✕/Esc coi như Cancel.
   mọi mẫu mail — *tên · loại · CC · tiêu đề · nội dung (rich text)*. Loại lấy từ
   `MAIL_TEMPLATE_TYPE_CHOICES` (Interview Round 1/2/3 · Application Thank You ·
   Notification · Offer · Rejection) và chủ yếu để phân nhóm cho dễ tìm, không
-  ràng buộc — **trừ `Application Thank You`**: nút *Send email* lọc đúng loại này
+  ràng buộc — **trừ `Application Thank You`**: mục *Send email* lọc đúng loại này
   cho ô chọn thư cảm ơn (hằng `cv_schema.MAIL_TEMPLATE_TYPE_THANK_YOU`).
   Ngoài CRUD, trang này có thêm nút **Duplicate**: chọn 1 dòng → tạo bản
   sao y hệt, tên thêm hậu tố `_copy` (trùng nữa thì `_copy2`, `_copy3`…) rồi mở
@@ -355,15 +371,15 @@ dùng chung, đóng bằng ✕/Esc coi như Cancel.
   *file JD* nhập ngay trong form của trang **Vị trí tuyển dụng**
   (cột `positions.jd_file_path`); tiêu đề JD luôn lấy theo **tên vị trí**. Không
   còn bảng `job_descriptions` lẫn trang master "Mô tả công việc (JD)" riêng.
-- Nút **Update status** (đổi trạng thái hàng loạt): tick **một hoặc nhiều** ứng
-  viên đang ở **CÙNG một trạng thái** → modal hiện trạng thái hiện tại và ô
+- **Update status** (đổi trạng thái hàng loạt): các hồ sơ trong phạm vi phải
+  đang ở **CÙNG một trạng thái** → modal hiện trạng thái hiện tại và ô
   *Move to* điền sẵn **bước kế tiếp** trong luồng (sửa được, chọn bất kỳ nhãn
   nào trong `CANDIDATE_STATUS_CHOICES`); bấm *OK* mới ghi xuống DB. Nếu các hồ
   sơ đang ở trạng thái khác nhau thì app **báo lỗi kèm danh sách từng nhóm** và
   không đổi gì.
-- Nút **Send email**: tick **một hoặc nhiều** ứng viên đang ở
-  **CÙNG một trạng thái** (lệch nhau thì báo lỗi kèm danh sách từng nhóm, giống
-  *Update status*) → hộp thoại chọn **loại mail muốn gửi**: 3 **vòng phỏng vấn**
+- **Send email**: các hồ sơ trong phạm vi cũng phải đang ở **CÙNG một trạng
+  thái** (lệch nhau thì báo lỗi kèm danh sách từng nhóm, giống *Update status*)
+  → hộp thoại chọn **loại mail muốn gửi**: 3 **vòng phỏng vấn**
   (mẫu lấy theo vị trí ứng tuyển) hoặc **Application Thank You** (thư cảm ơn đã
   ứng tuyển — mẫu chọn thẳng trong hộp thoại vì không gắn với vị trí nào). Hộp
   thoại hiện **trạng thái hiện tại** của các hồ sơ và **chọn sẵn vòng suy ra từ

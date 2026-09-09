@@ -179,7 +179,7 @@ Excel report, each comment still carries the name of who wrote it.
 
 ## Slide 11 — Step 7 · The Excel report you already use
 
-One click on **Export to Excel** produces the familiar **Candidates** sheet — 25 columns,
+Right-click the rows and pick **Export to Excel** to produce the familiar **Candidates** sheet — 25 columns,
 `A` to `Y`: batch, ID, name, position, source, contact, score, AI evaluation, status,
 result, phone screen, and four columns for each of the three interview rounds.
 

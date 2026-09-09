@@ -876,7 +876,15 @@ class EmployeeDbTool(BaseTool):
         self.ent_codes.addAction(widgets.svg_icon("idcard", theme.TEXT_MUTED, 16),
                                  QLineEdit.LeadingPosition)
         self.ent_codes.editingFinished.connect(self._reload)
-        lay.addWidget(self.ent_codes)
+        # Chừa thêm 9px phía trên: ô này là QLineEdit lấp kín băng của nó, còn ô
+        # lọc `FilterSelect` ở hàng dưới tự có 9px trống trên/dưới (cao cố định
+        # 54px, combo bên trong 36px, canh giữa). Không bù thì hàng đầu chỉ cách
+        # nhãn "Search employees" 10px trong khi mọi hàng khác — và cả màn hình
+        # Candidates — đều hở 19px.
+        codes = QVBoxLayout()
+        codes.setContentsMargins(0, 9, 0, 0)
+        codes.addWidget(self.ent_codes)
+        lay.addLayout(codes)
 
         # Hàng 2: ô tìm free-text (rộng hơn) + các ô lọc select + nút đặt lại.
         filters = QHBoxLayout()

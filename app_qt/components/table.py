@@ -312,8 +312,9 @@ class DataTable(QTableView):
         # tác riêng của từng tool, hiện ở ĐẦU menu chuột phải, phía trên nhóm
         # Copy dùng chung. Hàm nhận DANH SÁCH DÒNG đã giải theo _target_rows —
         # tool không cần tự đọc nhóm tick nữa. opts: {"single": True} cho thao
-        # tác chỉ làm được trên 1 dòng.
-        self._menu_actions = [a if len(a) > 2 else (*a, {})
+        # tác chỉ làm được trên 1 dòng. Phần tử `None` = ĐƯỜNG KẺ NGĂN, để tool
+        # tự gom các thao tác cùng loại thành nhóm cho menu dài đỡ rối.
+        self._menu_actions = [None if a is None else (a if len(a) > 2 else (*a, {}))
                               for a in (menu_actions or ())]
         # copy_keys: thứ tự cột CỐ ĐỊNH khi copy cả dòng (xem _copy_columns).
         self._copy_keys = list(copy_keys) if copy_keys else None
@@ -577,7 +578,11 @@ class DataTable(QTableView):
         # Nhãn luôn kèm phạm vi (số dòng) để người dùng thấy thao tác chạy trên
         # bao nhiêu dòng TRƯỚC khi bấm; thao tác `single` mà đang trỏ nhiều dòng
         # thì để mờ kèm lý do, không âm thầm chạy trên một dòng bất kỳ.
-        for label, callback, opts in self._menu_actions:
+        for item in self._menu_actions:
+            if item is None:
+                menu.addSeparator()
+                continue
+            label, callback, opts = item
             single = opts.get("single")
             if single and len(rows) > 1:
                 act = menu.addAction(f"{label.rstrip('…')} (pick one row)")
