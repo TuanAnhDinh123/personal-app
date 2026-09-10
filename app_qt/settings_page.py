@@ -5,6 +5,15 @@ from app.core import outlook, settings
 from app_qt import dialogs, theme, widgets
 
 
+def _int_or_default(text, key):
+    """Ô số để trống (hoặc gõ rác) thì lấy lại giá trị mặc định, không lưu chuỗi
+    rỗng — phần đọc setting mong đợi một con số."""
+    try:
+        return int(str(text).strip())
+    except (TypeError, ValueError):
+        return settings.DEFAULTS[key]
+
+
 def _group_card(parent_layout):
     card = widgets.Card()
     inner = QWidget(card)
@@ -59,12 +68,17 @@ def build():
     fields["birthday_from_account"] = widgets.model_select_row(
         inner, "Send birthday emails from account", outlook.list_accounts)
     fields["birthday_from_account"].set(data["birthday_from_account"])
-    widgets.hint(inner, "Pick the Outlook account to send birthday emails from, "
-                        "if it should differ from the account used elsewhere in the app. "
-                        "Leave empty to use Outlook's default account. To send from a "
-                        "shared/additional mailbox (it won't show up in this list), type "
-                        "its email address directly — you must already have Send As / "
-                        "Send on Behalf permission for it.")
+    fields["birthday_subject"] = widgets.text_row(inner, "Email subject")
+    fields["birthday_subject"].set(data["birthday_subject"])
+    widgets.hint(inner, "Use {name} for the employee's first name. The card image "
+                        "is the whole message — there is no email body.")
+    fields["birthday_catchup_days"] = widgets.digit_entry(
+        inner, "Catch-up window (days)")
+    fields["birthday_catchup_days"].set(str(data["birthday_catchup_days"]))
+    widgets.hint(inner, "Each queued email is sent on the employee's own birthday, "
+                        "the first time you open Personal Toolbox that day. If the app "
+                        "isn't opened that day, it still goes out within this many days "
+                        "— after that it is marked Missed and never sent automatically.")
 
     # ---- Nút lưu ----
     # Thẻ tự chừa CARD_PAD cho bóng → nút (không phải thẻ) thêm lề trái CARD_PAD
@@ -74,13 +88,17 @@ def build():
 
     def save():
         # update() thay vì save(): giữ lại các thiết lập chung KHÔNG có ô nhập ở
-        # màn hình này (vd giờ hẹn gửi mail sinh nhật do chính tool tự lưu).
+        # màn hình này.
         settings.update(
             api_key=fields["api_key"].get().strip(),
             ai_model=fields["ai_model"].get().strip() or settings.DEFAULTS["ai_model"],
             course_template_path=fields["course_template_path"].get().strip(),
             birthday_images_folder=fields["birthday_images_folder"].get().strip(),
             birthday_from_account=fields["birthday_from_account"].get().strip(),
+            birthday_subject=(fields["birthday_subject"].get().strip()
+                              or settings.DEFAULTS["birthday_subject"]),
+            birthday_catchup_days=_int_or_default(
+                fields["birthday_catchup_days"].get(), "birthday_catchup_days"),
         )
         dialogs.success(outer, "Saved", "Settings saved ✅")
 

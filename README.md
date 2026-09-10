@@ -151,6 +151,76 @@ khi gửi**. Chỉ quét 1 lần/ngày; vẫn có nút bấm tay để quét b�
 > Cần Windows + Outlook + `pywin32`. Trên môi trường khác app vẫn chạy, chỉ
 > báo là tính năng quét/gửi mail không khả dụng.
 
+## Tool: Mail chúc mừng sinh nhật 🎂
+
+[app_qt/tools/birthday_email.py](app_qt/tools/birthday_email.py) — gửi **thiệp
+sinh nhật** (ảnh xuất từ Canva Bulk Create) cho nhân viên qua Outlook. Logic ở
+[app/core/birthday_mail.py](app/core/birthday_mail.py), hàng chờ nằm ở bảng
+`birthday_emails`.
+
+**LỊCH GỬI DO APP GIỮ, không nhờ Outlook.** Đây là điểm cốt lõi: trước đây cả
+tháng mail được đẩy sang Outlook một lượt, mỗi mail gắn `DeferredDeliveryTime`
+để nằm ở Outbox tới đúng ngày. Cách đó chỉ chạy khi tài khoản gửi **đã đăng
+nhập** trong Outlook; gửi từ **hộp thư dùng chung** (chỉ được IT share, không
+login được) thì Outlook bỏ qua giờ hẹn và **gửi ngay** — cả tháng nhận mail cùng
+một lúc. Nên giờ chia làm ba nhịp, và **người dùng duyệt ở cả hai đầu**:
+
+| Nhịp | Việc |
+|---|---|
+| **Enqueue** (người dùng bấm) | Modal *Birthdays this month* liệt kê người sinh nhật tháng này để **duyệt**; bấm *Enqueue* thì ghi vào hàng chờ. **Không gửi gì cả.** |
+| **Mở app** → `prepare_due()` | Dọn hàng chờ rồi hiện modal **xác nhận** *Birthday emails to send* — liệt kê ai sắp được gửi, tick/bỏ tick từng người. **Vẫn chưa gửi.** |
+| **Bấm *Send now*** → `send_rows()` | Gửi đúng những dòng đã tick, ở luồng nền. |
+
+- **App KHÔNG BAO GIỜ tự gửi mail mà không hỏi.** Modal xác nhận chỉ hiện **một
+  lần mỗi ngày** (mở app 5 lần không bị hỏi 5 lần — dấu ngày ở `config.json`
+  section `birthday_email`, khóa `last_prompt`). Khác Gate-Open Mail một điểm:
+  chỗ đó đóng dấu `last_scan` **trước** khi làm việc nên Outlook lỗi là mất luôn
+  ngày đó; đây chỉ đóng dấu khi modal **đã thực sự hiện ra**.
+- **Bấm Cancel thì không mất gì**: mọi dòng nằm nguyên trong hàng chờ. Đổi ý thì
+  bấm nút **Send due emails** trên màn hình Queue — nút này *không* bị chặn bởi
+  dấu ngày, nên đó là đường vào lại bất cứ lúc nào.
+
+- **Trigger là MỞ APP, không phải mở máy.** Repo không có đăng ký autostart nào
+  (Gate-Open Mail cũng vậy) — hôm nào không mở Personal Toolbox thì hôm đó không
+  gửi. Bù lại bằng **hạn gửi bù** `birthday_catchup_days` (mặc định 3 ngày, sửa ở
+  ⚙️ Settings): mở app muộn vẫn gửi, quá hạn thì dòng đó thành `Missed` và không
+  tự gửi nữa. Muốn đúng nghĩa "mở máy là gửi" thì phải tự thêm shortcut vào
+  Startup folder của Windows.
+- **Không còn ô "Delivery time"**: gửi ở lần mở app đầu tiên trong ngày sinh
+  nhật, không hẹn giờ trong ngày (app không chạy 24/7 nên hẹn giờ là hứa hẹn
+  không giữ được). Setting `birthday_send_time` đã bỏ.
+- **Bảng Queue** ngay trên trang tool: *Employee · Email · Birthday · Status ·
+  Sent at · Error*, lọc theo trạng thái. Hai đường gửi tay, đừng lẫn:
+  **nút *Send due emails*** chạy đúng lượt mà app hỏi lúc mở máy (tìm dòng tới
+  hạn → modal xác nhận → gửi), còn **chuột phải → *Send now*** gửi đúng những
+  dòng đang chọn, **bất kể** còn bao lâu tới sinh nhật (đây là đường gửi tay cho
+  dòng `Missed`). Chuột phải còn có **Remove from queue**. Tháng nào chưa bấm
+  *Enqueue* thì trang hiện một dòng nhắc, kẻo quên là cả tháng không ai được gửi.
+- **Hàng chờ chỉ giữ khóa + trạng thái**, không chụp lại email/tên/đường dẫn
+  thiệp — tất cả tra lại từ `employees` + thư mục thiệp **lúc gửi**. Nhờ vậy
+  thiệp bị xóa, đổi mail công ty hay nhân viên nghỉ việc sau khi xếp hàng đều
+  không sinh ra dữ liệu sai: người đã nghỉ thành `Cancelled`, thiếu thiệp/mail
+  thành `Failed` (còn thử lại được). Xem
+  [docs/db_design.md](docs/db_design.md#birthday_emails--hàng-chờ-mail-chúc-mừng-sinh-nhật).
+- **Thư mục thiệp không truy cập được** (ổ mạng/OneDrive chưa mount lúc mới mở
+  máy) thì **bỏ cả lượt, giữ nguyên mọi dòng `Pending`** và không tính vào hạn
+  gửi bù — không được đánh `Failed` hàng loạt chỉ vì chưa thấy thư mục.
+- **Thiệp khớp theo MÃ NV**: tên file là mã NV, nhận cả dạng Canva xuất ra
+  (`1-20170456.png`) lẫn tên trần (`20170456.png`). Nút **Export CSV (missing
+  cards)** xuất danh sách **toàn bộ** nhân viên chưa có thiệp (không lọc theo
+  tháng) để làm một lượt cho cả năm trong Canva Bulk Create — trong đó đặt
+  *"Name each page using" → code* thì tên file tải về khớp mã NV luôn.
+- **Mail không có nội dung**: thiệp được nhúng inline (`cid:`) nên hiện to ngay
+  khi mở mail, không phải icon file đính kèm. Chỉ có tiêu đề, đặt ở ⚙️ Settings
+  (`{name}` = tên nhân viên).
+- **Chống gửi trùng** ở hai lớp: unique `(employee_id, due_date)` chặn xếp hàng
+  trùng, còn lúc gửi thì `claim_birthday_email()` giành dòng bằng một câu
+  `UPDATE` có điều kiện — mở app hai lần cùng lúc cũng chỉ một bên gửi được.
+
+> Cần Windows + Outlook + `pywin32`. Hộp thư dùng chung phải đã được cấp quyền
+> Send As / Send on Behalf, và chọn ở ⚙️ Settings → *Send birthday emails from
+> account* (gõ thẳng địa chỉ, hộp thư dùng chung không hiện trong danh sách).
+
 ## Tool: Quét CV bằng AI 🤖
 
 `app_qt/tools/ai_scan_cv.py` — gửi **nguyên file PDF** cho mô hình **Google Gemini**

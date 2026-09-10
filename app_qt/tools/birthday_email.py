@@ -1,95 +1,55 @@
 """Gửi mail chúc mừng sinh nhật — đính kèm ảnh thiệp xuất từ Canva Bulk Create.
 
-Bấm "Send": tự quét bảng nhân viên tìm người có NGÀY SINH TRONG THÁNG HIỆN
-TẠI, đối chiếu mã NV với thư mục ảnh đã cấu hình ở Cài đặt (tên file = mã NV)
-→ hiện modal xác nhận (ai THIẾU ảnh bị đánh dấu, sẽ KHÔNG được gửi) → xác nhận
-thì đẩy mail qua Outlook (có thể dùng tài khoản riêng, khác tài khoản mặc định
-— cũng cấu hình ở Cài đặt) → báo lại số mail đã xếp hàng + tên những người
-chưa được gửi.
+Bấm "Review birthdays": tự quét bảng nhân viên tìm người có NGÀY SINH TRONG
+THÁNG HIỆN TẠI, đối chiếu mã NV với thư mục ảnh đã cấu hình ở Cài đặt (tên file
+= mã NV) → hiện modal xác nhận (ai THIẾU ảnh/mail bị đánh dấu, không xếp hàng
+được) → bấm "Enqueue" thì danh sách được XẾP HÀNG vào bảng `birthday_emails`.
 
-Mail KHÔNG đi ngay: mỗi mail được HẸN GIỜ (DeferredDeliveryTime của Outlook)
-đúng ngày sinh nhật của người đó, vào giờ chọn ở ô "Delivery time" — nên chạy
-một lần đầu tháng là cả tháng tự gửi. Trong lúc chờ, mail nằm ở Outbox: tài
-khoản Exchange thì server giữ hộ, tài khoản POP/IMAP thì Outlook phải đang mở
-lúc tới hạn. Ai đã qua sinh nhật trong tháng thì gửi ngay (không hẹn được nữa).
+Mail KHÔNG đi lúc bấm Enqueue, và cũng không còn nhờ Outlook hẹn giờ nữa: MỖI
+LẦN MỞ APP, `startup()` hiện **modal xác nhận** liệt kê những người tới hạn hôm
+nay; bấm *Send now* mới gửi. Lý do bỏ cách cũ (`DeferredDeliveryTime`, mail nằm
+Outbox tới đúng ngày): nó chỉ chạy khi tài khoản gửi ĐÃ ĐĂNG NHẬP trong Outlook,
+còn hộp thư dùng chung (chỉ được IT share) thì Outlook bỏ qua giờ hẹn và gửi
+ngay — cả tháng nhận mail cùng một lúc.
+
+App KHÔNG BAO GIỜ tự gửi mail mà không hỏi. Modal đó chỉ hiện **một lần mỗi
+ngày** (mở app 5 lần không bị hỏi 5 lần); bấm Cancel thì mọi dòng nằm nguyên
+trong hàng chờ và gửi tay được bằng nút *Send due emails* ở màn hình Queue.
+
+Toàn bộ logic gửi/xếp hàng nằm ở `app/core/birthday_mail.py` (thuần Python):
+`startup()` phải chạy được khi người dùng chưa từng mở trang này.
 """
 import csv
 import datetime
-import os
-import re
 import unicodedata
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel,
+    QVBoxLayout, QWidget,
 )
 
+from app.core import birthday_mail, config
 from app.core import cv_repository as repo
-from app.core import outlook
-from app.core import settings
+from app.core import cv_schema, debuglog, outlook
 from app_qt import dialogs, theme, widgets
 from app_qt.base_tool import BaseTool
 from app_qt.components.modal import ModalDialog
+from app_qt.components.table import DataTable
+from app_qt.components.task import Task
 
-_IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
+SECTION = "birthday_email"
 
-_DEFAULT_SEND_TIME = "08:00"
+# `last_prompt`: ngày gần nhất modal xác nhận lúc mở app đã hiện ra. Chỉ hỏi một
+# lần mỗi ngày — mở app 5 lần không bị hỏi 5 lần. Đây là cấu hình RIÊNG của tool
+# nên ở `config.py`, không phải `settings.py` (thiết lập chung có ô nhập ở
+# màn hình Cài đặt).
+_CONFIG_DEFAULTS = {"last_prompt": ""}
 
-_DEFAULT_SUBJECT = "Happy Birthday, {name}!"
-
-
-def _fill(text, name):
-    return text.replace("{name}", name)
-
-
-def _day_month(dob):
-    """'dd/mm/yyyy' -> (ngày, tháng) dạng int, hoặc None nếu không đọc được."""
-    try:
-        d, m, _y = (dob or "").strip().split("/")
-        return int(d), int(m)
-    except (ValueError, AttributeError):
-        return None
-
-
-def _birth_month(dob):
-    dm = _day_month(dob)
-    return dm[1] if dm else None
-
-
-def _time_slots():
-    """Các mốc giờ cho ô "Delivery time" — mỗi 30 phút trong giờ hành chính."""
-    return [f"{h:02d}:{m:02d}" for h in range(6, 21) for m in (0, 30)]
-
-
-def _parse_time(text):
-    """'HH:MM' -> datetime.time; đọc không được thì về mặc định 08:00."""
-    try:
-        h, m = (text or "").strip().split(":")
-        return datetime.time(int(h), int(m))
-    except (ValueError, AttributeError):
-        return datetime.time(8, 0)
-
-
-def _birthday_datetime(dob, at_time, year):
-    """Thời điểm hẹn gửi = ngày/tháng sinh của `year`, vào giờ `at_time`.
-
-    Ngày sinh 29/2 rơi vào năm không nhuận (hoặc dữ liệu ngày lệch như 31/4)
-    thì lùi dần tối đa 3 ngày cho ra ngày hợp lệ, thay vì bỏ qua người đó.
-    """
-    dm = _day_month(dob)
-    if not dm:
-        return None
-    day, month = dm
-    for offset in range(4):
-        try:
-            d = datetime.date(year, month, day - offset)
-        except ValueError:
-            continue
-        return datetime.datetime.combine(d, at_time)
-    return None
-
-
-def _fmt_when(dt):
-    return dt.strftime("%d %b · %H:%M") if dt else "—"
+# Đợi hộp thoại của tool khác (Gate-Open Mail) đóng trước khi hỏi — 120 × 700ms
+# ≈ 84 giây, quá đó thì bỏ lượt hỏi hôm nay.
+_PROMPT_RETRY_MS = 700
+_PROMPT_MAX_TRIES = 120
 
 
 def _title_case_name(name):
@@ -106,29 +66,17 @@ def _strip_vn_accents(text):
     return unicodedata.normalize("NFC", text)
 
 
-_CANVA_FNAME_RE = re.compile(r"^\d+-(.+)$")
+def _fmt_day(d):
+    """datetime.date -> '23 Sep'."""
+    return d.strftime("%d %b") if d else "—"
 
 
-def _card_code_from_stem(stem):
-    """Canva Bulk Create xuất file dạng '<stt>-<mã NV>' (vd '1-20170456',
-    '2-20184578') — trả về phần mã NV. File không theo mẫu này (đặt tên trực
-    tiếp bằng mã NV, kiểu cũ) thì trả nguyên tên."""
-    m = _CANVA_FNAME_RE.match(stem)
-    return m.group(1) if m else stem
-
-
-def _scan_images(folder):
-    """Map mã NV (chuẩn hóa hoa) -> tên file ảnh, trong `folder`."""
-    images = {}
-    if folder and os.path.isdir(folder):
-        for fname in os.listdir(folder):
-            stem, ext = os.path.splitext(fname)
-            stem = stem.strip()
-            if ext.lower() in _IMAGE_EXTS and stem:
-                code = _card_code_from_stem(stem).strip()
-                if code:
-                    images[code.upper()] = fname
-    return images
+def _fmt_iso_day(value):
+    """'yyyy-mm-dd' -> '23 Sep' cho cột Birthday của bảng hàng chờ."""
+    try:
+        return datetime.date.fromisoformat(str(value)).strftime("%d %b")
+    except (TypeError, ValueError):
+        return str(value or "")
 
 
 def _chip(parent, text, color):
@@ -140,143 +88,431 @@ def _chip(parent, text, color):
     return lbl
 
 
+def _person_row(parent, cb, name_text, meta_text, right_text, chip_label, chip_color):
+    """Một dòng người trong modal: [tick] Tên (mã) / email … ngày [chip].
+
+    Dùng chung cho cả modal xếp hàng và modal xác nhận gửi — hai modal khác nhau
+    ở dữ liệu, còn khung dòng thì phải nhìn giống nhau.
+    """
+    box = QFrame(parent)
+    box.setObjectName("DetailCard")
+    h = QHBoxLayout(box)
+    h.setContentsMargins(14, 10, 14, 10)
+    h.setSpacing(8)
+    h.addWidget(cb)
+
+    col = QVBoxLayout()
+    col.setSpacing(2)
+    name = QLabel(name_text, box)
+    name.setObjectName("DetailNamePlain")
+    col.addWidget(name)
+    meta = QLabel(meta_text, box)
+    meta.setObjectName("DetailMeta")
+    col.addWidget(meta)
+    h.addLayout(col, 1)
+
+    right = QLabel(right_text, box)
+    right.setObjectName("Hint")
+    h.addWidget(right)
+    h.addWidget(_chip(box, chip_label, chip_color))
+    return box
+
+
+def _row_badge(row):
+    """(nhãn chip, màu, chọn được?, tick sẵn?) cho một dòng trong modal.
+
+    Thiếu thiệp/mail thì không có gì để gửi; đã gửi hoặc đang chờ thì xếp hàng
+    lại là vô nghĩa → cả hai nhóm đều KHÔNG chọn được. Dòng từng lỗi/quá hạn thì
+    chọn được và tick sẵn: đó chính là đường gửi lại.
+    """
+    status = row["queued_status"]
+    if not row["card_path"]:
+        return "No card", theme.PALETTE["--danger"], False, False
+    if not row["email"]:
+        return "No email", theme.PALETTE["--danger"], False, False
+    if status == cv_schema.BIRTHDAY_EMAIL_SENT:
+        return "Sent", theme.PALETTE["--success"], False, False
+    if status in (cv_schema.BIRTHDAY_EMAIL_PENDING, cv_schema.BIRTHDAY_EMAIL_SENDING):
+        return (f"Queued · {_fmt_day(row['due_date'])}",
+                theme.TEXT_MUTED, False, False)
+    if status:
+        # Failed / Missed / Cancelled — xếp hàng lại được.
+        return f"{status} · retry", theme.PALETTE["--warning"], True, True
+    if row["passed"]:
+        return "Passed · sends now", theme.PALETTE["--warning"], True, False
+    return _fmt_day(row["due_date"]), theme.PALETTE["--success"], True, True
+
+
+_QUEUE_COLUMNS = [
+    ("employee", "Employee", 230, "left"),
+    ("email", "Email", 230, "left"),
+    ("due_date", "Birthday", 100, "center", _fmt_iso_day),
+    ("status", "Status", 100, "center"),
+    ("sent_at", "Sent at", 145, "center"),
+    ("last_error", "Error", 260, "left"),
+]
+
+
 class BirthdayEmailTool(BaseTool):
     name = "Birthday emails"
     description = "Send birthday cards (Canva-exported images) to employees by email."
     icon = "🎂"
     category = "Office"
     order = 7
+    fills_height = True
+    # Mỗi lần mở app: gửi những mail đã tới ngày (xem startup()).
+    auto_startup = True
 
+    # Dựng thẳng thẻ full-height (giống EmployeeDbTool) thay cho khung mặc định.
     def build(self, parent=None):
+        repo.init_db()
         card = widgets.Card(parent)
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(22, 20, 22, 18)
+        lay.setContentsMargins(22, 10, 22, 18)
         lay.setSpacing(10)
         self._root = card
 
-        widgets.section_label(card, "Email content")
-        self.subject_field = widgets.text_row(card, "Subject")
-        self.subject_field.set(_DEFAULT_SUBJECT)
-        widgets.hint(card, "No email body — the card image is the message.")
-
-        widgets.section_label(card, "Delivery")
-        self.time_field = widgets.dropdown(card, "Delivery time", _time_slots())
-        self.time_field.set(settings.get("birthday_send_time") or _DEFAULT_SEND_TIME)
+        # Trang này KHÔNG có ô nhập nào: tiêu đề mail, thư mục thiệp, tài khoản
+        # gửi và hạn gửi bù đều ở ⚙️ Settings → Birthday email. Để tiêu đề ở cả
+        # hai chỗ thì vừa trùng, vừa ăn chiều cao của bảng hàng chờ — mà bảng đó
+        # mới là thứ cần nhìn hằng ngày. Vì vậy cũng không còn section label nào
+        # cho phần trên (không có field group để mà đặt tên).
         widgets.hint(
-            card, "Emails are not sent right away: each one waits in Outlook's "
-                  "Outbox and goes out on the employee's own birthday at this "
-                  "time. Keep Outlook running and signed in so queued emails "
-                  "can leave the Outbox.")
+            card, "Queued emails live in this app, not in Outlook. Each one is "
+                  "sent on the employee's own birthday, the first time you open "
+                  "Personal Toolbox that day — after asking you to confirm. Miss "
+                  f"that day and it still goes out within "
+                  f"{birthday_mail.catchup_days()} day(s). Subject and cards "
+                  "folder: Settings → Birthday email.")
 
         send_bar = QHBoxLayout()
         send_bar.setContentsMargins(0, 8, 0, 0)
         send_bar.addWidget(widgets.button(card, "Review birthdays", variant="primary",
-                                          icon="search", command=self._on_send))
+                                          icon="search", command=self._on_review))
         send_bar.addWidget(widgets.button(
             card, "Export CSV (missing cards)", variant="neutral",
             icon="file-text", command=self._export_missing_csv))
         send_bar.addStretch(1)
         lay.addLayout(send_bar)
+
+        # Nhắc khi tháng này chưa xếp hàng: hàng chờ chỉ có dòng cho tháng nào
+        # người dùng đã bấm Enqueue, quên bấm là cả tháng không ai được gửi.
+        self.notice_lbl = QLabel("", card)
+        self.notice_lbl.setObjectName("Hint")
+        self.notice_lbl.setWordWrap(True)
+        lay.addWidget(self.notice_lbl)
+
+        widgets.section_label(card, "Queue")
+        self.table = DataTable(_QUEUE_COLUMNS, pk="birthday_email_id",
+                               stretch_key="last_error", checkable=True,
+                               menu_actions=[
+                                   ("Send now", self._send_now),
+                                   None,
+                                   ("Remove from queue", self._remove_from_queue),
+                               ])
+        self._build_queue_bar(lay)
+        lay.addWidget(self.table, 1)
+
+        self.count_lbl = QLabel("", card)
+        self.count_lbl.setObjectName("Hint")
+        lay.addWidget(self.count_lbl)
+
+        self._reload_queue()
         return card
 
     def build_body(self, parent):
         pass
 
-    # -------------------------------------------------------------- quét + xác nhận
-    def _on_send(self):
+    # ------------------------------------------------------------ hàng chờ
+    def _build_queue_bar(self, lay):
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        self.sel_status = widgets.FilterSelect("Status")
+        self.sel_status.set_options(cv_schema.BIRTHDAY_EMAIL_STATUS_CHOICES)
+        self.sel_status.changed.connect(self._reload_queue)
+        self.sel_status.setFixedWidth(180)
+        row.addWidget(self.sel_status)
+        row.addStretch(1)
+        # Trigger TAY cho đúng lượt mà app hỏi lúc mở máy: bấm Cancel ở modal đó
+        # thì cả ngày không bị hỏi lại, đây là đường vào lại.
+        row.addWidget(widgets.button(
+            self._root, "Send due emails", variant="primary", icon="mail",
+            command=lambda: self._run_due_flow(self._root)))
+        row.addWidget(widgets.button(self._root, "Reload", variant="neutral",
+                                     icon="refresh", command=self._reload_queue))
+        lay.addLayout(row)
+
+    def _reload_queue(self):
+        """Nạp lại bảng + hai dòng chữ phía trên/dưới. Gọi được cả sau lượt gửi
+        tự động (chạy khi mở app), nên phải chịu được việc TRANG CHƯA DỰNG —
+        trang tool chỉ dựng khi người dùng bấm vào sidebar. `count_lbl` là widget
+        dựng SAU CÙNG trong build() nên có nó là chắc chắn có đủ phần còn lại.
+        """
+        if getattr(self, "count_lbl", None) is None:
+            return
+        year = datetime.date.today().year
+        rows = repo.list_birthday_emails(status=self.sel_status.value(), year=year)
+        self.table.set_rows([{
+            "birthday_email_id": r["birthday_email_id"],
+            "employee": f"{_title_case_name(r['full_name'] or '')} "
+                        f"({r['employee_code'] or '—'})".strip(),
+            "email": ((r["company_email"] or "") or (r["email"] or "")).strip(),
+            "due_date": r["due_date"],
+            "status": r["status"],
+            "sent_at": r["sent_at"] or "",
+            "last_error": r["last_error"] or "",
+        } for r in rows])
+
+        counts = {s: repo.count_birthday_emails(status=s, year=year)
+                  for s in cv_schema.BIRTHDAY_EMAIL_STATUS_CHOICES}
+        shown = " · ".join(f"{n} {s.lower()}" for s, n in counts.items() if n)
+        self.count_lbl.setText(f"{year}: {shown}" if shown
+                               else f"{year}: nothing queued yet")
+
+        queued = birthday_mail.month_is_queued()
+        self.notice_lbl.setText(
+            "" if queued else
+            "⚠ This month's birthdays are not queued yet — click "
+            "\"Review birthdays\" so the emails can go out on the day.")
+        self.notice_lbl.setVisible(not queued)
+
+    def _send_now(self, rows):
+        """Gửi ngay, bất kể còn bao lâu tới sinh nhật (menu chuột phải)."""
         if not outlook.available():
             dialogs.warning(self._root, "Outlook required",
                             "Sending email needs Outlook on Windows (pywin32).")
             return
+        targets = [r for r in rows
+                   if r["status"] not in (cv_schema.BIRTHDAY_EMAIL_SENT,
+                                          cv_schema.BIRTHDAY_EMAIL_CANCELLED)]
+        if not targets:
+            dialogs.info(self._root, "Nothing to send",
+                         "The selected row(s) are already sent or cancelled.")
+            return
+        if not dialogs.confirm(
+                self._root, "Send now",
+                f"Send {len(targets)} birthday email(s) right now, without waiting "
+                "for the birthday?", ok_label="Send now"):
+            return
+        self._send_async(self._root, [r["birthday_email_id"] for r in targets])
 
-        now = datetime.datetime.now()
-        matches = [e for e in repo.list_employees()
-                  if _birth_month(e["date_of_birth"]) == now.month]
-        if not matches:
+    def _remove_from_queue(self, rows):
+        if not dialogs.confirm(
+                self._root, "Remove from queue",
+                f"Remove {len(rows)} row(s) from the queue? The employees will "
+                "not be emailed unless you queue them again.",
+                ok_label="Remove"):
+            return
+        for row in rows:
+            repo.delete_birthday_email(row["birthday_email_id"])
+        self._reload_queue()
+
+    # -------------------------------------------------- duyệt + xếp hàng
+    def _on_review(self):
+        rows = birthday_mail.month_candidates()
+        if not rows:
             dialogs.info(self._root, "No birthdays",
-                        "No employee has a birthday this month.")
+                         "No employee has a birthday this month.")
             return
 
-        # Nhớ giờ vừa chọn để lần sau mở tool khỏi phải chỉnh lại.
-        send_time = _parse_time(self.time_field.get())
-        settings.update(birthday_send_time=send_time.strftime("%H:%M"))
-
-        folder = settings.get("birthday_images_folder")
-        images = _scan_images(folder)
-
-        rows = []
-        for emp in matches:
-            code_norm = (emp["code"] or "").strip().upper()
-            image_name = images.get(code_norm)
-            send_at = _birthday_datetime(emp["date_of_birth"], send_time, now.year)
-            rows.append({
-                "code": emp["code"],
-                "name": emp["name"] or emp["full_name"] or emp["code"],
-                "full_name": _title_case_name(emp["full_name"] or emp["code"]),
-                # Ưu tiên company email, chỉ dùng personal email khi công ty
-                # chưa có (vd nhân viên mới chưa cấp mail công ty).
-                "email": (emp["company_email"] or emp["email"] or "").strip(),
-                "date_of_birth": emp["date_of_birth"],
-                "image_path": os.path.join(folder, image_name) if image_name else None,
-                "send_at": send_at,
-                # Sinh nhật đã qua (hoặc đúng hôm nay nhưng lỡ giờ) thì không
-                # hẹn được nữa -> gửi ngay.
-                "scheduled": bool(send_at and send_at > now),
-            })
-
-        dlg = _BirthdayConfirmDialog(self._root, rows, folder)
+        dlg = _BirthdayConfirmDialog(self._root, rows,
+                                     birthday_mail.cards_folder())
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         selected = dlg.selected_rows()
         if not selected:
             dialogs.info(self._root, "Nothing selected",
-                        "No employee is ticked — nothing to send.")
+                         "No employee is ticked — nothing to queue.")
             return
-        self._send_all(selected)
 
-    def _send_all(self, rows):
-        account = settings.get("birthday_from_account").strip()
-        subject_tpl = self.subject_field.get().strip() or _DEFAULT_SUBJECT
+        result = birthday_mail.enqueue(selected)
+        self._reload_queue()
 
-        queued, sent_now, not_sent = [], [], []
-        for row in rows:
-            display_name = row["full_name"]
-            if not row["image_path"]:
-                not_sent.append(f"{display_name} — no matching card")
-                continue
-            if not row["email"]:
-                not_sent.append(f"{display_name} — missing email")
-                continue
-            try:
-                outlook.send_mail(
-                    row["email"], _fill(subject_tpl, row["name"]), "",
-                    account_smtp=account or None, attachments=[row["image_path"]],
-                    inline_attachment=True,
-                    deferred_until=row["send_at"] if row["scheduled"] else None)
-                if row["scheduled"]:
-                    queued.append(f"{display_name} — {_fmt_when(row['send_at'])}")
-                else:
-                    sent_now.append(display_name)
-            except Exception as exc:
-                not_sent.append(f"{display_name} — send failed: {exc}")
+        parts = [f"Queued: {len(result['queued'])}"]
+        if result["requeued"]:
+            parts.append(f"Queued again after a previous failure "
+                         f"({len(result['requeued'])}):\n"
+                         + "\n".join(_title_case_name(n) for n in result["requeued"]))
+        if result["skipped"]:
+            parts.append(f"Skipped — already queued or sent ({len(result['skipped'])}):\n"
+                         + "\n".join(_title_case_name(n) for n in result["skipped"]))
+        dialogs.success(
+            self._root, "Queued", "\n\n".join(parts)
+            + "\n\nEach email goes out on the employee's own birthday, the first "
+              "time you open Personal Toolbox that day.")
 
-        parts = [f"Handed to Outlook: {len(queued) + len(sent_now)}/{len(rows)}"]
-        if queued:
-            parts.append(f"Waiting in the Outbox until each birthday ({len(queued)}):\n"
-                         + "\n".join(queued))
-        if sent_now:
-            parts.append("Sent immediately — birthday already passed this month "
-                         f"({len(sent_now)}):\n" + "\n".join(sent_now))
-        if not_sent:
-            parts.append("Not sent:\n" + "\n".join(not_sent))
+    # ------------------------------------------ hỏi & gửi khi mở app
+    def startup(self, window):
+        """Hỏi rồi gửi những mail đã tới ngày. Bốn cái bẫy ở đây, đừng gỡ:
+
+        1. `startup()` chạy TRƯỚC `build()` — trang tool dựng lười lúc bấm
+           sidebar, nên `self._root`/`self.table` CHƯA tồn tại. Chỉ được đọc
+           DB/settings, lấy `window` làm cha hộp thoại.
+        2. Không làm việc thẳng trong hàm này mà đẩy qua `QTimer.singleShot`:
+           `MainWindow._run_startup_tasks` gọi lần lượt từng tool, và Gate-Open
+           Mail (order 5, chạy TRƯỚC tool này) kết thúc bằng `dlg.exec()` — một
+           event loop lồng. Làm việc thẳng ở đây thì hộp thoại đó còn mở là cả
+           ngày không mail nào đi.
+        3. `MainWindow._run_startup_tasks` nuốt mọi exception bằng `pass`, nên
+           lỗi ở đây là mail âm thầm không gửi mà không có dấu vết → phải tự
+           bọc try/except + debuglog.
+        4. `repo.init_db()` gọi ở LUỒNG GIAO DIỆN (không chạy migration trong
+           worker): tool này trước giờ chưa từng gọi, ăn theo tool khác.
+        """
+        if not outlook.available():
+            return
+        QTimer.singleShot(0, lambda: self._prompt_due_on_startup(window))
+
+    def _prompt_due_on_startup(self, window, tries=0):
+        """Lượt hỏi-rồi-gửi lúc mở app. CHỈ HỎI MỘT LẦN MỖI NGÀY.
+
+        Bấm Cancel là cả ngày không hỏi lại (mở app 5 lần không bị hỏi 5 lần);
+        đổi ý thì bấm "Send due emails" ở màn hình Queue. Dòng vẫn nằm nguyên
+        trong hàng chờ nên hôm sau — còn trong hạn gửi bù — lại được hỏi.
+
+        Khác Gate-Open Mail ở một điểm quan trọng: chỗ đó đóng dấu `last_scan`
+        TRƯỚC khi làm việc nên Outlook lỗi là mất luôn ngày đó. Đây chỉ đóng dấu
+        khi modal ĐÃ THỰC SỰ hiện ra.
+        """
+        # Gate-Open Mail (order 5, chạy trước tool này) có thể đang mở modal của
+        # nó bằng `dlg.exec()`. Bật thêm modal đè lên thì rối, nên đợi trống đã.
+        # Đợi mãi không được thì thôi, không đóng dấu ngày -> lần mở app sau vẫn
+        # hỏi, và nút "Send due emails" ở màn hình Queue luôn là đường vào lại.
+        if QApplication.activeModalWidget() is not None:
+            if tries >= _PROMPT_MAX_TRIES:
+                debuglog.write("birthday_email: another dialog stayed open, "
+                               "skipped today's send prompt")
+                return
+            QTimer.singleShot(
+                _PROMPT_RETRY_MS,
+                lambda: self._prompt_due_on_startup(window, tries + 1))
+            return
+        try:
+            repo.init_db()
+        except Exception as exc:
+            debuglog.write(f"birthday_email.startup: init_db failed: {exc}")
+            return
+        cfg = config.load(SECTION, _CONFIG_DEFAULTS)
+        if cfg.get("last_prompt") == datetime.date.today().isoformat():
+            return
+        self._run_due_flow(window, silent_if_empty=True, stamp_prompt=True)
+
+    def _run_due_flow(self, parent, silent_if_empty=False, stamp_prompt=False):
+        """Chuẩn bị → hiện modal duyệt → gửi. Dùng chung cho lượt mở app và nút
+        "Send due emails" trên màn hình Queue."""
+        try:
+            result = birthday_mail.prepare_due()
+        except Exception as exc:
+            debuglog.write(f"birthday_email.prepare_due failed: {exc}")
+            if not silent_if_empty:
+                dialogs.error(parent, "Birthday emails",
+                              f"Couldn't read the queue:\n{exc}")
+            return
+        self._reload_queue()
+
+        if result["skipped"]:
+            if not silent_if_empty:
+                dialogs.warning(parent, "Birthday emails",
+                                f"Nothing to send — {result['skipped']}.")
+            return
+        if not result["rows"]:
+            if not silent_if_empty:
+                msg = "No birthday email is due today."
+                if result["missed"]:
+                    msg += (f"\n\n{result['missed']} email(s) passed the "
+                            "catch-up window and are marked Missed.")
+                dialogs.info(parent, "Nothing due", msg)
+            return
+
+        # Kéo cửa sổ lên trước rồi mới hỏi — lượt mở app có thể đang bị cửa sổ
+        # khác che.
+        if stamp_prompt:
+            self._raise_window(parent)
+
+        dlg = _SendDueDialog(parent, result["rows"], result["missed"])
+        if stamp_prompt:
+            cfg = config.load(SECTION, _CONFIG_DEFAULTS)
+            cfg["last_prompt"] = datetime.date.today().isoformat()
+            config.save(SECTION, cfg)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            debuglog.write("birthday_email: user cancelled the send prompt "
+                           f"({len(result['rows'])} due)")
+            return
+        row_ids = dlg.selected_ids()
+        if not row_ids:
+            dialogs.info(parent, "Nothing selected",
+                         "No employee is ticked — nothing was sent.")
+            return
+        self._send_async(parent, row_ids)
+
+    @staticmethod
+    def _raise_window(window):
+        try:
+            window.showNormal()
+            window.raise_()
+            window.activateWindow()
+        except Exception:
+            pass
+
+    def _send_async(self, parent, row_ids):
+        """Gửi ở luồng nền: Outlook khởi động lạnh có thể mất chục giây, không
+        được để đơ cửa sổ."""
+        def work(_emit):
+            return birthday_mail.send_rows(row_ids)
+
+        # `signals` được tạo ở luồng GUI nên Qt xếp hàng các slot dưới đây về
+        # đúng luồng đó (đã kiểm chứng: slot chạy ở luồng chính, không phải
+        # luồng nền) — nhờ vậy `_on_sent` chạm widget được. Đừng đổi sang gọi
+        # thẳng hàm trong `work()`.
+        self._task = Task(work, parent)
+        self._task.signals.finished.connect(
+            lambda result: self._on_sent(parent, result))
+        self._task.signals.failed.connect(
+            lambda msg: self._on_send_failed(parent, msg))
+        # QThread trần: không chờ lúc thoát app thì đóng cửa sổ giữa lúc Outlook
+        # đang khởi động lạnh sẽ ra "QThread: Destroyed while thread is running".
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self._wait_for_task)
+        self._task.start()
+
+    def _wait_for_task(self):
+        task = getattr(self, "_task", None)
+        if task is not None and task.isRunning():
+            task.wait(5000)
+
+    def _on_sent(self, parent, result):
+        self._reload_queue()
+        self._report(parent, result, "Birthday emails")
+
+    def _on_send_failed(self, parent, msg):
+        debuglog.write(f"birthday_email.send_rows failed: {msg}")
+        self._reload_queue()
+        dialogs.error(parent, "Birthday emails", f"Sending failed:\n{msg}")
+
+    @staticmethod
+    def _report(parent, result, title):
+        """Hộp thoại tổng kết một lượt gửi (dùng chung cho lượt tự động và
+        "Send now")."""
+        if result["skipped"]:
+            dialogs.warning(parent, title,
+                            f"Nothing was sent — {result['skipped']}.")
+            return
+        parts = [f"Sent: {len(result['sent'])}"]
+        if result["sent"]:
+            parts.append("\n".join(result["sent"]))
+        if result["failed"]:
+            parts.append(f"Not sent ({len(result['failed'])}):\n"
+                         + "\n".join(result["failed"]))
+        if result.get("missed"):
+            parts.append(f"{result['missed']} email(s) passed the catch-up "
+                         "window and are marked Missed — they will not be sent "
+                         "automatically.")
         msg = "\n\n".join(parts)
-
-        if not_sent:
-            dialogs.warning(self._root, "Done with skipped/failed", msg)
+        if result["failed"]:
+            dialogs.warning(parent, title, msg)
         else:
-            dialogs.success(self._root, "Done",
-                            msg + "\n\nKeep Outlook running so queued emails "
-                                  "can leave the Outbox on the day.")
+            dialogs.success(parent, title, msg)
 
     # -------------------------------------------------------- xuất CSV cho Canva
     def _export_missing_csv(self):
@@ -289,21 +525,20 @@ class BirthdayEmailTool(BaseTool):
         để dán thẳng vào khung chữ chào trên thiệp, vd 'Anh,'."""
         today = datetime.date.today()
         all_employees = [e for e in repo.list_employees()
-                         if _day_month(e["date_of_birth"])]
+                         if birthday_mail.birth_month(e["date_of_birth"])]
         if not all_employees:
             dialogs.info(self._root, "No employees",
-                        "No employee has a usable date of birth.")
+                         "No employee has a usable date of birth.")
             return
 
-        folder = settings.get("birthday_images_folder")
-        images = _scan_images(folder)
+        images = birthday_mail.scan_cards(birthday_mail.cards_folder())
 
         missing = []
         for emp in all_employees:
             code_norm = (emp["code"] or "").strip().upper()
             if code_norm in images:
                 continue   # đã có card rồi, không cần xuất lại
-            dm = _day_month(emp["date_of_birth"])
+            dm = birthday_mail.day_month(emp["date_of_birth"])
             raw_name = emp["name"] or emp["full_name"] or emp["code"] or ""
             missing.append({
                 "code": emp["code"] or "",
@@ -313,7 +548,7 @@ class BirthdayEmailTool(BaseTool):
 
         if not missing:
             dialogs.info(self._root, "Nothing to export",
-                        "Every employee already has a card.")
+                         "Every employee already has a card.")
             return
 
         path, _ = QFileDialog.getSaveFileName(
@@ -344,23 +579,27 @@ class BirthdayEmailTool(BaseTool):
 
 
 class _BirthdayConfirmDialog(ModalDialog):
-    """Modal xác nhận trước khi gửi: liệt kê người có sinh nhật tháng này, đánh
-    dấu ai THIẾU ảnh thiệp (người đó sẽ không được gửi mail)."""
+    """Modal duyệt trước khi XẾP HÀNG: liệt kê người có sinh nhật tháng này, đánh
+    dấu ai không xếp hàng được (thiếu thiệp/mail, hoặc đã xếp hàng/đã gửi rồi)."""
 
     def __init__(self, parent, rows, folder):
         super().__init__(parent, "md")
         card, lay = self.build_shell(f"Birthdays this month · {len(rows)}")
-        self._checks = []   # [(row, QCheckBox)] — bỏ tick để loại người đó (vd chỉ gửi test cho mình)
+        self._checks = []   # [(row, QCheckBox)] — bỏ tick để loại người đó
 
         if not folder:
             widgets.hint(
                 card, "⚠ No cards folder configured — set it in Settings → "
-                     "Birthday email. Nobody will be emailed.")
+                      "Birthday email. Nobody can be queued.")
 
-        has_any_card = any(r["image_path"] for r in rows)
+        # Tính nhãn/màu/chọn-được một lần rồi đi kèm từng row: cả phần đếm ở
+        # cuối hộp thoại lẫn từng dòng đều đọc chung một kết quả.
+        badged = [(row, _row_badge(row)) for row in rows]
+        has_selectable = any(b[2] for _r, b in badged)
         self.select_all_cb = QCheckBox("Select all", card)
-        self.select_all_cb.setChecked(has_any_card)
-        self.select_all_cb.setEnabled(has_any_card)
+        self.select_all_cb.setChecked(
+            has_selectable and all(b[3] for _r, b in badged if b[2]))
+        self.select_all_cb.setEnabled(has_selectable)
         self.select_all_cb.stateChanged.connect(self._toggle_all)
         lay.addWidget(self.select_all_cb)
 
@@ -372,31 +611,32 @@ class _BirthdayConfirmDialog(ModalDialog):
             empty = QLabel("No employee has a birthday this month.")
             empty.setObjectName("DialogMsg")
             col.addWidget(empty)
-        for row in rows:
-            col.addWidget(self._row_card(body, row))
+        for row, badge in badged:
+            col.addWidget(self._row_card(body, row, badge))
         col.addStretch(1)
         sa = widgets.scroll_area(body)
         lay.addWidget(sa, 1)
         self.set_grow_region(sa)
 
         widgets.hint(
-            card, "Emails go to Outlook's Outbox and are delivered on each "
-                  "employee's own birthday at the delivery time — Outlook must "
-                  "stay running and signed in until then.")
+            card, "Ticked employees are queued in this app. Each email is sent "
+                  "on that employee's own birthday, the first time you open "
+                  "Personal Toolbox that day — nothing is sent right now.")
 
-        missing = sum(1 for r in rows if not r["image_path"])
-        if missing:
+        blocked = sum(1 for r, b in badged if not b[2] and not r["queued_status"])
+        if blocked:
             widgets.hint(
-                card, f"⚠ {missing} employee(s) have no matching card and will "
-                     "NOT be emailed.")
-        instant = sum(1 for r in rows if r["image_path"] and not r["scheduled"])
-        if instant:
+                card, f"⚠ {blocked} employee(s) have no matching card or no email "
+                      "address and cannot be queued.")
+        passed = sum(1 for r, b in badged if r["passed"] and b[2])
+        if passed:
             widgets.hint(
-                card, f"⚠ {instant} birthday(s) already passed this month — those "
-                     "emails cannot be scheduled and will be sent right away.")
+                card, f"⚠ {passed} birthday(s) already passed this month — tick "
+                      "them only if you still want the email to go out on the "
+                      "next app launch.")
 
         foot = QHBoxLayout()
-        foot.addWidget(widgets.button(card, "Send", variant="primary", icon="mail",
+        foot.addWidget(widgets.button(card, "Enqueue", variant="primary", icon="mail",
                                       command=self.accept))
         foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
                                       command=self.reject))
@@ -404,48 +644,108 @@ class _BirthdayConfirmDialog(ModalDialog):
         lay.addLayout(foot)
 
     def selected_rows(self):
-        """Danh sách row còn được tick — bỏ tick thì loại khỏi đợt gửi."""
+        """Danh sách row còn được tick — bỏ tick thì loại khỏi đợt xếp hàng."""
         return [row for row, cb in self._checks if cb.isChecked()]
 
     def _toggle_all(self, _state=None):
-        """Tick/bỏ tick "Select all" -> áp cho mọi dòng CÓ card (danh sách dài
-        thì tick/bỏ hết 1 phát nhanh hơn tự bỏ từng người)."""
+        """Tick/bỏ tick "Select all" -> áp cho mọi dòng XẾP HÀNG ĐƯỢC (danh sách
+        dài thì tick/bỏ hết 1 phát nhanh hơn tự bỏ từng người)."""
         checked = self.select_all_cb.isChecked()
-        for row, cb in self._checks:
+        for _row, cb in self._checks:
             if cb.isEnabled():
                 cb.setChecked(checked)
 
-    def _row_card(self, parent, row):
-        box = QFrame(parent)
-        box.setObjectName("DetailCard")
-        h = QHBoxLayout(box)
-        h.setContentsMargins(14, 10, 14, 10)
-        h.setSpacing(8)
-
-        has_card = bool(row["image_path"])
-        cb = QCheckBox(box)
-        cb.setChecked(has_card)      # thiếu card thì không có gì để gửi -> mặc định bỏ tick
-        cb.setEnabled(has_card)
-        h.addWidget(cb)
+    def _row_card(self, parent, row, badge):
+        label, color, selectable, checked = badge
+        cb = QCheckBox(parent)
+        cb.setChecked(selectable and checked)
+        cb.setEnabled(selectable)
         self._checks.append((row, cb))
+        return _person_row(
+            parent, cb,
+            f"{_title_case_name(row['raw_full_name'])}  ({row['code']})",
+            row["email"] or "No email on file",
+            row["date_of_birth"] or "—", label, color)
 
-        name_col = QVBoxLayout()
-        name_col.setSpacing(2)
-        name = QLabel(f"{row['full_name']}  ({row['code']})", box)
-        name.setObjectName("DetailNamePlain")
-        name_col.addWidget(name)
-        email = QLabel(row["email"] or "No email on file", box)
-        email.setObjectName("DetailMeta")
-        name_col.addWidget(email)
-        h.addLayout(name_col, 1)
-        dob = QLabel(row["date_of_birth"] or "—", box)
-        dob.setObjectName("Hint")
-        h.addWidget(dob)
-        if not has_card:
-            h.addWidget(_chip(box, "No card", theme.PALETTE["--danger"]))
-        elif row["scheduled"]:
-            h.addWidget(_chip(box, _fmt_when(row["send_at"]),
-                              theme.PALETTE["--success"]))
+
+class _SendDueDialog(ModalDialog):
+    """Modal xác nhận NGAY TRƯỚC KHI GỬI — app không tự gửi mail mà không hỏi.
+
+    Hiện lúc mở app (một lần mỗi ngày) và khi bấm "Send due emails" ở màn hình
+    Queue. Bấm Cancel thì mọi dòng nằm nguyên trong hàng chờ, gửi tay sau được.
+    """
+
+    def __init__(self, parent, rows, missed=0):
+        super().__init__(parent, "md")
+        sendable = [r for r in rows if not r["blocked"]]
+        card, lay = self.build_shell(f"Birthday emails to send · {len(sendable)}")
+        self._checks = []   # [(row_id, QCheckBox)]
+
+        self.select_all_cb = QCheckBox("Select all", card)
+        self.select_all_cb.setChecked(bool(sendable))
+        self.select_all_cb.setEnabled(bool(sendable))
+        self.select_all_cb.stateChanged.connect(self._toggle_all)
+        lay.addWidget(self.select_all_cb)
+
+        body = QWidget()
+        col = QVBoxLayout(body)
+        col.setContentsMargins(0, 0, 8, 0)
+        col.setSpacing(8)
+        today_iso = datetime.date.today().isoformat()
+        for row in rows:
+            col.addWidget(self._row_card(body, row, today_iso))
+        col.addStretch(1)
+        sa = widgets.scroll_area(body)
+        lay.addWidget(sa, 1)
+        self.set_grow_region(sa)
+
+        widgets.hint(
+            card, "These are the queued birthday emails that are due. Sending "
+                  "happens now, from this app — Cancel leaves everything in the "
+                  "queue and you can send later with \"Send due emails\" on the "
+                  "Queue list.")
+        blocked = len(rows) - len(sendable)
+        if blocked:
+            widgets.hint(
+                card, f"⚠ {blocked} queued email(s) cannot be sent — the reason "
+                      "is shown on each row and saved in the queue.")
+        if missed:
+            widgets.hint(
+                card, f"⚠ {missed} email(s) passed the catch-up window and are "
+                      "marked Missed — they will not be sent automatically.")
+
+        foot = QHBoxLayout()
+        foot.addWidget(widgets.button(card, "Send now", variant="primary", icon="mail",
+                                      command=self.accept))
+        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
+                                      command=self.reject))
+        foot.addStretch(1)
+        lay.addLayout(foot)
+
+    def selected_ids(self):
+        return [row_id for row_id, cb in self._checks if cb.isChecked()]
+
+    def _toggle_all(self, _state=None):
+        checked = self.select_all_cb.isChecked()
+        for _row_id, cb in self._checks:
+            if cb.isEnabled():
+                cb.setChecked(checked)
+
+    def _row_card(self, parent, row, today_iso):
+        blocked = row["blocked"]
+        cb = QCheckBox(parent)
+        cb.setChecked(not blocked)
+        cb.setEnabled(not blocked)
+        self._checks.append((row["row_id"], cb))
+
+        when = _fmt_iso_day(row["due_date"])
+        if blocked:
+            label, color = blocked, theme.PALETTE["--danger"]
+        elif row["due_date"] < today_iso:
+            # Sinh nhật đã qua nhưng còn trong hạn gửi bù -> nói rõ là gửi muộn.
+            label, color = f"Late · {when}", theme.PALETTE["--warning"]
         else:
-            h.addWidget(_chip(box, "Sends now", theme.PALETTE["--warning"]))
-        return box
+            label, color = when, theme.PALETTE["--success"]
+        return _person_row(
+            parent, cb, f"{_title_case_name(row['display'])}  ({row['code']})",
+            row["email"] or "No email on file", "", label, color)

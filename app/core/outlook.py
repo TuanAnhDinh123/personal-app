@@ -516,6 +516,20 @@ def send_mail(to, subject, body, cc="", html="", account_smtp=None, attachments=
             mail.Body = body
         if deferred_until and deferred_until > datetime.datetime.now():
             mail.DeferredDeliveryTime = _ol_time(deferred_until)
+            # ĐỌC LẠI ngay sau khi gán: Outlook parse chuỗi ngày theo LOCALE của
+            # máy và sai định dạng thì lặng lẽ bỏ qua (giống chỗ phải thử ba định
+            # dạng ở `_to_datetime`) — mail đi ngay mà không báo gì. Ghi lại giá
+            # trị thật để phân biệt "Outlook không nhận giờ hẹn" với "Outlook
+            # nhận rồi nhưng vẫn gửi ngay" (hộp thư dùng chung). Giá trị
+            # 4501-01-01 là mốc "chưa đặt" của Outlook.
+            try:
+                debuglog.write(
+                    f"send_mail: DeferredDeliveryTime set to "
+                    f"{_ol_time(deferred_until)!r}, Outlook read back "
+                    f"{mail.DeferredDeliveryTime!r}")
+            except Exception as exc:
+                debuglog.write(f"send_mail: can't read back "
+                               f"DeferredDeliveryTime: {exc}")
         if account_smtp:
             ns = outlook.GetNamespace("MAPI")
             matched = False

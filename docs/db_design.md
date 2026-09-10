@@ -43,6 +43,7 @@ flowchart LR
         employees["employees<br/><small>nhân viên</small>"]
         courses["courses<br/><small>khóa học</small>"]
         courseemp["course_employees<br/><small>ghi danh</small>"]
+        bdmail["birthday_emails<br/><small>hàng chờ mail sinh nhật</small>"]
     end
 
     departments --> functions
@@ -73,6 +74,7 @@ flowchart LR
 
     courses --> courseemp
     employees --> courseemp
+    employees -- "sinh nhật đã xếp hàng" --> bdmail
 
     classDef master  fill:#DCE6F5,stroke:#3B5C93,stroke-width:1px,color:#15233A
     classDef recruit fill:#FAE3CE,stroke:#B0702A,stroke-width:1px,color:#452B0E
@@ -81,7 +83,7 @@ flowchart LR
     class departments,levels,emptypes,costcenters,skills,mailtpl master
     class positions,posreq,cvs,exps,candskills,apps,evals,acts,intv,fb,fts recruit
     class candidates core
-    class employees,courses,courseemp hr
+    class employees,courses,courseemp,bdmail hr
     style MASTER  fill:#F4F7FC,stroke:#B9C7DE,color:#3B5C93
     style RECRUIT fill:#FDF6EF,stroke:#E0C3A0,color:#B0702A
     style HR      fill:#F3F7F1,stroke:#C4D7BE,color:#4C7743
@@ -861,6 +863,33 @@ CREATE INDEX        idx_ce_course   ON course_employees(course_id);
 CREATE INDEX        idx_ce_employee ON course_employees(employee_id);
 ```
 
+### `birthday_emails` — Hàng chờ mail chúc mừng sinh nhật
+
+Lịch gửi mail sinh nhật do **app** giữ, không nhờ Outlook nữa. Trước đây cả tháng mail được đẩy sang Outlook một lượt, mỗi mail gắn `DeferredDeliveryTime` để nằm ở Outbox tới đúng ngày; cách đó chỉ chạy khi tài khoản gửi **đã đăng nhập** trong Outlook, còn gửi từ **hộp thư dùng chung** (chỉ được IT share) thì Outlook bỏ qua giờ hẹn và gửi ngay — cả tháng nhận mail cùng một lúc.
+
+Hai nhịp: người dùng duyệt danh sách ở modal rồi **xếp hàng** vào bảng này; mỗi lần **mở app**, `birthday_mail.send_due()` gửi những dòng đã tới ngày.
+
+**Bảng chỉ giữ khóa + trạng thái.** Không có cột nào chụp lại email / họ tên / đường dẫn thiệp: mọi thứ đó tra lại từ `employees` + thư mục thiệp **lúc gửi**. Nhờ vậy không tồn tại các lỗi dữ liệu cũ (thiệp bị xóa, đổi mail công ty, nhân viên nghỉ việc sau khi xếp hàng) — nếu chụp lại thì mỗi thứ đó là một bug phải đi vá riêng.
+
+| Cột | Kiểu | Mô tả |
+|---|---|---|
+| `birthday_email_id` | INTEGER **PK** | |
+| `employee_id` | INT | → `employees.employee_id` |
+| `due_date` | DATE | **ISO `yyyy-mm-dd`** — ngày sinh nhật của năm xếp hàng. |
+| `status` | VARCHAR | Xem [Trạng thái mail sinh nhật](#trạng-thái-mail-sinh-nhật). |
+| `attempts` | INT | Số lần đã thật sự gọi Outlook. |
+| `last_error` | TEXT | Lý do lần gần nhất không gửi được. |
+| `sent_at` | DATETIME | Thời điểm gửi thành công. |
+
+> **Vì sao `due_date` dùng ISO mà `employees.date_of_birth` dùng `dd/mm/yyyy`** — đừng "sửa lại cho khớp". Cột này để **so sánh với hôm nay ngay trong SQL** (`due_date <= ?`); chuỗi ISO so sánh theo thứ tự chữ là ra đúng thứ tự ngày, `dd/mm/yyyy` thì không. Hàng chờ nối với `employees` qua `employee_id`, **không bao giờ** nối theo ngày, nên hai định dạng không gặp nhau. (Cần lọc sinh nhật bằng SQL thì đã có `cv_repository._sql_iso_date()`.)
+
+> **Unique `(employee_id, due_date)`** = mỗi người mỗi sinh nhật đúng **một** mail. `birthday_mail.enqueue()` vẫn tra trước rồi mới ghi nên bình thường không đụng tới index; index là lưới an toàn cho trường hợp mở app hai lần cùng lúc (bắt `IntegrityError` rồi coi như bỏ qua). Việc chống gửi trùng lúc **gửi** thì do `cv_repository.claim_birthday_email()` lo — một câu `UPDATE` có điều kiện, chỉ một bên thấy `rowcount == 1`.
+
+```sql
+CREATE UNIQUE INDEX idx_bd_emails_slot ON birthday_emails(employee_id, due_date);
+CREATE INDEX        idx_bd_emails_due  ON birthday_emails(status, due_date);
+```
+
 ---
 
 ## Giá trị cố định
@@ -928,6 +957,21 @@ Ba cột phải khớp nhau, nếu không mỗi màn hình lại đọc ra một
 | 2 | `mail_template_r2_id` | Second Interview |
 | 3 | `mail_template_r3_id` | Third Interview |
 
+### Trạng thái mail sinh nhật
+
+`birthday_emails.status` — nhãn hiện thẳng trên bảng cho người dùng xem nên viết tiếng Anh.
+
+Vòng đời bình thường: `Pending` → `Sending` → `Sent`.
+
+| Trạng thái | Nghĩa | Còn gửi lại? |
+|---|---|---|
+| `Pending` | Đã xếp hàng, chờ tới ngày. | — |
+| `Sending` | Đã giành được dòng, đang gọi Outlook. Dòng kẹt ở đây (app tắt giữa lúc gửi) được `reset_stale_sending()` đưa về `Pending` sau 1 giờ. | — |
+| `Sent` | Đã gửi. Trạng thái **cuối**. | Không |
+| `Failed` | Gọi Outlook lỗi, thiếu email, hoặc không tìm thấy thiệp. | Có — lượt mở app sau (còn trong hạn gửi bù) hoặc *Send now* |
+| `Missed` | Quá hạn gửi bù (`birthday_catchup_days`). Không tự gửi nữa, để người dùng nhìn thấy mà xử lý tay. | Chỉ bằng *Send now* |
+| `Cancelled` | Nhân viên đã nghỉ việc (hoặc bị xóa khỏi `employees`) trước khi tới ngày. Trạng thái **cuối**. | Không |
+
 ### Các bộ giá trị khác
 
 | Cột | Giá trị |
@@ -987,3 +1031,4 @@ Ba quy tắc bắt buộc:
 | `0004_drop_employees_address` | `employees` | **Bỏ** `address` (Excel *Street (address)*) — cột nằm lạc ở cuối file Excel, sau mấy ô header trống, HR xác nhận không dùng; cột hợp lệ cuối cùng của file là *Birthday*. Địa chỉ vẫn đủ ở `permanent_address` / `temporary_address` (+ `city`, `country`). Dữ liệu trong cột **mất theo**. |
 | `0005_drop_employees_excel_figures` | `employees` | **Bỏ** `years_of_service`, `length_of_service`, `birth_year`, `age`, `age_range` — đều là **công thức** bên file Excel nên lưu lại chỉ là ảnh chụp lúc import, càng để lâu càng sai. Bốn cột đầu tính động trong câu truy vấn (`cv_repository.EMPLOYEE_COMPUTED_SQL`) từ `date_of_birth` / `date_of_employment`, giữ đúng công thức của file; `birth_year` bỏ hẳn không tính lại (trùng `age`). Dữ liệu trong 5 cột **mất theo** (không tiếc: tính lại được). |
 | `0006_functions_and_code_lists` | `functions` · `code_lists` · `employees` | **Thêm** hai bảng danh mục và một cột. `functions` — cột Excel *Function (Common)*, gắn vào `departments` (một phòng ban nhiều nhóm), sửa ngay trong form phòng ban. `code_lists` — gom nhiều danh mục một cột vào chung một bảng, phân biệt bằng `type` (Qualification · Qualification (VN) · ID issued place), có màn hình riêng *Master Data → Code lists*. `employees.qualification_vn` — cột *Qualification (Việt Nam)* trước đây bỏ qua khi import vì tưởng là bản dịch của *Qualification*; sheet *Code* của file HC cho thấy đó là danh mục riêng nên lưu lại. Bulk Import nay **chặn** cả bốn cột này nếu giá trị không có trong danh mục. |
+| `0007_birthday_email_queue` | `birthday_emails` *(mới)* | **Thêm** hàng chờ mail chúc mừng sinh nhật + unique `(employee_id, due_date)` và index `(status, due_date)`. Lịch gửi chuyển từ Outlook (`DeferredDeliveryTime`, mail nằm Outbox tới đúng ngày) sang **app tự giữ**: cách cũ chỉ chạy khi tài khoản gửi đã đăng nhập trong Outlook, còn gửi từ **hộp thư dùng chung** (chỉ được IT share) thì Outlook bỏ qua giờ hẹn và gửi ngay — cả tháng nhận mail cùng lúc. Không mất dữ liệu (bảng mới). Kèm theo: setting `birthday_send_time` **bị bỏ** (không còn giờ hẹn), thêm `birthday_subject` + `birthday_catchup_days`. |

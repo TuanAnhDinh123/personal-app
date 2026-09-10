@@ -729,6 +729,43 @@ MIGRATIONS: list[tuple[str, str]] = [
 
         ALTER TABLE employees ADD COLUMN qualification_vn VARCHAR;
     '''),
+    # HÀNG CHỜ mail chúc mừng sinh nhật. Trước đây lịch gửi do Outlook giữ
+    # (`DeferredDeliveryTime` — mail nằm Outbox tới đúng ngày); cách đó chỉ chạy
+    # được khi tài khoản gửi ĐÃ ĐĂNG NHẬP trong Outlook. Gửi từ hộp thư dùng
+    # chung (chỉ được share, không login) thì Outlook bỏ qua giờ hẹn và gửi
+    # ngay, nên cả tháng nhận mail cùng lúc. Giờ app tự giữ lịch: xếp hàng vào
+    # bảng này, mỗi lần mở app gửi những dòng đã tới ngày.
+    #
+    # Bảng chỉ giữ KHÓA + TRẠNG THÁI, không chụp lại email/tên/đường dẫn thiệp:
+    # mọi thứ đó tra lại từ `employees` + thư mục thiệp lúc gửi, nên không bao
+    # giờ có chuyện dữ liệu chụp lúc xếp hàng bị cũ (thiệp bị xóa, đổi mail công
+    # ty, nhân viên nghỉ việc sau khi xếp hàng).
+    #
+    # `due_date` lưu ISO 'yyyy-mm-dd' — CỐ TÌNH khác `employees.date_of_birth`
+    # ('dd/mm/yyyy'): cột này để so sánh với hôm nay ngay trong SQL, chuỗi ISO
+    # so sánh là ra đúng thứ tự ngày còn 'dd/mm/yyyy' thì không. Hàng chờ nối
+    # với `employees` qua `employee_id`, không bao giờ nối theo ngày.
+    #
+    # Unique (employee_id, due_date): mỗi người mỗi sinh nhật đúng MỘT mail.
+    # `birthday_mail.enqueue()` vẫn tra trước rồi mới ghi nên bình thường không
+    # đụng tới index; index là lưới an toàn cho trường hợp mở app hai lần cùng lúc.
+    ("0007_birthday_email_queue", '''
+        CREATE TABLE IF NOT EXISTS birthday_emails (
+            birthday_email_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INT,        -- → employees.employee_id
+            due_date    DATE,       -- 'yyyy-mm-dd' (ISO — xem ghi chú ở migration)
+            status      VARCHAR,    -- xem BIRTHDAY_EMAIL_STATUS_CHOICES
+            attempts    INT DEFAULT 0,
+            last_error  TEXT,
+            sent_at     DATETIME,
+            created_at  DATETIME DEFAULT (datetime('now', 'localtime')),
+            updated_at  DATETIME DEFAULT (datetime('now', 'localtime'))
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_bd_emails_slot
+            ON birthday_emails(employee_id, due_date);
+        CREATE INDEX IF NOT EXISTS idx_bd_emails_due
+            ON birthday_emails(status, due_date);
+    '''),
 ]
 
 # =============================================================================
@@ -1143,6 +1180,36 @@ MARITAL_STATUS_CHOICES = ["Single", "Married", "Divorced", "Widowed"]
 
 COLLAR_CHOICES = ["Blue Collar", "White Collar"]
 GROUP_FUNCTION_CHOICES = ["VNPlant", "Corporate", "R&D"]
+
+# ── Mail chúc mừng sinh nhật ─────────────────────────────────────────────
+# Trạng thái một dòng trong hàng chờ `birthday_emails`. Nhãn hiện thẳng trên
+# bảng cho người dùng xem nên viết tiếng Anh.
+#
+# Vòng đời bình thường:  Pending → Sending → Sent
+# Các nhánh rẽ:
+#   • Failed    — gọi Outlook lỗi, thiếu email, hoặc không tìm thấy thiệp. CÒN
+#                 thử lại được: lần mở app sau (còn trong hạn gửi bù) hoặc bấm
+#                 "Send now" sẽ chạy lại.
+#   • Missed    — quá hạn gửi bù (xem setting `birthday_catchup_days`). Không tự
+#                 gửi nữa, chỉ để người dùng nhìn thấy mà xử lý tay.
+#   • Cancelled — nhân viên đã nghỉ việc trước khi tới ngày sinh nhật.
+#   • Sending   — đã giành được dòng, đang gọi Outlook. Dòng kẹt ở đây (app tắt
+#                 giữa lúc gửi) được `reset_stale_sending()` đưa về Pending.
+BIRTHDAY_EMAIL_PENDING = "Pending"
+BIRTHDAY_EMAIL_SENDING = "Sending"
+BIRTHDAY_EMAIL_SENT = "Sent"
+BIRTHDAY_EMAIL_FAILED = "Failed"
+BIRTHDAY_EMAIL_MISSED = "Missed"
+BIRTHDAY_EMAIL_CANCELLED = "Cancelled"
+
+BIRTHDAY_EMAIL_STATUS_CHOICES = [
+    BIRTHDAY_EMAIL_PENDING,
+    BIRTHDAY_EMAIL_SENDING,
+    BIRTHDAY_EMAIL_SENT,
+    BIRTHDAY_EMAIL_FAILED,
+    BIRTHDAY_EMAIL_MISSED,
+    BIRTHDAY_EMAIL_CANCELLED,
+]
 
 # ── Đào tạo ──────────────────────────────────────────────────────────────
 # Loại khóa học — lưu dạng INT trong cột courses.course_type (chỉ số = giá trị lưu).

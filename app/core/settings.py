@@ -25,7 +25,12 @@ DEFAULTS = {
     "course_template_path": "",     # file Excel mẫu để xuất roster khóa học
     "birthday_images_folder": "",   # thư mục ảnh thiệp sinh nhật (Canva Bulk Create, tên file = mã NV)
     "birthday_from_account": "",    # địa chỉ Outlook dùng để gửi mail chúc mừng sinh nhật (khác tài khoản mặc định)
-    "birthday_send_time": "08:00",  # giờ hẹn gửi mail sinh nhật (mail nằm Outbox tới đúng ngày sinh nhật, giờ này)
+    # Tiêu đề mail sinh nhật. Phải lưu ở đây (không để trong widget như trước):
+    # app tự gửi lúc mở máy, khi người dùng chưa từng mở trang tool.
+    "birthday_subject": "Happy Birthday, {name}!",
+    # Số ngày còn GỬI BÙ khi đúng hôm sinh nhật không ai mở app (nghỉ phép, cuối
+    # tuần, máy tắt). Quá hạn thì mail bị đánh "Missed", không tự gửi nữa.
+    "birthday_catchup_days": 3,
 }
 
 # Section cũ (tool "Quét CV bằng AI" từng lưu API key/model ở đây). Dùng để tự

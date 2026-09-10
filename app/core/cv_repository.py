@@ -136,6 +136,13 @@ EMPLOYEE_FIELDS = [
 COURSE_FIELDS = ["title", "content", "date", "location", "course_type"]
 COURSE_EMPLOYEE_FIELDS = ["course_id", "employee_id", "status", "note"]
 
+# `updated_at` KHÔNG có trong danh sách: `_update_conn` tự chạm cột đó. Ngược
+# lại, `status`/`sent_at`/`attempts`/`last_error` BẮT BUỘC phải có — thiếu cột
+# nào thì lệnh đánh dấu trạng thái thành no-op mà không báo lỗi gì.
+BIRTHDAY_EMAIL_FIELDS = [
+    "employee_id", "due_date", "status", "attempts", "last_error", "sent_at",
+]
+
 # PK của mỗi bảng (dùng cho update/delete generic).
 _PK = {
     "departments": "department_id",
@@ -160,6 +167,7 @@ _PK = {
     "employees": "employee_id",
     "courses": "course_id",
     "course_employees": "enrollment_id",
+    "birthday_emails": "birthday_email_id",
 }
 
 
@@ -2157,3 +2165,180 @@ def search_course_employees(course_id=None, status: str = ""):
 def count_course_employees() -> int:
     with get_connection() as conn:
         return conn.execute("SELECT COUNT(*) FROM course_employees").fetchone()[0]
+
+
+# ══════════════ HÀNG CHỜ MAIL SINH NHẬT (birthday_emails) ═══════════════
+#
+# Lịch gửi do APP giữ (không còn nhờ DeferredDeliveryTime của Outlook — xem
+# migration 0007). Bảng chỉ giữ khóa + trạng thái; email/tên/thiệp tra lại từ
+# `employees` + thư mục thiệp lúc gửi. Logic nghiệp vụ ở `app/core/birthday_mail.py`.
+
+# SELECT dùng chung: kèm dữ liệu nhân viên mà cả bảng hiển thị lẫn lúc gửi cần.
+# `termination_date` để lúc gửi biết người đó còn làm việc không (nghỉ việc sau
+# khi xếp hàng thì không gửi nữa).
+_BIRTHDAY_EMAIL_SELECT = [
+    # `joined_employee_id` là NULL khi nhân viên đã bị xóa khỏi `employees` —
+    # dấu hiệu CHÍNH XÁC cho việc đó (các cột khác đều có thể rỗng hợp lệ).
+    "SELECT b.*, e.employee_id AS joined_employee_id,",
+    "       e.code AS employee_code, e.full_name, e.name,",
+    "       e.company_email, e.email, e.date_of_birth, e.termination_date",
+    "FROM birthday_emails b",
+    "LEFT JOIN employees e ON e.employee_id = b.employee_id",
+]
+
+
+def list_birthday_emails(status: str = "", year=None):
+    """Hàng chờ để hiển thị: lọc theo trạng thái và/hoặc năm của `due_date`."""
+    sql = list(_BIRTHDAY_EMAIL_SELECT) + ["WHERE 1=1"]
+    params: list = []
+    if status:
+        sql.append("AND b.status = ?")
+        params.append(status)
+    if year:
+        sql.append("AND b.due_date LIKE ?")
+        params.append(f"{int(year)}-%")
+    sql.append("ORDER BY b.due_date, e.full_name")
+    with get_connection() as conn:
+        return conn.execute(" ".join(sql), params).fetchall()
+
+
+def get_birthday_email(row_id):
+    """Một dòng hàng chờ KÈM dữ liệu nhân viên (khác `_get`, chỉ trả cột của bảng)."""
+    sql = " ".join(_BIRTHDAY_EMAIL_SELECT + ["WHERE b.birthday_email_id = ?"])
+    with get_connection() as conn:
+        return conn.execute(sql, (row_id,)).fetchone()
+
+
+def find_birthday_email(employee_id, due_date: str):
+    """Dòng đã có của đúng một người trong đúng một ngày — dùng để xếp hàng lại
+    mà không tạo bản ghi trùng."""
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT * FROM birthday_emails WHERE employee_id = ? AND due_date = ?",
+            (employee_id, due_date)).fetchone()
+
+
+def due_birthday_emails(today_iso: str, earliest_iso: str):
+    """Các dòng ĐÃ TỚI HẠN GỬI: còn `Pending`/`Failed` và `due_date` nằm trong
+    khoảng [earliest_iso, today_iso] — tức đúng ngày sinh nhật, hoặc trong hạn
+    gửi bù nếu hôm đó không mở app.
+
+    So sánh chuỗi được vì `due_date` lưu ISO 'yyyy-mm-dd' (xem migration 0007).
+    """
+    sql = " ".join(_BIRTHDAY_EMAIL_SELECT + [
+        "WHERE b.status IN (?, ?)",
+        "AND b.due_date >= ? AND b.due_date <= ?",
+        "ORDER BY b.due_date",
+    ])
+    with get_connection() as conn:
+        return conn.execute(sql, (
+            cv_schema.BIRTHDAY_EMAIL_PENDING, cv_schema.BIRTHDAY_EMAIL_FAILED,
+            earliest_iso, today_iso)).fetchall()
+
+
+def insert_birthday_email(data: dict) -> int:
+    return _insert("birthday_emails", BIRTHDAY_EMAIL_FIELDS, data)
+
+
+def update_birthday_email(row_id, data: dict) -> None:
+    _update("birthday_emails", BIRTHDAY_EMAIL_FIELDS, row_id, data)
+
+
+def delete_birthday_email(row_id) -> None:
+    _delete("birthday_emails", row_id)
+
+
+def claim_birthday_email(row_id) -> bool:
+    """GIÀNH một dòng trước khi gửi: đổi sang `Sending` và trả về True nếu chính
+    lượt này là lượt đổi được.
+
+    `get_connection()` mở kết nối mới mỗi lần gọi nên kiểu "đọc danh sách → lặp
+    → ghi" cho phép HAI instance app cùng gửi một mail hai lần. Một câu UPDATE
+    có điều kiện là chỗ duy nhất phân xử: chỉ một bên thấy `rowcount == 1`.
+
+    Giành được cả dòng `Missed` để mục "Send now" gửi tay được người đã quá hạn;
+    lượt tự động không bị ảnh hưởng vì `due_birthday_emails` không trả dòng đó.
+    `Sent`/`Cancelled` là trạng thái cuối, không giành được.
+    """
+    with get_connection() as conn:
+        cur = conn.execute(
+            "UPDATE birthday_emails "
+            "SET status = ?, updated_at = datetime('now', 'localtime') "
+            "WHERE birthday_email_id = ? AND status IN (?, ?, ?)",
+            (cv_schema.BIRTHDAY_EMAIL_SENDING, row_id,
+             cv_schema.BIRTHDAY_EMAIL_PENDING, cv_schema.BIRTHDAY_EMAIL_FAILED,
+             cv_schema.BIRTHDAY_EMAIL_MISSED))
+        return cur.rowcount == 1
+
+
+def reset_stale_sending(cutoff: str) -> int:
+    """Đưa các dòng kẹt ở `Sending` (app tắt giữa lúc gửi) về `Pending`.
+
+    `cutoff` là mốc 'yyyy-mm-dd HH:MM:SS'; dòng nào giành từ trước mốc đó mà vẫn
+    chưa xong thì coi như lượt gửi đã chết. Không có bước này thì một lần app
+    crash là dòng đó không bao giờ được gửi nữa.
+    """
+    with get_connection() as conn:
+        return conn.execute(
+            "UPDATE birthday_emails "
+            "SET status = ?, updated_at = datetime('now', 'localtime') "
+            "WHERE status = ? AND COALESCE(updated_at, '') < ?",
+            (cv_schema.BIRTHDAY_EMAIL_PENDING,
+             cv_schema.BIRTHDAY_EMAIL_SENDING, cutoff)).rowcount
+
+
+def expire_birthday_emails(earliest_iso: str) -> int:
+    """Quá hạn gửi bù → `Missed`: dòng còn chờ mà `due_date` đã lùi xa hơn mốc
+    sớm nhất còn được gửi. Không tự gửi nữa, chỉ để người dùng nhìn thấy."""
+    with get_connection() as conn:
+        return conn.execute(
+            "UPDATE birthday_emails "
+            "SET status = ?, updated_at = datetime('now', 'localtime') "
+            "WHERE status IN (?, ?) AND due_date < ?",
+            (cv_schema.BIRTHDAY_EMAIL_MISSED,
+             cv_schema.BIRTHDAY_EMAIL_PENDING, cv_schema.BIRTHDAY_EMAIL_FAILED,
+             earliest_iso)).rowcount
+
+
+def mark_birthday_email_sent(row_id) -> None:
+    """Gửi xong. SQL viết tay vì `attempts + 1` là BIỂU THỨC — `_update` chỉ gán
+    được giá trị có sẵn."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE birthday_emails "
+            "SET status = ?, sent_at = datetime('now', 'localtime'), "
+            "    attempts = COALESCE(attempts, 0) + 1, last_error = NULL, "
+            "    updated_at = datetime('now', 'localtime') "
+            "WHERE birthday_email_id = ?",
+            (cv_schema.BIRTHDAY_EMAIL_SENT, row_id))
+
+
+def mark_birthday_email_failed(row_id, error: str,
+                              status: str = "", count_attempt: bool = True) -> None:
+    """Không gửi được. `status` để trống thì là `Failed` (còn thử lại được);
+    truyền `Cancelled` cho trường hợp không bao giờ nên thử lại nữa.
+
+    `count_attempt=False` cho các lỗi KHÔNG PHẢI do lượt gửi này (vd chưa tra
+    được thiệp) — không đẩy số lần thử lên oan.
+    """
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE birthday_emails "
+            f"SET status = ?, last_error = ?, "
+            f"    attempts = COALESCE(attempts, 0) + {1 if count_attempt else 0}, "
+            "    updated_at = datetime('now', 'localtime') "
+            "WHERE birthday_email_id = ?",
+            (status or cv_schema.BIRTHDAY_EMAIL_FAILED, error, row_id))
+
+
+def count_birthday_emails(status: str = "", year=None) -> int:
+    sql = ["SELECT COUNT(*) FROM birthday_emails WHERE 1=1"]
+    params: list = []
+    if status:
+        sql.append("AND status = ?")
+        params.append(status)
+    if year:
+        sql.append("AND due_date LIKE ?")
+        params.append(f"{int(year)}-%")
+    with get_connection() as conn:
+        return conn.execute(" ".join(sql), params).fetchone()[0]
