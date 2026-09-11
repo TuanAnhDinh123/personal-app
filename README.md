@@ -560,7 +560,9 @@ như mỗi cột trong file có một cột tương ứng trong DB; chú thích
   dữ liệu trong DB đã là kết quả cuối). Chỉ dán **công thức** ở ô mà giá trị
   phụ thuộc ngày hôm nay (4 cột *Figures*) hoặc app không có dữ liệu (*Count*,
   *Birthday*); công thức viết bằng tham chiếu có cấu trúc `[@[Tên cột]]` nên dán
-  dòng nào cũng đúng.
+  dòng nào cũng đúng. Ô *Emergency Contact Name* dán **tên ⏎ số ĐT gộp lại** —
+  file chỉ có một ô cho cả hai, app tách ra hai cột lúc import nên copy phải nối
+  ngược lại (`_emergency_contact_cell`).
 - Các cột **file Excel tự tính** (Age, Age range, Year of service, Length of
   service) **không lưu trong DB** — app tính lại mỗi lần truy vấn bằng đúng
   công thức của file (`cv_repository.EMPLOYEE_COMPUTED_SQL`) nên không bao giờ

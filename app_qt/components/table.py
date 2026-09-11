@@ -104,6 +104,17 @@ def _tsv_cell(value):
     return s
 
 
+def _copy_cell(row, key):
+    """Một ô của dòng copy — xem DataTable._copy_rows để biết các dạng `key`."""
+    if key is None:
+        return ""
+    if callable(key):
+        return _tsv_cell(key(row))
+    if key.startswith("="):
+        return key
+    return _tsv_cell(_cell(row, key))
+
+
 def _row_count(rows):
     """Phạm vi thao tác dạng chữ để ghép vào nhãn menu — luôn ghi cả số 1
     ("1 row") để người dùng thấy rõ thao tác chỉ chạy trên một dòng."""
@@ -536,9 +547,11 @@ class DataTable(QTableView):
         """Đưa `rows` lên clipboard dạng TSV — dán vào Excel là trải đúng ô.
 
         Giá trị lấy THẲNG TỪ DỮ LIỆU DÒNG (kết quả truy vấn), không qua
-        formatter hiển thị của bảng. Ba dạng phần tử trong `copy_keys`:
+        formatter hiển thị của bảng. Bốn dạng phần tử trong `copy_keys`:
           • khóa cột → giá trị của ô đó;
           • `None` → ô trống, chừa chỗ cho cột bên file Excel đích;
+          • hàm `f(row) -> str` → ô GHÉP từ nhiều cột, cho ô mà file Excel đích
+            gộp mấy field app lưu riêng;
           • chuỗi mở đầu bằng "=" → CÔNG THỨC EXCEL, dán nguyên văn. Không khóa
             cột nào mở đầu bằng "=" nên không nhập nhằng. Công thức KHÔNG bọc
             nháy kép như ô text (ô mở đầu bằng nháy kép dễ bị Excel hiểu thành
@@ -546,11 +559,8 @@ class DataTable(QTableView):
             dòng nên để trần vẫn đúng khuôn TSV.
         """
         keys = self._copy_columns()
-        text = "\n".join(
-            "\t".join(key if key and key.startswith("=")
-                      else _tsv_cell(_cell(row, key) if key else "")
-                      for key in keys)
-            for row in rows)
+        text = "\n".join("\t".join(_copy_cell(row, key) for key in keys)
+                         for row in rows)
         QApplication.clipboard().setText(text)
         QToolTip.showText(QCursor.pos(),
                           f"Copied {len(rows)} row{'s' if len(rows) > 1 else ''}",

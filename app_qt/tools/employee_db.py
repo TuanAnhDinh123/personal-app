@@ -446,6 +446,7 @@ _EMP_COLUMNS = [(key, title, _W.get(key, EMP_COL_WIDTH_DEFAULT), align)
 #      employee_type_code · collar) → dán GIÁ TRỊ;
 #    • `None` → ô trống giữ chỗ cho cột file có mà DB không lưu, nhờ đó các cột
 #      phía sau vẫn dán đúng vị trí;
+#    • hàm `f(row) -> str` → ô GHÉP từ nhiều cột (ô "Emergency Contact Name");
 #    • chuỗi mở đầu bằng "=" → dán CÔNG THỨC của chính file Excel.
 #
 #  DÁN CÔNG THỨC HAY DÁN TEXT? Mặc định dán TEXT — kể cả ô mà file vốn để công
@@ -470,10 +471,33 @@ _EMP_COLUMNS = [(key, title, _W.get(key, EMP_COL_WIDTH_DEFAULT), align)
 #  birthday (year)" — công thức của nó trùng hệt cột Age nên đã bỏ ở cả hai bên.
 #
 #  Cột file Excel KHÔNG có nên KHÔNG copy: cost_center_group · work_status ·
-#  nationality · emergency_contact_phone (file gộp chung ô "Emergency Contact
-#  Name", chỉ tách ra khi import) · marriage_status · children_count ·
-#  children_names · is_interviewer · employee_id.
+#  nationality · marriage_status · children_count · children_names ·
+#  is_interviewer · employee_id.
 # ─────────────────────────────────────────────────────────────────────────
+
+
+def _emergency_contact_cell(row) -> str:
+    """Ô "Emergency Contact Name" của file Excel — GỘP tên + SĐT làm một ô.
+
+    File chỉ có một ô cho cả hai (app tách sang hai cột khi import, xem
+    `repo.split_contact_name_phone`), nên copy phải nối ngược lại theo đúng kiểu
+    phổ biến trong file: "tên ⏎ số ĐT". Thiếu vế nào thì dán vế còn lại, không
+    để lại dấu xuống dòng thừa.
+    """
+    name = str(_row_value(row, "emergency_contact_name")).strip()
+    phone = str(_row_value(row, "emergency_contact_phone")).strip()
+    return "\n".join(p for p in (name, phone) if p)
+
+
+def _row_value(row, key):
+    """Đọc row[key] an toàn cho cả sqlite3.Row lẫn dict; thiếu/NULL → ""."""
+    try:
+        val = row[key]
+    except (KeyError, IndexError):
+        return ""
+    return "" if val is None else val
+
+
 _EMP_COPY_COLUMNS = [
     None,                       # Legal Entity (Company) — cố định 1 pháp nhân
     "=ROW()-6",                 # Count — số thứ tự (dòng dữ liệu đầu là dòng 7)
@@ -530,7 +554,7 @@ _EMP_COPY_COLUMNS = [
     "insurance_book_no",        # Insurance Book No.
     "passport_no",              # Passport No.
     "passport_issued_date",     # Issued date2
-    "emergency_contact_name",   # Emergency Contact Name
+    _emergency_contact_cell,    # Emergency Contact Name (tên ⏎ SĐT)
     "emergency_contact_relationship",   # Relationship
     "permanent_address",        # Địa chỉ thường trú
     "temporary_address",        # Địa chỉ tạm trú
