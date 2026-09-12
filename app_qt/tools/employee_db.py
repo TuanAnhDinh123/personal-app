@@ -11,10 +11,11 @@ import unicodedata
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMenu, QVBoxLayout,
+    QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu,
+    QVBoxLayout, QWidget,
 )
 
-from app.core import application_form, config, settings
+from app.core import application_form, config, employee_sync, settings
 from app.core import cv_repository as repo
 from app.core import cv_schema
 from app_qt import dialogs, theme, widgets
@@ -743,6 +744,83 @@ def _canon_choice(value, choices):
     return v
 
 
+# ───────────────────── ĐỒNG BỘ VỚI FILE EXCEL CỦA HR ────────────────────────
+# Nút "Sync with Excel" đọc lại chính file "Personnel Data" (đường dẫn đặt ở
+# ⚙️ Settings) rồi đối chiếu từng mã NV với DB. Logic so sánh/ghi nằm ở
+# app/core/employee_sync.py; ở đây chỉ khai BỐ CỤC FILE — cột nào so với cột
+# nào — vì đó là thứ gắn với `_EXCEL_HEADER_MAP` ngay phía trên.
+
+# Bốn cột danh mục lưu ID trong DB → khi so sánh phải đọc TEXT ở cột nối bảng
+# tương ứng của dòng truy vấn (xem cv_repository._EMPLOYEE_SELECT).
+_SYNC_ROW_KEYS = {
+    _DEPT_TEXT: "department_short_name",
+    _CC_TEXT: "cost_center_code",
+    _ETYPE_TEXT: "employee_type_code",
+    _LEVEL_TEXT: "level_name",
+}
+
+# Nhãn cho cột KHÔNG có mặt trên bảng nhân viên (bảng hiện tên bộ phận đầy đủ,
+# còn file Excel lưu mã viết tắt) — các cột khác lấy nhãn từ _EMP_COLUMN_SPECS.
+_SYNC_EXTRA_LABELS = {"department_short_name": "Department (short)"}
+
+# Cột KHÔNG đồng bộ: `code` là khóa khớp hai bên nên không bao giờ lệch.
+_SYNC_SKIP_FIELDS = {"code"}
+
+# Số dòng "vắng mặt trong file" mà quá thì hỏi lại trước khi mở modal nghỉ việc.
+_MAX_RESIGNATION_ROWS = 150
+
+
+def _sync_field_specs():
+    """[(khóa trong bản ghi Excel, khóa trong dòng DB, nhãn)] — mọi cột đồng bộ
+    được. Suy thẳng từ `_EXCEL_HEADER_MAP` nên thêm một cột vào map là lượt đồng
+    bộ tự so thêm cột đó, không phải khai ở hai nơi.
+    """
+    labels = {key: title for key, title, _align in _EMP_COLUMN_SPECS}
+    labels.update(_SYNC_EXTRA_LABELS)
+    specs, seen = [], set()
+    for value in _EXCEL_HEADER_MAP.values():
+        for rec_key in (value if isinstance(value, tuple) else (value,)):
+            if rec_key in seen or rec_key in _SYNC_SKIP_FIELDS:
+                continue
+            seen.add(rec_key)
+            row_key = _SYNC_ROW_KEYS.get(rec_key, rec_key)
+            specs.append((rec_key, row_key, labels.get(row_key, row_key)))
+    return specs
+
+
+def _sync_resolver():
+    """Hàm đổi (khóa trong bản ghi Excel, text) → (field DB, giá trị ghi xuống).
+
+    Bốn cột danh mục lưu id nên phải tra bảng master; text không khớp danh mục
+    nào trả (None, None) → ô đó bị loại khỏi lượt đồng bộ. Khác Bulk Import
+    (một ô sai là chặn cả file): ở đây mỗi ô là một thay đổi độc lập trên người
+    đã có sẵn, bỏ riêng ô sai vẫn ghi đúng được các ô còn lại.
+
+    Ô TRỐNG là lệnh xóa hợp lệ (file có cột đó nhưng để trắng) → cột danh mục
+    ghi NULL, tức bỏ liên kết, chứ không phải "không tra được".
+    """
+    tables = {sentinel: {_norm(r[match_col]): r[id_col]
+                         for r in loader() if r[match_col]}
+              for sentinel, _field, loader, match_col, id_col, _label in _MASTER_LOOKUPS}
+    fields = {sentinel: field for sentinel, field, *_rest in _MASTER_LOOKUPS}
+
+    def resolve(field, value):
+        if field not in tables:
+            return field, value
+        if not _norm(value):
+            return fields[field], None
+        row_id = tables[field].get(_norm(value))
+        return (fields[field], row_id) if row_id is not None else (None, None)
+
+    return resolve
+
+
+def _sample(values, limit=6):
+    """Vài giá trị đầu để ghép vào dòng cảnh báo — dài quá thì cắt, thêm "…"."""
+    shown = ", ".join(str(v) for v in values[:limit])
+    return shown + (" …" if len(values) > limit else "")
+
+
 class _DuplicateCodesDialog(ModalDialog):
     """Modal cảnh báo mã NV bị trùng khi import Excel (đã có sẵn trong DB).
 
@@ -849,6 +927,163 @@ class _InvalidValuesDialog(ModalDialog):
         self.exec()
 
 
+class _SyncChangesDialog(ModalDialog):
+    """Modal duyệt các ô LỆCH giữa file Excel và app trước khi ghi xuống DB.
+
+    Mỗi dòng là MỘT Ô của một nhân viên (không phải cả người): cùng một người có
+    thể đúng ở cột này mà sai ở cột kia, gộp cả người thành một dòng thì muốn
+    giữ lại một ô là phải bỏ luôn những ô khác. Mọi dòng tick sẵn — thường thì
+    file Excel là bản mới nhất — bỏ tick dòng nào thì ô đó giữ nguyên giá trị
+    đang có trong app.
+    """
+
+    def __init__(self, parent, changes, notes=()):
+        super().__init__(parent, "lg")
+        self._accepted = False
+        card, lay = self.build_shell(f"Sync from Excel · {len(changes)} changes")
+
+        desc = QLabel("The Excel file and the app disagree on these cells. "
+                      "Ticked rows overwrite the app value with the Excel value.")
+        desc.setObjectName("DialogMsg")
+        desc.setWordWrap(True)
+        lay.addWidget(desc)
+
+        self.table = DataTable([
+            ("code", "Emp code", 90),
+            ("full_name", "Employee", 170),
+            ("label", "Field", 150),
+            ("old_text", "In the app", 190),
+            ("new_text", "In Excel", 190),
+        ], pk="_id", checkable=True, stretch_key="new_text")
+        self.table.set_rows(changes)
+        self.table.set_all_checked(True)
+        self.table.setMinimumHeight(min(320, self.modal_h))
+        lay.addWidget(self.table, 1)
+        self.set_grow_region(self.table)
+
+        widgets.hint(card, "Click the header checkbox to tick/untick everything. "
+                           "Columns the file doesn't have are never touched.")
+        cleared = sum(1 for c in changes if c.get("clears"))
+        if cleared:
+            widgets.hint(
+                card, f'⚠ {cleared} of these rows CLEAR a value: the column is in '
+                      f'the file but the cell is empty, shown as '
+                      f'"{employee_sync.EMPTY_TEXT}". Untick them if the app value '
+                      "should stay.")
+        for note in notes:
+            widgets.hint(card, note)
+
+        foot = QHBoxLayout()
+        foot.addWidget(widgets.button(card, "Apply ticked changes", variant="success",
+                                      icon="check", command=self._ok))
+        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
+                                      command=self.reject))
+        foot.addStretch(1)
+        lay.addLayout(foot)
+
+    def _ok(self):
+        self._accepted = True
+        self.accept()
+
+    def run(self):
+        """Các dòng được tick, hoặc [] nếu người dùng hủy."""
+        self.exec()
+        return self.table.checked_rows() if self._accepted else []
+
+
+class _ResignationsDialog(ModalDialog):
+    """Modal cho nhân viên ĐANG LÀM VIỆC trong app mà file Excel không còn dòng
+    nào mang mã của họ — nhiều khả năng đã nghỉ việc.
+
+    Không có ô tick: ĐIỀN NGÀY chính là cách chọn. Để trống ngày = chưa kết
+    luận gì, người đó vẫn "đang làm việc" như cũ (app không tự suy diễn: vắng
+    mặt trong file còn có thể vì HR chưa cập nhật, hay người đó mới vào).
+    """
+
+    def __init__(self, parent, rows, no_code=0):
+        super().__init__(parent, "lg")
+        self._accepted = False
+        self._inputs = []   # [(employee_id, DateEdit, QLineEdit)]
+        card, lay = self.build_shell(
+            f"Employees missing from the Excel file · {len(rows)}")
+
+        desc = QLabel(
+            "These employees are still Working in the app, but the Excel file "
+            "has no row with their employee code. Fill in a termination date to "
+            "mark someone as resigned — leave it empty to keep them unchanged.")
+        desc.setObjectName("DialogMsg")
+        desc.setWordWrap(True)
+        lay.addWidget(desc)
+
+        body = QWidget()
+        col = QVBoxLayout(body)
+        col.setContentsMargins(0, 0, 8, 0)
+        col.setSpacing(8)
+        for row in rows:
+            col.addWidget(self._row_card(body, row))
+        col.addStretch(1)
+        area = widgets.scroll_area(body)
+        lay.addWidget(area, 1)
+        self.set_grow_region(area)
+
+        if no_code:
+            widgets.hint(card, f"⚠ {no_code} working employee(s) have no employee "
+                               "code yet and could not be matched against the "
+                               "file — they are not listed here.")
+
+        foot = QHBoxLayout()
+        foot.addWidget(widgets.button(card, "Save resignations", variant="success",
+                                      icon="save", command=self._ok))
+        foot.addWidget(widgets.button(card, "Cancel", variant="neutral", icon="x",
+                                      command=self.reject))
+        foot.addStretch(1)
+        lay.addLayout(foot)
+
+    def _row_card(self, parent, row):
+        box = QFrame(parent)
+        box.setObjectName("DetailCard")
+        h = QHBoxLayout(box)
+        h.setContentsMargins(14, 10, 14, 10)
+        h.setSpacing(8)
+
+        col = QVBoxLayout()
+        col.setSpacing(2)
+        name = QLabel(f"{_row_value(row, 'full_name') or '—'}  "
+                      f"({_row_value(row, 'code') or 'no code'})", box)
+        name.setObjectName("DetailNamePlain")
+        col.addWidget(name)
+        meta = QLabel(" · ".join(
+            str(p) for p in (_row_value(row, "department_name"),
+                             _row_value(row, "job_title")) if p) or "—", box)
+        meta.setObjectName("DetailMeta")
+        col.addWidget(meta)
+        h.addLayout(col, 1)
+
+        date = widgets.DateEdit(box)
+        date.setFixedWidth(140)
+        h.addWidget(date)
+        reason = QLineEdit(box)
+        reason.setPlaceholderText("Reason for leaving")
+        reason.setFixedWidth(240)
+        h.addWidget(reason)
+
+        self._inputs.append((row["employee_id"], date, reason))
+        return box
+
+    def entries(self):
+        """[(employee_id, ngày 'yyyy-mm-dd', lý do)] của các dòng ĐÃ điền ngày."""
+        return [(eid, date.get(), reason.text().strip())
+                for eid, date, reason in self._inputs if date.get()]
+
+    def _ok(self):
+        self._accepted = True
+        self.accept()
+
+    def run(self):
+        self.exec()
+        return self._accepted
+
+
 class EmployeeDbTool(BaseTool):
     name = "Employees"
     description = "Search, manage work status, export reports."
@@ -942,15 +1177,18 @@ class EmployeeDbTool(BaseTool):
         lay.addLayout(filters)
 
     def _build_toolbar(self, lay):
-        """Thanh nút: chỉ để LỘ việc làm hằng ngày (nhập đơn dự tuyển); ba việc
-        thi thoảng mới dùng (Add · Bulk Import · Reload) gom vào nút ⋮ bên phải
-        cho thanh nút đỡ rối. Ghi danh khóa học vào bằng CHUỘT PHẢI trên bảng
-        (xem menu_actions của DataTable) vì nó luôn thao tác trên dòng."""
+        """Thanh nút: chỉ để LỘ việc làm thường xuyên — nhập đơn dự tuyển và
+        đồng bộ với file Excel của HR; ba việc thi thoảng mới dùng (Add · Bulk
+        Import · Reload) gom vào nút ⋮ bên phải cho thanh nút đỡ rối. Ghi danh
+        khóa học vào bằng CHUỘT PHẢI trên bảng (xem menu_actions của DataTable)
+        vì nó luôn thao tác trên dòng."""
         bar = QHBoxLayout()
         bar.setSpacing(6)
         B = widgets.button
         bar.addWidget(B(None, "Import application form", variant="primary",
                         icon="file-text", command=self._import_forms))
+        bar.addWidget(B(None, "Sync with Excel", variant="info", icon="refresh",
+                        command=self._sync_excel))
         bar.addStretch(1)
 
         # GLOBAL SCOPE (xem cv_repository._status_scope_sql): mặc định chỉ hiện
@@ -1134,7 +1372,7 @@ class EmployeeDbTool(BaseTool):
         if not path:
             return
         try:
-            rows, unknown = self._read_excel(path)
+            rows, unknown, _present = self._read_excel(path)
         except Exception as exc:
             dialogs.error(self._root, "Read error", f"Couldn't read Excel:\n{exc}")
             return
@@ -1255,7 +1493,14 @@ class EmployeeDbTool(BaseTool):
 
     @staticmethod
     def _read_excel(path):
-        """Đọc file Excel → (list rec, list tiêu đề cột không nhận diện được).
+        """Đọc file Excel → (list rec, tiêu đề cột không nhận diện được, các
+        field FILE CÓ CỘT).
+
+        Thành phần thứ ba là tập field mà **dòng header có cột tương ứng**, kể
+        cả khi mọi ô của cột đó đều trống. Lượt đồng bộ cần đúng thông tin này
+        để phân biệt "file không quản cột này" với "ô này đã bị xóa trong file"
+        — hai thứ mà bản thân từng rec không phân biệt được (ô trống không được
+        ghi vào rec).
 
         KHỚP THEO TÊN CỘT (không theo thứ tự cột): mỗi ô header được chuẩn hóa
         rồi tra `_EXCEL_HEADER_MAP`. Mỗi rec là dict {field DB → giá trị}, riêng
@@ -1277,7 +1522,7 @@ class EmployeeDbTool(BaseTool):
             ws.iter_rows(min_row=header_row, max_row=header_row, values_only=True), None)
         if not header:
             wb.close()
-            return [], []
+            return [], [], set()
 
         col_key = {}       # chỉ số cột → field DB
         unknown = []       # tiêu đề không map được (để báo lại)
@@ -1295,6 +1540,12 @@ class EmployeeDbTool(BaseTool):
                 col_key[idx] = key
             elif norm_title not in _EXCEL_IGNORED_HEADERS:
                 unknown.append(str(title).strip())
+
+        present = set(col_key.values())
+        # Ô "Emergency Contact Name" của file gộp cả tên lẫn SĐT (tách ra hai
+        # cột bên dưới) → có cột đó nghĩa là file quản cả hai field.
+        if "emergency_contact_name" in present:
+            present.add("emergency_contact_phone")
 
         # {field: {giá trị chuẩn hóa → cách viết chuẩn}} — nạp MỘT LẦN cho cả
         # file (mỗi danh mục là một câu truy vấn, không lặp theo từng dòng).
@@ -1349,7 +1600,166 @@ class EmployeeDbTool(BaseTool):
             if any(rec.get(k) for k in ("full_name", "code", "global_code", "email")):
                 rows.append(rec)
         wb.close()
-        return rows, unknown
+        return rows, unknown, present
+
+    # ------------------------------------------ đồng bộ với file Excel của HR
+    # File "Personnel Data" là NGUỒN SỰ THẬT của HR, nhưng app còn nhận dữ liệu
+    # từ đơn dự tuyển nên hai bên trôi khỏi nhau. Nút này đối chiếu lại theo mã
+    # NV rồi hỏi người dùng ở hai bước: (1) các ô lệch → ghi đè bằng giá trị
+    # trong file, (2) người đang làm việc mà file không còn nhắc tới → điền ngày
+    # nghỉ việc. KHÔNG có gì được ghi xuống DB trước khi qua hai modal đó.
+    def _sync_excel(self):
+        if not _OPENPYXL_OK:
+            dialogs.error(self._root, "Missing library",
+                          "openpyxl is required to read Excel:\n  pip install openpyxl")
+            return
+        path = settings.get("hc_excel_path").strip()
+        if not path:
+            dialogs.error(self._root, "No Excel file configured",
+                          "Pick the Personnel Data Excel file in ⚙️ Settings "
+                          "(bottom of the sidebar) → Employee data first.")
+            return
+        if not os.path.exists(path):
+            dialogs.error(self._root, "File not found",
+                          "The Excel file set in Settings is not there any more:\n"
+                          f"{path}")
+            return
+
+        # Đọc file (vài MB) + dựng danh sách lệch chạy ở LUỒNG NỀN: làm thẳng ở
+        # luồng giao diện thì app đứng hình vài giây, nhìn như treo.
+        def job(ctx):
+            ctx.status(f"Reading {os.path.basename(path)}…")
+            excel_rows, unknown, present = self._read_excel(path)
+            ctx.log(f"Read {len(excel_rows)} data row(s) · {len(present)} known "
+                    "column(s) in the file.")
+            if ctx.cancelled:
+                return None
+            ctx.status("Comparing with the database…")
+            db_rows = repo.list_all_employees()
+            plan = employee_sync.build_changes(
+                excel_rows, db_rows, _sync_field_specs(), present_fields=present)
+            # Ô của cột danh mục mà text không tra ra id thì không ghi được —
+            # tách ra để báo lại thay vì cho người dùng tick một thứ vô hiệu.
+            resolve = _sync_resolver()
+            changes, unresolved = [], []
+            for change in plan["changes"]:
+                field, _value = resolve(change["field"], change["new"])
+                (unresolved if field is None else changes).append(change)
+            missing, no_code = employee_sync.missing_from_excel(db_rows, excel_rows)
+            plan.update(changes=changes, unresolved=unresolved, missing=missing,
+                        no_code=no_code, rows=len(excel_rows), unknown=unknown,
+                        clears=sum(1 for c in changes if c["clears"]))
+            ctx.log(f"{len(changes)} difference(s), {plan['clears']} of them "
+                    f"clearing a value · {len(missing)} employee(s) missing "
+                    "from the file.")
+            return plan
+
+        def on_finish(dlg, plan):
+            if plan is None:
+                dlg.set_final_status("Cancelled — nothing was changed.")
+                return
+            dlg.close()
+            self._show_sync_result(plan)
+
+        ProgressDialog(self._root, "Syncing with the Excel file…", busy=True,
+                       subtitle=os.path.basename(path)).start(job, on_finish)
+
+    def _show_sync_result(self, plan):
+        """Hai modal duyệt nối tiếp nhau, rồi báo lại đã ghi những gì.
+
+        Hủy modal thứ nhất KHÔNG bỏ luôn modal thứ hai: "không ghi đè mấy ô này"
+        và "ai đã nghỉ việc" là hai quyết định rời nhau.
+        """
+        if not plan["rows"]:
+            dialogs.error(self._root, "Empty file",
+                          "No data rows were found in the Excel file.")
+            return
+        if not plan["matched"] and not plan["new_codes"]:
+            dialogs.error(
+                self._root, "No employee codes found",
+                "Not a single row in the file has an employee code, so nothing "
+                "can be matched. Check that this is the Personnel Data file and "
+                'that its "EC" column is still there.')
+            return
+
+        # Các dòng cảnh báo đi kèm modal duyệt; modal đó không hiện (không ô nào
+        # lệch) thì dồn xuống hộp tổng kết — nếu không, những gì lượt đồng bộ bỏ
+        # qua sẽ chẳng bao giờ được nói ra.
+        notes = self._sync_notes(plan)
+        updated = resigned = 0
+        if plan["changes"]:
+            picked = _SyncChangesDialog(self._root, plan["changes"], notes).run()
+            notes = []
+            if picked:
+                updated = employee_sync.apply_changes(picked, resolve=_sync_resolver())
+        elif not plan["missing"]:
+            dialogs.success(self._root, "Already in sync", "\n\n".join(
+                ["Every employee in the file matches the app — nothing to update.",
+                 *notes]))
+            return
+
+        if plan["missing"] and self._confirm_resignation_list(plan["missing"]):
+            dlg = _ResignationsDialog(self._root, plan["missing"], plan["no_code"])
+            if dlg.run():
+                resigned = employee_sync.apply_resignations(dlg.entries())
+
+        self._reload()
+        lines = []
+        if updated:
+            lines.append(f"Updated {updated} employee(s) from the Excel file.")
+        if resigned:
+            lines.append(f"Marked {resigned} employee(s) as resigned.")
+        if not lines:
+            lines.append("Nothing was written — you didn't confirm any change.")
+        dialogs.success(self._root, "Sync finished", "\n\n".join(lines + notes))
+
+    def _confirm_resignation_list(self, missing):
+        """Hỏi lại khi danh sách "vắng mặt trong file" dài bất thường.
+
+        Cả công ty biến mất khỏi file gần như luôn là chọn nhầm file (hoặc file
+        chỉ chứa một bộ phận) chứ không phải cả công ty nghỉ việc. Danh sách dài
+        cũng mất vài giây mới dựng xong (mỗi dòng một ô chọn ngày) nên hỏi
+        trước vẫn hơn là để người dùng ngồi nhìn app đứng im.
+        """
+        if len(missing) <= _MAX_RESIGNATION_ROWS:
+            return True
+        return dialogs.confirm(
+            self._root, "Unusually many employees missing",
+            f"{len(missing)} working employees have no row in this Excel file. "
+            "That usually means the file covers only part of the company, or "
+            "another file was picked by mistake.\n\nOpen the list anyway? It "
+            "takes a few seconds to build.", ok_label="Open the list")
+
+    @staticmethod
+    def _sync_notes(plan):
+        """Các dòng cảnh báo kèm theo modal duyệt: những gì lượt đồng bộ KHÔNG
+        tự xử lý được, để người dùng biết mà làm tiếp bằng tay."""
+        notes = []
+        if plan["new_codes"]:
+            notes.append(
+                f"⚠ {len(plan['new_codes'])} employee code(s) in the file are not "
+                f"in the app yet ({_sample(plan['new_codes'])}). Sync only updates "
+                "people it already knows — add them with Bulk Import (⋮ menu), "
+                "which skips codes that already exist.")
+        if plan["unresolved"]:
+            samples = _sample([f"{c['label']} \"{c['new']}\""
+                               for c in plan["unresolved"]], limit=4)
+            notes.append(
+                f"⚠ {len(plan['unresolved'])} cell(s) were left out because their "
+                f"value is not in master data ({samples}). Add the value in "
+                "Master Data, or fix the spelling in Excel, then sync again.")
+        if plan["duplicate_codes"]:
+            notes.append(
+                f"⚠ The file has {len(plan['duplicate_codes'])} repeated employee "
+                f"code(s) ({_sample(plan['duplicate_codes'])}); only the first row "
+                "of each was used.")
+        if plan["rows_no_code"]:
+            notes.append(f"⚠ {plan['rows_no_code']} row(s) in the file have no "
+                         "employee code and were skipped.")
+        if plan["unknown"]:
+            notes.append("⚠ Unrecognized columns (not compared): "
+                         + _sample(plan["unknown"], limit=8))
+        return notes
 
     # ------------------------------------- nhập từ ĐƠN DỰ TUYỂN (AI đọc form)
     # Nhân viên mới tự điền "DLVN Application Form": hoặc gõ thẳng vào file Excel

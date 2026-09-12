@@ -58,6 +58,16 @@ def build():
         inner, "Template Excel file (course roster)", mode="file")
     fields["course_template_path"].set(data["course_template_path"])
 
+    # ---- Nhóm Đồng bộ nhân viên ----
+    inner = _group_card(outer_lay)
+    widgets.section_label(inner, "Employee data")
+    fields["hc_excel_path"] = widgets.file_row(
+        inner, "Personnel Data Excel file (HR headcount file)", mode="file")
+    fields["hc_excel_path"].set(data["hc_excel_path"])
+    widgets.hint(inner, "Used by Sync with Excel on the Employees screen: the app "
+                        "reads the Personnel Data sheet and lists every difference "
+                        "for you to confirm before anything is written.")
+
     # ---- Nhóm Mail chúc mừng sinh nhật ----
     inner = _group_card(outer_lay)
     widgets.section_label(inner, "Birthday email")
@@ -93,6 +103,7 @@ def build():
             api_key=fields["api_key"].get().strip(),
             ai_model=fields["ai_model"].get().strip() or settings.DEFAULTS["ai_model"],
             course_template_path=fields["course_template_path"].get().strip(),
+            hc_excel_path=fields["hc_excel_path"].get().strip(),
             birthday_images_folder=fields["birthday_images_folder"].get().strip(),
             birthday_from_account=fields["birthday_from_account"].get().strip(),
             birthday_subject=(fields["birthday_subject"].get().strip()

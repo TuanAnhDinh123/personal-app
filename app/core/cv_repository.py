@@ -1953,6 +1953,19 @@ def list_employees(resigned_only=False):
         return conn.execute(" ".join(sql)).fetchall()
 
 
+def list_all_employees():
+    """MỌI nhân viên, KHÔNG lọc theo trạng thái làm việc.
+
+    Ngoại lệ DUY NHẤT của GLOBAL SCOPE (xem `_status_scope_sql`), dành cho lượt
+    ĐỒNG BỘ với file Excel: lượt đó khớp theo mã NV nên phải nhìn thấy cả người
+    đã nghỉ, nếu không họ bị coi là "mã lạ" mỗi lần chạy.
+    """
+    sql = list(_EMPLOYEE_SELECT)
+    sql.append("ORDER BY e.full_name")
+    with get_connection() as conn:
+        return conn.execute(" ".join(sql)).fetchall()
+
+
 def search_employees(keyword: str = "", department_id=None, gender: str = "",
                      level_id=None, codes=None, resigned_only=False):
     """Tìm nhân viên: từ khóa quét MỌI cột text; lọc theo bộ phận / giới tính /

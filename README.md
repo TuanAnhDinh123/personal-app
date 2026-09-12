@@ -64,6 +64,7 @@ personal-app/
 └── app/core/                # LOGIC NGHIỆP VỤ (thuần Python, KHÔNG dính UI)
     ├── config.py · settings.py          # cấu hình
     ├── cv_repository.py · cv_schema.py   # SQLite quản lý CV ứng viên
+    ├── employee_sync.py                  # Đối chiếu bảng employees ↔ file Excel HC
     ├── outlook.py                        # Outlook COM (lịch · gửi mail · thư mời họp)
     ├── payroll_split.py                  # Tách bảng lương (Excel COM)
     ├── quarter_bonus.py                  # Thưởng quý (Excel COM)
@@ -570,8 +571,9 @@ như mỗi cột trong file có một cột tương ứng trong DB; chú thích
   thức trùng hệt cột Age). Các cột "Legal Entity (Company)", "Position status", "Business Unit
   (Department)", "BC/WC", "STT", "Birthday"… không lưu vì đã có nguồn khác hoặc
   chỉ là cột phụ trợ trong file (xem chú thích trong schema).
-- **Thanh nút** chỉ để lộ việc làm hằng ngày — *Import application form* (nhập
-  đơn dự tuyển). Ba việc thi thoảng mới dùng — **Add · Bulk Import · Reload** —
+- **Thanh nút** chỉ để lộ việc làm thường xuyên — *Import application form* (nhập
+  đơn dự tuyển) và *Sync with Excel* (đồng bộ với file HC, xem mục riêng bên
+  dưới). Ba việc thi thoảng mới dùng — **Add · Bulk Import · Reload** —
   nằm trong nút **⋮** ở góc phải (`_build_more_button` / `_show_more_menu`).
   *Bulk Import* chính là nhập hàng loạt từ file "Personnel Data" nói ở trên.
   *Enroll to course* (ghi danh khóa học) vào bằng **chuột phải trên bảng**
@@ -583,6 +585,68 @@ như mỗi cột trong file có một cột tương ứng trong DB; chú thích
   + Full name; lựa chọn được ghi nhớ. Sửa nhóm & cột mặc định ở
   `_EMP_COLUMN_SECTIONS` / `_EMP_DEFAULT_COLUMNS` trong
   `app_qt/tools/employee_db.py`.
+
+### Đồng bộ với file Excel của HR 🔄
+
+Nút **Sync with Excel** (màn hình *Employees*) đối chiếu bảng `employees` với
+chính file **"Personnel Data"** mà HR đang giữ, rồi **hỏi lại ở hai bước** — app
+**không ghi gì xuống DB trước khi người dùng bấm xác nhận**. Đường dẫn file đặt
+một lần ở ⚙️ **Settings → Employee data** (khóa `hc_excel_path`); logic so sánh
+& ghi ở [app/core/employee_sync.py](app/core/employee_sync.py), bố cục cột lấy
+thẳng từ `_EXCEL_HEADER_MAP` nên thêm cột vào map là lượt đồng bộ tự so thêm cột
+đó.
+
+Dùng lại **đúng bộ đọc file của *Bulk Import*** (`_read_excel`): tự dò **sheet
+dữ liệu** (ưu tiên sheet có tên chứa "personnel data" — cũng là sheet đầu tiên
+của file HC) và **dòng tiêu đề**, khớp **theo tên cột**. Khóa khớp hai bên là
+**mã nhân viên** (`code`), và lượt đồng bộ nhìn **cả người đã nghỉ**
+(`repo.list_all_employees` — ngoại lệ duy nhất của global scope) để họ không bị
+coi là "mã lạ" mỗi lần chạy.
+
+| Bước | Modal | Việc |
+|---|---|---|
+| 1 | *Sync from Excel · N changes* | Mỗi dòng là **MỘT Ô lệch**: mã NV · tên · tên cột · giá trị trong app · giá trị trong file. **Tick sẵn tất cả** (bấm ô tick ở header để tick/bỏ cả bảng); bỏ tick dòng nào thì ô đó **giữ nguyên** giá trị trong app. Bấm *Apply ticked changes* mới ghi — mỗi nhân viên gom thành một câu `UPDATE`. |
+| 2 | *Employees missing from the Excel file · N* | Người **đang làm việc** trong app mà file không còn dòng nào mang mã của họ. Mỗi người một dòng kèm **ô chọn ngày nghỉ việc** + **ô lý do**; *Save resignations* ghi `termination_date` + `leaving_reason` (có ngày = đã nghỉ việc). |
+
+- **Chia theo Ô, không theo NGƯỜI**, ở modal 1: cùng một người có thể đúng ở cột
+  này mà sai ở cột kia; gộp cả người thành một dòng thì muốn giữ lại một ô là
+  phải bỏ luôn những ô khác.
+- **Ô TRỐNG LÀ MỘT GIÁ TRỊ — nhưng chỉ khi FILE CÓ CỘT ĐÓ.** Bố cục file cố
+  định nên dòng header nói đủ: `_read_excel` trả thêm **tập field mà file có
+  cột** (kể cả cột trống trơn), nhờ đó phân biệt được hai chuyện khác hẳn nhau
+  — *cột file không quản* (giữ nguyên dữ liệu app, vd cột chỉ có trong đơn dự
+  tuyển) và *ô đã bị xóa trong file* (đề nghị xóa luôn bên app). Dòng xóa hiện
+  giá trị `(blank)` ở cột *In Excel*, đếm riêng thành một dòng cảnh báo trong
+  modal, và tick sẵn như mọi dòng khác — bỏ tick nếu muốn giữ giá trị trong
+  app. Cột danh mục bị xóa thì ghi **NULL** (gỡ liên kết), không phải chuỗi
+  rỗng. Ô "Emergency Contact Name" của file gộp tên + SĐT nên có cột đó là file
+  quản **cả hai** field app tách ra.
+- **So sánh KHOAN DUNG** (`employee_sync.same_value`): bỏ qua khác biệt về
+  khoảng trắng, hoa/thường, **cách viết ngày** (`10/09/1993` ≡ `1993-09-10`) và
+  **cách viết số** (`0` ≡ `"0.0"`), Unicode chuẩn hóa NFC trước khi so (tên
+  tiếng Việt trong file có thể ở dạng tổ hợp). Hai bên cùng một dữ liệu mà hiện
+  lên thành "thay đổi" thì danh sách duyệt đầy nhiễu, người dùng sẽ tick bừa.
+- **Điền ngày CHÍNH LÀ cách chọn** ở modal 2 (không có ô tick): để trống = chưa
+  kết luận gì, người đó vẫn "đang làm việc" như cũ — vắng mặt trong file còn có
+  thể vì HR chưa cập nhật hay người đó mới vào. Người **chưa có mã NV** không
+  khớp được theo mã nên không bị liệt vào đây, chỉ báo lại số lượng.
+- **Không tự thêm người mới**: mã có trong file mà app chưa có được **liệt kê
+  lại** kèm lời nhắc dùng *Bulk Import* (nút ⋮) — chỗ đó có sẵn bước kiểm tra
+  danh mục đầy đủ và tự bỏ qua mã đã tồn tại, nên nhập cả file lần nữa chỉ thêm
+  đúng những người còn thiếu.
+- **Ô cột danh mục không tra được** (bộ phận/cost center/loại NV/cấp bậc ghi sai
+  chính tả) thì **bỏ riêng ô đó** và báo lại, không chặn cả lượt như *Bulk
+  Import*: ở đây mỗi ô là một thay đổi độc lập trên người đã có sẵn, bỏ ô sai
+  vẫn ghi đúng được các ô còn lại.
+- **Hủy modal 1 KHÔNG bỏ luôn modal 2**: "không ghi đè mấy ô này" và "ai đã nghỉ
+  việc" là hai quyết định rời nhau. Các cảnh báo (mã mới · ô không tra được · mã
+  trùng · dòng thiếu mã · cột lạ) hiện ở modal 1, modal đó không hiện thì dồn
+  xuống hộp tổng kết.
+- Đọc file (vài MB) + dựng danh sách lệch chạy ở **luồng nền** kèm ProgressDialog
+  — làm thẳng ở luồng giao diện thì app đứng hình vài giây, nhìn như treo.
+- Danh sách "vắng mặt trong file" dài bất thường (>150 người) thì **hỏi lại
+  trước khi mở**: cả công ty biến mất khỏi file gần như luôn là chọn nhầm file,
+  và mỗi dòng một ô chọn ngày nên danh sách dài cũng mất vài giây mới dựng xong.
 
 ### Nhập nhân viên từ ĐƠN DỰ TUYỂN (AI đọc form) 📄
 

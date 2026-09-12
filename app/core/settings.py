@@ -23,6 +23,9 @@ DEFAULTS = {
     "api_key":  "",                 # API key Gemini, dùng chung cho các tính năng AI
     "ai_model": "gemini-3.6-flash",  # model mặc định khi gọi AI
     "course_template_path": "",     # file Excel mẫu để xuất roster khóa học
+    # File Excel "Personnel Data" của HR — nguồn để đồng bộ bảng `employees`
+    # (nút Sync with Excel ở màn hình Employees).
+    "hc_excel_path": "",
     "birthday_images_folder": "",   # thư mục ảnh thiệp sinh nhật (Canva Bulk Create, tên file = mã NV)
     "birthday_from_account": "",    # địa chỉ Outlook dùng để gửi mail chúc mừng sinh nhật (khác tài khoản mặc định)
     # Tiêu đề mail sinh nhật. Phải lưu ở đây (không để trong widget như trước):

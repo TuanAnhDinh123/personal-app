@@ -463,6 +463,12 @@ class DataTable(QTableView):
         """Danh sách dòng (dict/Row) đang được tick."""
         return self._model.checked_rows()
 
+    def set_all_checked(self, value=True):
+        """Tick (hoặc bỏ tick) MỌI dòng — dùng khi bảng nằm trong modal duyệt và
+        muốn tick sẵn tất cả, người dùng chỉ việc bỏ những dòng không muốn."""
+        self._model.set_all_checked(bool(value))
+        self._refresh_header_check()
+
     def _on_cell_clicked(self, index):
         if index.column() == self._check_col:
             self._model.toggle_row(index.row())
