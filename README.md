@@ -64,6 +64,7 @@ personal-app/
 └── app/core/                # LOGIC NGHIỆP VỤ (thuần Python, KHÔNG dính UI)
     ├── config.py · settings.py          # cấu hình
     ├── cv_repository.py · cv_schema.py   # SQLite quản lý CV ứng viên
+    ├── employee_excel.py                 # SSOT bố cục file Excel "Personnel Data"
     ├── employee_sync.py                  # Đối chiếu bảng employees ↔ file Excel HC
     ├── outlook.py                        # Outlook COM (lịch · gửi mail · thư mời họp)
     ├── payroll_split.py                  # Tách bảng lương (Excel COM)
@@ -512,12 +513,33 @@ ngoài ra `employees` (nhân viên) và `courses` ↔ `course_employees` (đào 
 như mỗi cột trong file có một cột tương ứng trong DB; chú thích
 `-- <Tiêu đề Excel>` ghi ngay cạnh từng cột trong `app/core/cv_schema.py`.
 
-- **Import khớp theo TÊN cột, KHÔNG theo thứ tự cột** (`_EXCEL_HEADER_MAP` ở
-  [app_qt/tools/employee_db.py](app_qt/tools/employee_db.py)): tiêu đề được
-  chuẩn hóa (chữ thường · gộp khoảng trắng · bỏ ký hiệu font Wingdings · NFC)
-  nên đổi chỗ cột hay thêm cột lạ đều không làm vỡ import. Cột **trùng tên**
-  ("Issued date", "Changing date") khai báo bằng *tuple* → lần xuất hiện thứ n
-  lấy field thứ n.
+- **BỐ CỤC FILE KHAI ĐÚNG MỘT CHỖ**: danh sách `COLUMNS` trong
+  [app/core/employee_excel.py](app/core/employee_excel.py), xếp **đúng thứ tự
+  cột của file (A → CD)**. Cấu trúc file đổi thì sửa **duy nhất** chỗ đó — thêm
+  một cột vào file = thêm **một dòng** vào đúng vị trí của nó trong list; bốn
+  thứ dưới đây tự đi theo, không phải đếm tay và không còn chỗ nào để lệch nhau:
+
+  | Sinh ra | Dùng ở đâu |
+  |---|---|
+  | `header_map()` | nhận diện tiêu đề khi Bulk Import / Sync |
+  | `ignored_headers()` | tiêu đề cố tình bỏ qua (không báo "cột lạ") |
+  | `copy_layout()` | các ô của *Copy row* (bám VỊ TRÍ cột) |
+  | `table_columns()` | thứ tự + nhãn cột trên bảng nhân viên |
+
+  Mỗi dòng khai được: tiêu đề trong file · field DB · **tên gọi khác** (`aliases`
+  — bản file khác đặt tên khác) · ô *Copy row* · nhãn + canh lề trên bảng. Cột
+  chỉ app mới có (ID · CC group · Status · Interviewer…) khai riêng ở
+  `APP_COLUMNS`, chèn cạnh cột cùng chủ đề bằng mốc `after`.
+- **Import khớp theo TÊN cột, KHÔNG theo thứ tự cột**: tiêu đề được chuẩn hóa
+  (chữ thường · gộp khoảng trắng · bỏ ký hiệu font Wingdings · NFC) nên đổi chỗ
+  cột hay thêm cột lạ đều không làm vỡ import. Cột **trùng tên** ("Issued date"
+  dùng cho cả CMND lẫn hộ chiếu) không phải khai tay nữa: `COLUMNS` có thứ tự
+  nên lần xuất hiện thứ n tự lấy field thứ n.
+- **Bố cục lệch thì app NÓI RA.** *Copy row* là chỗ **duy nhất** bám vị trí cột,
+  mà lệch một cột là mọi ô phía sau dán sai — không báo lỗi, không dấu hiệu gì.
+  Nên mỗi lượt đọc file (Bulk Import · Sync) đều đối chiếu dòng tiêu đề thật với
+  `COLUMNS` (`employee_excel.layout_mismatches`) và cảnh báo kèm **đúng chữ cái
+  cột**: *"column BR: the file has … where the app expects …"*.
 - **Ô "Emergency Contact Name" tự tách làm 2 cột KHI IMPORT**: file gốc gộp cả
   tên lẫn số điện thoại trong một ô, đủ kiểu ngăn cách (`tên ⏎ số`, `tên (số)`,
   `số - tên`) → tách sang `emergency_contact_name` (chỉ họ tên) và
@@ -531,13 +553,10 @@ như mỗi cột trong file có một cột tương ứng trong DB; chú thích
   `work_status` ("Working"/"Resigned") để hiển thị; mặc định chỉ hiện người đang
   làm việc (tick *Only resigned employees* để đảo sang danh sách người đã nghỉ —
   hai danh sách tách riêng, không có chế độ xem gộp).
-- **THỨ TỰ CỘT PHẢI BÁM ĐÚNG FILE EXCEL.** `_EMP_COLUMN_SPECS`
-  (`app_qt/tools/employee_db.py`) xếp theo đúng thứ tự cột của file "Personnel
-  Data"; thêm/đổi cột thì chèn vào **đúng vị trí của cột đó trong file**, không
-  nối vào cuối. Ba nơi bám theo danh sách này: thứ tự cột trên bảng, nhóm cột
-  trong modal **Columns** (`_EMP_COLUMN_SECTIONS` cắt nhóm ngay từ danh sách
-  này nên đọc dọc modal luôn ra đúng thứ tự bảng) và **Copy row**
-  (`_EMP_COPY_COLUMNS` — bố cục cột của file Excel đích).
+- **THỨ TỰ CỘT TRÊN BẢNG BÁM ĐÚNG FILE EXCEL** — không phải quy ước phải nhớ
+  nữa mà là hệ quả: `_EMP_COLUMN_SPECS` sinh thẳng từ `COLUMNS`. Nhóm cột trong
+  modal **Columns** (`_EMP_COLUMN_SECTIONS`) cắt ngay từ danh sách đó nên đọc
+  dọc modal luôn ra đúng thứ tự bảng, và đúng thứ tự file.
 - **4 cột text được tra sang bảng danh mục** (lưu **id**): "Department (short)"
   → `departments` (short_name) · "New Cost center" → `cost_centers` (code) ·
   "IBC/DBC/WC" → `employee_types` (code) · "Job level" → `levels` (level_name).
@@ -563,14 +582,24 @@ như mỗi cột trong file có một cột tương ứng trong DB; chú thích
   *Birthday*); công thức viết bằng tham chiếu có cấu trúc `[@[Tên cột]]` nên dán
   dòng nào cũng đúng. Ô *Emergency Contact Name* dán **tên ⏎ số ĐT gộp lại** —
   file chỉ có một ô cho cả hai, app tách ra hai cột lúc import nên copy phải nối
-  ngược lại (`_emergency_contact_cell`).
+  ngược lại (`employee_excel.emergency_contact_cell`).
 - Các cột **file Excel tự tính** (Age, Age range, Year of service, Length of
   service) **không lưu trong DB** — app tính lại mỗi lần truy vấn bằng đúng
   công thức của file (`cv_repository.EMPLOYEE_COMPUTED_SQL`) nên không bao giờ
   cũ. Cột *Year of birthday (year)* **bỏ khỏi cả app lẫn file Excel** (công
-  thức trùng hệt cột Age). Các cột "Legal Entity (Company)", "Position status", "Business Unit
-  (Department)", "BC/WC", "STT", "Birthday"… không lưu vì đã có nguồn khác hoặc
-  chỉ là cột phụ trợ trong file (xem chú thích trong schema).
+  thức trùng hệt cột Age) — `COLUMNS` vẫn khai nó với `in_layout=False` để bản
+  file CŨ còn cột đó vẫn import được mà không bị báo "cột lạ", nhưng nó không
+  chiếm ô nào của *Copy row*. Các cột "Legal Entity (Company)", "Position
+  status", "Business Unit (Department)", "BC/WC", "STT", "Birthday"… không lưu
+  vì đã có nguồn khác hoặc chỉ là cột phụ trợ trong file (xem chú thích trong
+  schema).
+- **BẢNG NHÂN VIÊN CHỈ ĐỌC — không có form sửa, double-click không mở gì.**
+  Nguồn sự thật là file Excel "Personnel Data" của HR; dữ liệu vào app qua
+  *Bulk Import* · *Sync with Excel* · *Import application form*. Sửa tay một
+  dòng thì lượt đồng bộ sau lại thấy lệch và đòi ghi đè, nên chỗ để sửa là
+  **file Excel** rồi bấm *Sync with Excel*. Khác hẳn màn hình *Candidates* (ở
+  đó double-click vào dòng là mở form sửa) — bảng đó không có nguồn bên ngoài
+  nào để đồng bộ.
 - **Thanh nút** chỉ để lộ việc làm thường xuyên — *Import application form* (nhập
   đơn dự tuyển) và *Sync with Excel* (đồng bộ với file HC, xem mục riêng bên
   dưới). Ba việc thi thoảng mới dùng — **Add · Bulk Import · Reload** —
@@ -592,9 +621,10 @@ Nút **Sync with Excel** (màn hình *Employees*) đối chiếu bảng `employe
 chính file **"Personnel Data"** mà HR đang giữ, rồi **hỏi lại ở hai bước** — app
 **không ghi gì xuống DB trước khi người dùng bấm xác nhận**. Đường dẫn file đặt
 một lần ở ⚙️ **Settings → Employee data** (khóa `hc_excel_path`); logic so sánh
-& ghi ở [app/core/employee_sync.py](app/core/employee_sync.py), bố cục cột lấy
-thẳng từ `_EXCEL_HEADER_MAP` nên thêm cột vào map là lượt đồng bộ tự so thêm cột
-đó.
+& ghi ở [app/core/employee_sync.py](app/core/employee_sync.py), còn cột nào so
+với cột nào thì lấy thẳng từ SSOT
+[app/core/employee_excel.py](app/core/employee_excel.py) — thêm một cột vào đó
+là lượt đồng bộ tự so thêm cột ấy.
 
 Dùng lại **đúng bộ đọc file của *Bulk Import*** (`_read_excel`): tự dò **sheet
 dữ liệu** (ưu tiên sheet có tên chứa "personnel data" — cũng là sheet đầu tiên
