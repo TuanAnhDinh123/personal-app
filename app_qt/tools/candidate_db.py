@@ -1435,8 +1435,8 @@ class CandidateDbTool(BaseTool):
         top.setSpacing(10)
         # Ô free-text cao 36px, ô lọc chiếm băng 54px → canh giữa theo chiều dọc
         # mới thẳng hàng nhau (giống Employees).
-        top.addWidget(self.ent_kw, 1, Qt.AlignVCenter)
-        top.addWidget(self.sel_pos, 0)
+        top.addWidget(self.ent_kw, 3, Qt.AlignVCenter)
+        top.addWidget(self.sel_pos, 2)
         rows.addLayout(top)
 
         # Hàng dưới: các ô lọc còn lại — chọn 1 option là tìm luôn. Nút Reset đẩy
@@ -1451,11 +1451,20 @@ class CandidateDbTool(BaseTool):
         rows.addLayout(filters)
         lay.addLayout(rows)
 
-        # Bề rộng ô lọc CỐ ĐỊNH & bằng nhau như Employees: để layout tự giãn thì
-        # mỗi ô một cỡ theo option dài nhất (Department nuốt chỗ của Batch).
+        # Bề rộng ô lọc HÀNG DƯỚI cố định & bằng nhau như Employees: để layout tự
+        # giãn thì mỗi ô một cỡ theo option dài nhất (Department nuốt chỗ Batch).
+        for w in (self.sel_dept, self.sel_status, self.sel_pool, self.sel_batch):
+            w.setFixedWidth(180)
+
+        # Vị trí tuyển dụng là nhãn DÀI NHẤT trong các bộ lọc ("Test Automation
+        # Framework Supervisor"…) nên ô này giãn theo cửa sổ — 2 phần so với 3
+        # phần của ô tìm kiếm — thay vì bị ghim 180px như hàng dưới. Chặn hai đầu
+        # để màn hẹp vẫn đọc được và màn rộng không phình thành ô khổng lồ.
+        self.sel_pos.setMinimumWidth(240)
+        self.sel_pos.setMaximumWidth(420)
+
         for w in (self.sel_pos, self.sel_dept, self.sel_status, self.sel_pool,
                   self.sel_batch):
-            w.setFixedWidth(180)
             w.changed.connect(self._reload)
 
     def _build_toolbar(self, lay):

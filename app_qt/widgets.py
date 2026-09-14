@@ -33,6 +33,8 @@ class ComboBox(QComboBox):
     lên cha (vùng cuộn/hộp thoại) — trang vẫn cuộn bình thường. Khi popup đang mở,
     sự kiện wheel đi vào view của popup (không qua đây) nên vẫn cuộn danh sách được.
 
+    Danh sách bung ra LUÔN RỘNG VỪA option dài nhất, không bó theo bề ngang ô.
+
     `on_open` (tùy chọn): callable chạy NGAY TRƯỚC khi bung danh sách — dùng để
     nạp lại option từ DB, đảm bảo luôn tươi mới (trang bị cache vẫn cập nhật kịp).
     """
@@ -45,7 +47,27 @@ class ComboBox(QComboBox):
     def showPopup(self):
         if callable(self.on_open):
             self.on_open()
+        self._widen_popup()
         super().showPopup()
+
+    def _widen_popup(self):
+        """Nới danh sách bung ra cho vừa option DÀI NHẤT.
+
+        Style Windows ghim bề ngang popup đúng bằng bề ngang ô combo (style
+        Fusion thì không) → ô lọc bị khoá 180px cho thẳng hàng sẽ cắt cụt những
+        nhãn dài (tên vị trí tuyển dụng) thành "Automation Test Too…", không đọc
+        đủ để mà chọn. Popup là cửa sổ RỜI nên rộng hơn ô được, chỉ chặn trên
+        bằng bề ngang màn hình.
+        """
+        view = self.view()
+        fm = view.fontMetrics()
+        longest = max((fm.horizontalAdvance(self.itemText(i))
+                       for i in range(self.count())), default=0)
+        # Chừa chỗ cho đệm/viền của popup + thanh cuộn dọc khi danh sách dài.
+        pad = 28 + self.style().pixelMetric(QStyle.PM_ScrollBarExtent)
+        screen = self.screen() or QApplication.primaryScreen()
+        cap = screen.availableGeometry().width() - 64 if screen else longest + pad
+        view.setMinimumWidth(min(max(longest + pad, self.width()), cap))
 
 
 def fold(text):
@@ -779,6 +801,8 @@ class FilterSelect(QWidget):
     def _sync(self):
         """Đồng bộ nhãn nổi + trạng thái viền theo việc đã chọn hay chưa."""
         floated = self.combo.currentIndex() >= self._first
+        # Ô hẹp cắt cụt nhãn dài bằng "…" → cho xem đủ qua tooltip khi rê chuột.
+        self.combo.setToolTip(self.combo.currentText() if floated else "")
         self.float_lbl.setVisible(floated)
         self.combo.setProperty("floated", "true" if floated else "false")
         self.combo.style().unpolish(self.combo)
