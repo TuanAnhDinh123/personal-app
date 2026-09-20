@@ -88,7 +88,9 @@ def build():
     widgets.hint(inner, "Each queued email is sent on the employee's own birthday, "
                         "the first time you open Personal Toolbox that day. If the app "
                         "isn't opened that day, it still goes out within this many days "
-                        "— after that it is marked Missed and never sent automatically.")
+                        "— after that it is marked Missed and never sent automatically. "
+                        "Set it to 0 to turn catch-up off: anyone whose birthday has "
+                        "already passed is marked Missed instead.")
 
     # ---- Nút lưu ----
     # Thẻ tự chừa CARD_PAD cho bóng → nút (không phải thẻ) thêm lề trái CARD_PAD

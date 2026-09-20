@@ -177,13 +177,18 @@ class BirthdayEmailTool(BaseTool):
         # hai chỗ thì vừa trùng, vừa ăn chiều cao của bảng hàng chờ — mà bảng đó
         # mới là thứ cần nhìn hằng ngày. Vì vậy cũng không còn section label nào
         # cho phần trên (không có field group để mà đặt tên).
+        # Hạn gửi bù đặt về 0 thì câu "goes out within 0 day(s)" vô nghĩa -> nói
+        # thẳng là tính năng đang tắt.
+        days = birthday_mail.catchup_days()
+        catchup = (f"Miss that day and it still goes out within {days} day(s)."
+                   if days else
+                   "Catch-up is off: miss that day and it is marked Missed "
+                   "instead of being sent.")
         widgets.hint(
             card, "Queued emails live in this app, not in Outlook. Each one is "
                   "sent on the employee's own birthday, the first time you open "
-                  "Personal Toolbox that day — after asking you to confirm. Miss "
-                  f"that day and it still goes out within "
-                  f"{birthday_mail.catchup_days()} day(s). Subject and cards "
-                  "folder: Settings → Birthday email.")
+                  f"Personal Toolbox that day — after asking you to confirm. {catchup} "
+                  "Subject and cards folder: Settings → Birthday email.")
 
         send_bar = QHBoxLayout()
         send_bar.setContentsMargins(0, 8, 0, 0)
