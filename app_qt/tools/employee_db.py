@@ -16,7 +16,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.core import (
-    application_form, config, employee_excel, employee_sync, settings,
+    application_form, config, docx_merge, employee_excel, employee_sync,
+    resignation_decision, settings,
 )
 from app.core import cv_repository as repo
 from app.core import cv_schema
@@ -60,6 +61,20 @@ def _cell_str(value):
     if isinstance(value, (datetime.datetime, datetime.date)):
         return value.strftime("%d/%m/%Y")
     return str(value).strip()
+
+
+def _row_label(rows) -> str:
+    """"1 employee" / "3 employees" — dùng trong câu thông báo."""
+    n = len(rows)
+    return f"{n} employee{'s' if n != 1 else ''}"
+
+
+def _launch_file(parent, path):
+    """Mở file bằng ứng dụng mặc định của hệ điều hành."""
+    try:
+        widgets.open_path(path)
+    except Exception as exc:
+        dialogs.error(parent, "Open error", f"Couldn't open the file:\n{exc}")
 
 
 _PHONE_SPLIT_RE = re.compile(r"[,;/\n]+")
@@ -735,7 +750,9 @@ class EmployeeDbTool(BaseTool):
                                stretch_key="email",
                                checkable=True, copy_keys=_EMP_COPY_COLUMNS,
                                menu_actions=[
-                                   ("Enroll to course", self._enroll_to_course)])
+                                   ("Enroll to course", self._enroll_to_course),
+                                   ("Export resignation decision",
+                                    self._export_resignation)])
         self._build_toolbar(lay)
         lay.addWidget(self.table, 1)
 
@@ -978,6 +995,122 @@ class EmployeeDbTool(BaseTool):
         title = (c["title"] or "").strip() or f"#{c['course_id']}"
         date = (str(c["date"]).strip() if c["date"] else "")
         return f"{title} · {date}" if date else title
+
+    # ------------------------------------------------- quyết định thôi việc
+    def _export_resignation(self, rows):
+        """Xuất quyết định thôi việc (.docx) cho các dòng trong phạm vi.
+
+        NGÀY NGHỈ VIỆC PHẢI CÓ SẴN TRONG DB — không hỏi trong lúc xuất. Ngày đó
+        là thứ cả tờ quyết định dựa vào (ngày hiệu lực, ngày làm việc cuối,
+        tháng đóng BHXH), điền vội một ngày chỉ để có file thì DB và tờ quyết
+        định nói hai chuyện khác nhau. Đường ghi ngày là *Sync with Excel* →
+        *Save resignations*; sau đó tick "Only resigned employees" là thấy họ.
+        """
+        if not rows:
+            return
+        cfg = settings.load()
+        template = (cfg.get("resignation_template_path") or "").strip()
+        out_dir = (cfg.get("resignation_output_folder") or "").strip()
+        if not os.path.isfile(template):
+            dialogs.error(self._root, "No Word template",
+                          "Choose the resignation decision template first: "
+                          "⚙️ Settings → Resignation decision → Word template.")
+            return
+        if not os.path.isdir(out_dir):
+            dialogs.error(self._root, "No output folder",
+                          "Choose where the files should go first: ⚙️ Settings "
+                          "→ Resignation decision → Output folder.")
+            return
+
+        ready, blocked = [], []
+        for row in rows:
+            date = resignation_decision.parse_date(
+                employee_excel.row_value(row, "termination_date"))
+            (ready if date else blocked).append(row)
+        if not ready:
+            dialogs.error(
+                self._root, "No termination date",
+                "A resignation decision needs a termination date, and "
+                f"{_row_label(blocked)} still {'have' if len(blocked) > 1 else 'has'}"
+                " none.\n\nRecord it with Sync with Excel → Save resignations, "
+                "then tick \"Only resigned employees\" to find them again.")
+            return
+
+        year, number = settings.next_decision_number(cfg)
+        overwrite = self._confirm_resignation(ready, blocked, out_dir, year, number)
+        if overwrite is None:
+            return
+
+        try:
+            result = resignation_decision.export(
+                ready, template, out_dir, number, year, overwrite=overwrite)
+        except (docx_merge.MergeError, OSError) as exc:
+            dialogs.error(self._root, "Export failed", str(exc))
+            return
+
+        if result.exported:
+            settings.save_decision_number(year, result.next_number)
+        self._report_resignation(result, out_dir, year)
+
+    def _confirm_resignation(self, ready, blocked, out_dir, year, number):
+        """Hộp xác nhận. Trả về True/False = có ghi đè file trùng tên không;
+        None = người dùng hủy.
+
+        Hỏi ghi đè NGAY Ở ĐÂY, một lần cho cả lượt, thay vì hỏi lại ở từng
+        file: xuất 20 người mà bật lên 20 hộp thoại thì ai cũng bấm bừa.
+        """
+        first = resignation_decision.decision_no(year, number)
+        last = resignation_decision.decision_no(year, number + len(ready) - 1)
+        lines = [f"Export {_row_label(ready)} to:", out_dir, ""]
+        lines.append(f"Decision number: {first}" if len(ready) == 1
+                     else f"Decision numbers: {first} … {last}")
+
+        warned = [f"· {employee_excel.row_value(r, 'full_name')}: "
+                  f"{', '.join(resignation_decision.missing_labels(r))}"
+                  for r in ready if resignation_decision.missing_labels(r)]
+        if warned:
+            lines += ["", "These fields are empty and will be left blank in the "
+                          "document:"] + warned
+        if blocked:
+            lines += ["", f"Skipping {_row_label(blocked)} — no termination date:"]
+            lines += [f"· {employee_excel.row_value(r, 'full_name')}" for r in blocked]
+
+        clashes = [r for r in ready if os.path.exists(
+            os.path.join(out_dir, resignation_decision.output_filename(r)))]
+        if not clashes:
+            return True if dialogs.confirm(self._root, "Export resignation decision",
+                                           "\n".join(lines), ok_label="Export") else None
+        lines += ["", f"{_row_label(clashes)} already {'have' if len(clashes) > 1 else 'has'}"
+                      " a file in that folder:"]
+        lines += [f"· {resignation_decision.output_filename(r)}" for r in clashes]
+        answer = dialogs.choose(
+            self._root, "Files already exist", "\n".join(lines),
+            options=[("Skip those", "neutral", "skip"),
+                     ("Overwrite", "warning", "overwrite")])
+        return {"overwrite": True, "skip": False}.get(answer)
+
+    def _report_resignation(self, result, out_dir, year):
+        """Tổng kết lượt xuất; xuất được đúng 1 file thì mời mở luôn file đó."""
+        if not result.exported:
+            dialogs.info(self._root, "Nothing exported",
+                         "No file was written — every employee in the selection "
+                         "was skipped.")
+            return
+        numbers = [resignation_decision.decision_no(year, e.number)
+                   for e in result.exported]
+        msg = [f"Wrote {len(result.exported)} file(s) to:", out_dir, "",
+               f"Decision number{'s' if len(numbers) > 1 else ''}: "
+               f"{', '.join(numbers)}"]
+        if result.skipped:
+            msg += ["", "Skipped:"] + [f"· {n} — {why}" for n, why in result.skipped]
+        # Trường có trong file mẫu mà app không biết điền: mẫu đã đổi (HR thêm
+        # một trường mới) → nói ra, đừng để người dùng tự phát hiện ô trống.
+        if result.unfilled:
+            msg += ["", "The template has fields this app doesn't fill — they "
+                        "are now blank: " + ", ".join(sorted(result.unfilled))]
+        dialogs.success(self._root, "Resignation decision exported", "\n".join(msg))
+        if len(result.exported) == 1:
+            _launch_file(self._root, result.exported[0].path)
 
     # ----------------------------------------------------- nhập hàng loạt Excel
     def _batch_import(self):

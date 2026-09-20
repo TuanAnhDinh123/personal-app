@@ -68,6 +68,29 @@ def build():
                         "reads the Personnel Data sheet and lists every difference "
                         "for you to confirm before anything is written.")
 
+    # ---- Nhóm Quyết định thôi việc ----
+    inner = _group_card(outer_lay)
+    widgets.section_label(inner, "Resignation decision")
+    fields["resignation_template_path"] = widgets.file_row(
+        inner, "Word template (.docx with mail merge fields)", mode="file")
+    fields["resignation_template_path"].set(data["resignation_template_path"])
+    fields["resignation_output_folder"] = widgets.file_row(
+        inner, "Output folder", mode="folder")
+    fields["resignation_output_folder"].set(data["resignation_output_folder"])
+    # Ô này chỉ nhận SỐ THỨ TỰ; phần năm do app ghép vào (và tự đánh số lại từ 1
+    # khi sang năm mới) nên cho gõ cả "2026-20" thì lần sau năm lại lệch.
+    dec_year, dec_no = settings.next_decision_number(data)
+    fields["resignation_decision_no"] = widgets.digit_entry(
+        inner, "Next decision number")
+    fields["resignation_decision_no"].set(str(dec_no))
+    widgets.hint(inner, f"The next decision will be numbered "
+                        f"{dec_year}-{dec_no:02d}, and the number goes up by one "
+                        f"for every file exported. The year comes from the "
+                        f"system clock: on 1 January the count restarts at 1. "
+                        f"One file per employee, named <employee code>_<full "
+                        f"name>.docx — export it by right-clicking a row on the "
+                        f"Employees screen.")
+
     # ---- Nhóm Mail chúc mừng sinh nhật ----
     inner = _group_card(outer_lay)
     widgets.section_label(inner, "Birthday email")
@@ -106,6 +129,14 @@ def build():
             ai_model=fields["ai_model"].get().strip() or settings.DEFAULTS["ai_model"],
             course_template_path=fields["course_template_path"].get().strip(),
             hc_excel_path=fields["hc_excel_path"].get().strip(),
+            resignation_template_path=fields["resignation_template_path"].get().strip(),
+            resignation_output_folder=fields["resignation_output_folder"].get().strip(),
+            # Ghi kèm NĂM của số vừa nhập: người dùng sửa số ở đây là đang nói
+            # về năm nay, nếu không lần xuất tới lại tưởng số cũ của năm ngoái
+            # và đánh số lại từ 1.
+            resignation_decision_year=dec_year,
+            resignation_decision_no=max(1, _int_or_default(
+                fields["resignation_decision_no"].get(), "resignation_decision_no")),
             birthday_images_folder=fields["birthday_images_folder"].get().strip(),
             birthday_from_account=fields["birthday_from_account"].get().strip(),
             birthday_subject=(fields["birthday_subject"].get().strip()

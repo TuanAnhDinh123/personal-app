@@ -948,6 +948,19 @@ def file_row(parent, label, mode="file"):
     return StringValue(edit)
 
 
+def open_path(path) -> None:
+    """Mở file/thư mục bằng ứng dụng mặc định của hệ điều hành.
+
+    Ném OSError khi mở không được (không có ứng dụng gắn với đuôi file, file đã
+    bị xóa…) — chỗ gọi tự quyết định báo lỗi thế nào.
+    """
+    try:
+        os.startfile(path)              # chỉ có trên Windows
+    except AttributeError:
+        import subprocess
+        subprocess.Popen(["xdg-open", path])
+
+
 def export_target_row(parent, label):
     """Chọn ĐÍCH xuất: nút Thư mục hoặc File Excel. Trả về StringValue."""
     block, v = _field_block(parent, label)

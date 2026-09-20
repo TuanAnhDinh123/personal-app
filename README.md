@@ -66,6 +66,8 @@ personal-app/
     ├── cv_repository.py · cv_schema.py   # SQLite quản lý CV ứng viên
     ├── employee_excel.py                 # SSOT bố cục file Excel "Personnel Data"
     ├── employee_sync.py                  # Đối chiếu bảng employees ↔ file Excel HC
+    ├── docx_merge.py                     # Điền trường MERGEFIELD của file Word (.docx)
+    ├── resignation_decision.py           # Quyết định thôi việc: số QĐ · last date · tháng BHXH
     ├── outlook.py                        # Outlook COM (lịch · gửi mail · thư mời họp)
     ├── payroll_split.py                  # Tách bảng lương (Excel COM)
     ├── quarter_bonus.py                  # Thưởng quý (Excel COM)
@@ -605,8 +607,9 @@ như mỗi cột trong file có một cột tương ứng trong DB; chú thích
   dưới). Ba việc thi thoảng mới dùng — **Add · Bulk Import · Reload** —
   nằm trong nút **⋮** ở góc phải (`_build_more_button` / `_show_more_menu`).
   *Bulk Import* chính là nhập hàng loạt từ file "Personnel Data" nói ở trên.
-  *Enroll to course* (ghi danh khóa học) vào bằng **chuột phải trên bảng**
-  (`menu_actions` của `DataTable`): thao tác luôn gắn với dòng nên phạm vi là
+  Hai việc gắn với DÒNG — *Enroll to course* (ghi danh khóa học) và *Export
+  resignation decision* (xuất quyết định thôi việc, xem mục riêng bên dưới) —
+  vào bằng **chuột phải trên bảng** (`menu_actions` của `DataTable`): phạm vi là
   dòng chuột phải, hoặc cả nhóm tick nếu dòng đó đang được tick.
 - Bảng ~90 cột → giao diện chỉ hiện vài cột mặc định, bật/tắt thêm ở modal
   **Columns** — cột gom theo nhóm (Identity / Personal info / Organization…),
@@ -709,8 +712,84 @@ logic ở [app/core/application_form.py](app/core/application_form.py).
 - Dùng chung **API key + model ở ⚙️ Settings** như các tính năng AI khác; không
   cần cài thêm gói (đã có `openpyxl` + `pymupdf`).
 
+### Xuất QUYẾT ĐỊNH THÔI VIỆC (.docx) 📄
+
+**Chuột phải trên bảng nhân viên → *Export resignation decision*** — dựng tờ
+quyết định thôi việc song ngữ từ file Word mẫu của HR, dữ liệu lấy thẳng từ
+`employees`. Logic ở [app/core/resignation_decision.py](app/core/resignation_decision.py),
+phần điền trường Word ở [app/core/docx_merge.py](app/core/docx_merge.py).
+
+Thay hẳn lối làm cũ: file Excel *Quick update resignation* + Mail Merge của
+Word. Không còn file Excel trung gian, không phải mở Word, **không phải gõ tay
+ô nào** — và cũng không còn chỗ để lệch nhau (file Excel đang dùng có ba dòng
+ghi tháng BHXH khác nhau cho cùng một ngày làm việc cuối).
+
+**File mẫu KHÔNG bị sửa gì** — app đọc ra, điền, ghi sang file mới. Nội dung,
+câu chữ, con dấu, bố cục trang đều do file mẫu quyết định; muốn đổi lời văn thì
+sửa file Word, không phải sửa code.
+
+Đặt ở ⚙️ **Settings → Resignation decision**: đường dẫn **file Word mẫu**, **thư
+mục xuất**, và **số quyết định kế tiếp**.
+
+| Thứ | Cách tính |
+|---|---|
+| **No.Decision** | `<năm>-<số>` (vd `2026-20`). Ô Settings chỉ nhập **số**; năm lấy theo đồng hồ máy và **1/1 đánh số lại từ 1**. Mỗi file xuất ra tăng một số, ghi lại vào Settings ngay sau khi ghi file. |
+| **Last date** | Termination date **− 1 ngày**, rơi vào T7/CN thì **lùi tiếp** tới thứ 6 gần nhất. **Không** xét ngày lễ (app không giữ lịch nghỉ lễ) — trúng dịp lễ thì sửa tay trong file xuất ra. |
+| **Tháng còn đóng BHXH** | Last date từ **ngày 15** trở đi → chính tháng đó; **ngày 14 trở về trước** → **lùi một tháng** (tháng ấy công ty không đóng nữa). |
+| **Anh/Chị · Mr/Ms** | suy từ `gender` (nhận cả `Male`/`Female` lẫn `M`/`F` của file HC). |
+| **Bộ phận** | `departments.department_name_vn` / `department_name` — tờ quyết định in cả hai thứ tiếng. |
+
+- **NGÀY NGHỈ VIỆC PHẢI CÓ SẴN TRONG DB**, app không hỏi trong lúc xuất: ngày đó
+  là thứ cả tờ quyết định dựa vào (ngày hiệu lực · ngày làm việc cuối · tháng
+  BHXH), điền vội một ngày chỉ để có file thì DB và tờ quyết định nói hai chuyện
+  khác nhau. Đường ghi ngày là *Sync with Excel* → *Save resignations*; sau đó
+  tick **Only resigned employees** là thấy họ (bảng mặc định chỉ hiện người đang
+  làm việc). Dòng chưa có ngày thì app báo tên và **bỏ qua**, không chặn cả lượt.
+- **Xuất được nhiều người một lượt** theo đúng luật chung của bảng
+  (`DataTable._target_rows`): mỗi người một file `MSNV_Họ và tên.docx`, số quyết
+  định tăng dần liên tiếp. **Số chỉ tăng khi file đã ghi xong** — ai bị bỏ qua
+  thì người kế tiếp lấy chính số đó, không để thủng số trong sổ quyết định.
+- **Hộp xác nhận nói trước mọi thứ**: xuất bao nhiêu người, vào thư mục nào,
+  dùng dải số nào, ai đang thiếu ô nào (thiếu thì để trắng trong file chứ không
+  chặn), ai bị bỏ qua. Bấm *Cancel* thì **số quyết định không nhúc nhích**.
+- **Trùng tên file thì hỏi MỘT LẦN cho cả lượt** (*Skip those* / *Overwrite*),
+  không hỏi ở từng file — xuất 20 người mà bật 20 hộp thoại thì ai cũng bấm bừa.
+- Xuất đúng **một** file thì app mở luôn file đó cho xem lại.
+
+> **Trường trong file mẫu là FIELD của Word, không phải chữ `<<tên>>`.** Word
+> hiển thị chúng là `«Full_name»` nên nhìn tưởng chữ thường, nhưng trong XML mỗi
+> trường là một chuỗi run `begin → instrText → separate → kết quả → end`; tìm-thay
+> theo chuỗi ký tự không chạm được tới chúng. `docx_merge` thay mỗi trường bằng
+> **một run duy nhất** mượn định dạng của run kết quả cũ (font, cỡ chữ) nên file
+> ra là **văn bản tĩnh** — `Fields.Count = 0`, Word không còn hỏi cập nhật dữ liệu.
+>
+> Hai việc dọn dẹp kèm theo, thiếu cái nào cũng ra file lỗi:
+> - **Gỡ liên kết nguồn dữ liệu** (`w:mailMerge` trong `settings.xml` + quan hệ
+>   `mailMergeSource`): file mẫu trỏ tới file Excel của HR bằng một câu lệnh
+>   OLEDB, giữ lại thì mỗi lần mở Word đều hỏi *"chạy câu lệnh SQL?"* và đòi
+>   đúng đường dẫn cũ.
+> - **Giữ nguyên tiền tố namespace.** OOXML có mấy thuộc tính mà GIÁ TRỊ là
+>   TIỀN TỐ — `mc:Ignorable="w14 wp14"`, `<mc:Choice Requires="wps">` — nên
+>   `ElementTree` đụng vào tiền tố là hỏng, dù XML vẫn hợp lệ. Hai kiểu hỏng:
+>   ET **bỏ** khai báo mà "không ai dùng" (Word khai cả chục namespace ở thẻ gốc
+>   chỉ để liệt kê trong `mc:Ignorable`), và ET **đổi tên** tiền tố nó chưa biết
+>   thành `ns5`/`ns7`. Vì vậy phải quét khai báo trên **CẢ PHẦN XML**, không chỉ
+>   thẻ gốc: Word khai `a` và `a14` (DrawingML) ngay tại phần tử hình vẽ, đọc mỗi
+>   thẻ gốc là hai tiền tố đó bị đổi tên — file mẫu hiện tại sống sót chỉ vì
+>   không có `Requires`/`Ignorable` nào gọi tên chúng, mẫu có logo/hình thì không
+>   chắc thế.
+>
+> Khóa định dạng ngày (`\@ "dd/MM/yyyy"`) nằm trong **chính file mẫu** nên app
+> truyền thẳng `datetime.date`: HR đổi cách hiển thị ngày trong Word là đổi luôn
+> ở file xuất ra. Trường nào có trong mẫu mà app không biết điền thì được **liệt
+> kê lại** ở hộp tổng kết — thêm trường mới vào mẫu là biết ngay, không phải tự
+> dò xem ô nào bị trắng.
+>
+> Chỉ dùng `zipfile` + `xml.etree` (thư viện chuẩn) — **không cần cài thêm gói,
+> không cần có Word trên máy**.
+
 **Bảng danh mục (master data)** — nạp sẵn dữ liệu từ sheet *Code* của file HC:
-`departments` (tên + mã viết tắt), `functions` (nhóm chức năng, gắn vào phòng
+`departments` (tên + mã viết tắt + **tên tiếng Việt**), `functions` (nhóm chức năng, gắn vào phòng
 ban), `employee_types` (WC/WCA/IBC/IBCA/DBC/DBCA + nhóm Blue/White Collar),
 `cost_centers` (mã VN1001… + Group Function VNPlant/Corporate/R&D — dùng để gom
 nhân viên theo nhóm khi tính chi phí vận hành), `levels` (Director, Manager,

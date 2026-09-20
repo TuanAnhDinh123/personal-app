@@ -8,6 +8,7 @@ module này thay vì tự hỏi API key.
 Muốn thêm một thiết lập chung mới: thêm khóa vào `DEFAULTS`, rồi thêm ô nhập
 tương ứng ở `app/ui/settings_page.py`.
 """
+import datetime
 import json
 import urllib.error
 import urllib.request
@@ -34,6 +35,14 @@ DEFAULTS = {
     # Số ngày còn GỬI BÙ khi đúng hôm sinh nhật không ai mở app (nghỉ phép, cuối
     # tuần, máy tắt). Quá hạn thì mail bị đánh "Missed", không tự gửi nữa.
     "birthday_catchup_days": 3,
+    # ── Quyết định thôi việc (app/core/resignation_decision.py) ──
+    "resignation_template_path": "",   # file Word mẫu (chứa các trường MERGEFIELD)
+    "resignation_output_folder": "",   # thư mục nhận các file .docx xuất ra
+    # Số thứ tự cho quyết định TIẾP THEO + năm mà số đó thuộc về. Hai khóa đi
+    # cùng nhau: sang năm mới, `resignation_decision_year` khác năm hiện tại là
+    # dấu hiệu để đánh số lại từ 1 (xem `next_decision_number`).
+    "resignation_decision_no": 1,
+    "resignation_decision_year": 0,
 }
 
 # Section cũ (tool "Quét CV bằng AI" từng lưu API key/model ở đây). Dùng để tự
@@ -76,6 +85,31 @@ def update(**changes):
 def get(key, default=""):
     """Lấy nhanh một thiết lập chung."""
     return load().get(key, default)
+
+
+def next_decision_number(data=None, today=None) -> tuple:
+    """Số quyết định thôi việc dùng cho lần xuất tới → (năm, số thứ tự).
+
+    Sổ quyết định đánh số lại từ 1 mỗi năm, nên số đã lưu chỉ còn giá trị khi
+    nó thuộc về NĂM NAY; năm đã sang thì trả về (năm nay, 1). Việc đánh số lại
+    chỉ được GHI XUỐNG khi thực sự xuất file (`save_decision_number`) — mở màn
+    hình Cài đặt xem rồi thoát ra thì không đụng gì tới cấu hình.
+    """
+    data = load() if data is None else data
+    year = (today or datetime.date.today()).year
+    try:
+        saved_year = int(data.get("resignation_decision_year") or 0)
+        number = int(data.get("resignation_decision_no") or 1)
+    except (TypeError, ValueError):
+        saved_year, number = 0, 1
+    if saved_year != year:
+        return year, 1
+    return year, max(1, number)
+
+
+def save_decision_number(year: int, number: int) -> None:
+    """Ghi lại số quyết định cho lần xuất SAU (kèm năm mà số đó thuộc về)."""
+    update(resignation_decision_year=int(year), resignation_decision_no=int(number))
 
 
 def list_models(api_key, timeout=30):

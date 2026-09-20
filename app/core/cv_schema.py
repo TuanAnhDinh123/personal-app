@@ -766,6 +766,64 @@ MIGRATIONS: list[tuple[str, str]] = [
         CREATE INDEX IF NOT EXISTS idx_bd_emails_due
             ON birthday_emails(status, due_date);
     '''),
+    # TÊN BỘ PHẬN BẰNG TIẾNG VIỆT — cho QUYẾT ĐỊNH THÔI VIỆC (app/core/
+    # resignation_decision.py): tờ quyết định song ngữ, dòng "Bộ phận/Department"
+    # ghi cả hai thứ tiếng.
+    #
+    # Là một CỘT của `departments` chứ không phải bảng dịch riêng: mỗi phòng ban
+    # có đúng một tên tiếng Việt, tách bảng chỉ để nối lại ngay.
+    #
+    # Giá trị nạp sẵn lấy từ sheet "Code" của file "Quick update resignation"
+    # (cặp cột Dept-EN × Dept-VN) — chính bảng tra mà HR đang dùng cho mail
+    # merge, khớp theo `department_name`. Hai chỗ cùng ghi để cả máy mới lẫn máy
+    # cũ đều có: khối seed (`SEED_DATA`, version 2) chỉ nạp được cho bản ghi
+    # CHƯA TỒN TẠI nên máy đã có sẵn 20 phòng ban phải dùng UPDATE ở đây.
+    # Điều kiện "đang trống" giữ lại tên người dùng tự sửa trước đó.
+    #
+    # "Global Operations" KHÔNG có trong sheet Code nên để trống — điền ở
+    # Master Data → Departments, đừng đoán hộ HR một cái tên tiếng Việt.
+    ("0008_department_name_vn", '''
+        ALTER TABLE departments ADD COLUMN department_name_vn VARCHAR;
+
+        UPDATE departments SET department_name_vn = 'Cơ sở hạ tầng'
+         WHERE department_name = 'Facilities Control' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Kinh Doanh'
+         WHERE department_name = 'Sales SEA' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Đảm bảo chất lượng nhà cung ứng'
+         WHERE department_name = 'Global Supply Quality' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Kế Toán'
+         WHERE department_name = 'Finance' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Quản lí nhà cung cấp'
+         WHERE department_name = 'Global Procurement' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Sản xuất'
+         WHERE department_name = 'Production' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Kỹ thuật sản xuất'
+         WHERE department_name = 'Manufacturing Engineering' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Kế hoạch sản xuất'
+         WHERE department_name = 'Production Planning' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Kho vận'
+         WHERE department_name = 'Logistics' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Đảm bảo chất lượng'
+         WHERE department_name = 'Quality Assurance' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Nhân sự'
+         WHERE department_name = 'Human Resource & Administration' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Nghiên cứu và phát triển'
+         WHERE department_name = 'Research & Development' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Kế hoạch sản xuất toàn cầu'
+         WHERE department_name = 'Global Planning' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Kho vận toàn cầu'
+         WHERE department_name = 'Global Logistics' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Quản lý nguyên vật liệu'
+         WHERE department_name = 'Materials Management' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Công nghệ thông tin'
+         WHERE department_name = 'Information Technology' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Quản lí đơn hàng'
+         WHERE department_name = 'Local COM' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Quản lí đơn hàng toàn cầu'
+         WHERE department_name = 'Global COM' AND COALESCE(TRIM(department_name_vn), '') = '';
+        UPDATE departments SET department_name_vn = 'Quản lí nhà cung cấp'
+         WHERE department_name = 'Purchasing/Indirect Material' AND COALESCE(TRIM(department_name_vn), '') = '';
+    '''),
 ]
 
 # =============================================================================
@@ -809,31 +867,37 @@ CODE_LIST_TYPES = [
 #      trong SEED_DATA (dict giữ nguyên thứ tự khai báo) để nó đã có dữ liệu.
 # =============================================================================
 SEED_DATA: dict[str, dict] = {
+    # `department_name_vn` — tên tiếng Việt, in trên QUYẾT ĐỊNH THÔI VIỆC (tờ
+    # quyết định song ngữ). Nguồn: sheet "Code" của file "Quick update
+    # resignation". MÁY ĐÃ CÓ SẴN 20 phòng ban thì khối seed bỏ qua (match theo
+    # `department_name`) nên chỗ điền cho máy cũ là migration
+    # "0008_department_name_vn" — sửa ở đây thì nhớ sửa cả bên đó.
     "departments": {
-        "version": 1,
-        "columns": ("department_name", "short_name"),
+        "version": 2,
+        "columns": ("department_name", "short_name", "department_name_vn"),
         "match": ("department_name",),
         "rows": [
-            ("Facilities Control",               "FC"),
-            ("Sales SEA",                        "Sale"),
-            ("Global Supply Quality",            "Gpr"),
-            ("Finance",                          "FIN"),
-            ("Global Operations",                "BOM"),
-            ("Global Procurement",               "Gpr"),
-            ("Production",                       "PD"),
-            ("Manufacturing Engineering",        "ME"),
-            ("Production Planning",              "PL"),
-            ("Logistics",                        "LG"),
-            ("Quality Assurance",                "QA"),
-            ("Human Resource & Administration",  "HR"),
-            ("Research & Development",           "R&D"),
-            ("Global Planning",                  "GP"),
-            ("Global Logistics",                 "GL"),
-            ("Materials Management",             "MM"),
-            ("Information Technology",           "IT"),
-            ("Local COM",                        "COM"),
-            ("Global COM",                       "GCOM"),
-            ("Purchasing/Indirect Material",     "Gpr"),
+            ("Facilities Control",               "FC",   "Cơ sở hạ tầng"),
+            ("Sales SEA",                        "Sale", "Kinh Doanh"),
+            ("Global Supply Quality",            "Gpr",  "Đảm bảo chất lượng nhà cung ứng"),
+            ("Finance",                          "FIN",  "Kế Toán"),
+            # Sheet "Code" không có tên tiếng Việt cho phòng ban này.
+            ("Global Operations",                "BOM",  ""),
+            ("Global Procurement",               "Gpr",  "Quản lí nhà cung cấp"),
+            ("Production",                       "PD",   "Sản xuất"),
+            ("Manufacturing Engineering",        "ME",   "Kỹ thuật sản xuất"),
+            ("Production Planning",              "PL",   "Kế hoạch sản xuất"),
+            ("Logistics",                        "LG",   "Kho vận"),
+            ("Quality Assurance",                "QA",   "Đảm bảo chất lượng"),
+            ("Human Resource & Administration",  "HR",   "Nhân sự"),
+            ("Research & Development",           "R&D",  "Nghiên cứu và phát triển"),
+            ("Global Planning",                  "GP",   "Kế hoạch sản xuất toàn cầu"),
+            ("Global Logistics",                 "GL",   "Kho vận toàn cầu"),
+            ("Materials Management",             "MM",   "Quản lý nguyên vật liệu"),
+            ("Information Technology",           "IT",   "Công nghệ thông tin"),
+            ("Local COM",                        "COM",  "Quản lí đơn hàng"),
+            ("Global COM",                       "GCOM", "Quản lí đơn hàng toàn cầu"),
+            ("Purchasing/Indirect Material",     "Gpr",  "Quản lí nhà cung cấp"),
         ],
     },
     # Nhóm nhỏ bên trong phòng ban (Excel "Function (Common)"). Cột thứ hai ghi

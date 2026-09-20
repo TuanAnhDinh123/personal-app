@@ -3,3 +3,14 @@
 *.spec
 __pycache__/
 *.pyc
+
+# DỮ LIỆU THẬT CỦA HR — chỉ để tham khảo lúc dev, KHÔNG BAO GIỜ đẩy lên git.
+# File mẫu Word (quyết định thôi việc), file Excel "Quick update resignation",
+# file "Regular HC-"… đều chứa thông tin nhân viên có thật. Chặn cả họ hàng
+# .xlsx/.xlsm/.docx ở GỐC repo (chỉ gốc — `/` đầu dòng) thay vì liệt kê từng
+# tên: đặt thêm một file dữ liệu vào đây là chuyện thường, mà `git add .` thì
+# không ai đọc lại danh sách.
+/*.xlsx
+/*.xlsm
+/*.docx
+~$*

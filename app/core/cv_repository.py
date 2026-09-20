@@ -23,7 +23,8 @@ from app.core import cv_schema
 # ─────────────────────── Cột được phép ghi cho từng bảng ─────────────────
 # (chặn khóa lạ lọt vào câu INSERT/UPDATE)
 
-DEPARTMENT_FIELDS = ["department_name", "short_name", "manager_name", "description"]
+DEPARTMENT_FIELDS = ["department_name", "department_name_vn", "short_name",
+                     "manager_name", "description"]
 EMPLOYEE_TYPE_FIELDS = ["code", "collar", "description"]
 COST_CENTER_FIELDS = ["code", "group_function", "name", "description"]
 LEVEL_FIELDS = ["level_name", "sort_order", "description"]
@@ -1931,7 +1932,10 @@ _EMPLOYEE_SELECT = [
     # `department_short_name`: mã viết tắt của bộ phận (FIN, IT…) — bảng hiển
     # thị tên đầy đủ, nhưng cột "Department (short)" bên file Excel lưu mã viết
     # tắt nên Copy row phải dán mã này thì import ngược lại mới khớp.
-    "SELECT e.*, d.department_name, d.short_name AS department_short_name,",
+    # `department_name_vn`: tên bộ phận tiếng Việt — quyết định thôi việc là văn
+    # bản song ngữ (xem app/core/resignation_decision.py).
+    "SELECT e.*, d.department_name, d.department_name_vn,",
+    "       d.short_name AS department_short_name,",
     "       l.level_name,",
     "       cc.code AS cost_center_code, cc.group_function AS cost_center_group,",
     "       et.code AS employee_type_code, et.collar,",

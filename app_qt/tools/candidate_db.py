@@ -364,10 +364,7 @@ def _divider(parent):
 def _launch_file(parent, path):
     """Mở file bằng ứng dụng mặc định của hệ điều hành."""
     try:
-        os.startfile(path)
-    except AttributeError:
-        import subprocess
-        subprocess.Popen(["xdg-open", path])
+        widgets.open_path(path)
     except Exception as exc:
         dialogs.error(parent, "Open error", f"Couldn't open the file:\n{exc}")
 
@@ -436,6 +433,7 @@ def _master_specs():
             "columns": [
                 ("department_id", "ID", 50),
                 ("department_name", "Department name", 200),
+                ("department_name_vn", "Vietnamese name", 200),
                 ("short_name", "Short code", 100),
                 ("functions", "Functions", 260),
                 ("manager_name", "Manager", 150),
@@ -444,6 +442,13 @@ def _master_specs():
             "form": [
                 {"key": "department_name", "label": "Department name (*)",
                  "kind": "text", "required": True},
+                {"key": "department_name_vn", "label": "Vietnamese name",
+                 "kind": "text",
+                 "hint": "Printed next to the English name on the resignation "
+                         "decision, which is a bilingual document — the line "
+                         "reads \"Bộ phận/Department: <Vietnamese> / "
+                         "<English>\". Leave it empty and that half stays "
+                         "blank."},
                 {"key": "short_name", "label": "Short code (e.g. FIN, IT, R&D)",
                  "kind": "text"},
                 {"key": "manager_name", "label": "Manager", "kind": "text"},
