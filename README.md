@@ -56,6 +56,7 @@ personal-app/
 │   ├── main_window.py       # Cửa sổ chính (frameless): sidebar + nội dung
 │   ├── dialogs.py           # Hộp thoại tùy biến (info/error/confirm)
 │   ├── settings_page.py     # Trang Cài đặt
+│   ├── profile.py           # Hồ sơ người dùng (tên hiển thị + avatar)
 │   ├── icons.py             # Map emoji → tên icon line
 │   ├── richtext.py          # Ô soạn thảo rich text (QTextEdit)
 │   ├── assets/icons/        # Bộ icon line (SVG)
@@ -815,6 +816,62 @@ Officer…), `code_lists` (Qualification · Qualification (VN) · ID issued plac
 > Vì thiết kế cố tình **không dùng khóa ngoại**, các cột `*_id` chỉ là tham
 > chiếu mềm — ứng dụng tự đảm bảo liên kết. `init_db()` tự tạo bảng khi mở tool;
 > nếu bảng cũ đang **trống** mà lệch cấu trúc, nó tự dựng lại (không mất dữ liệu).
+
+## Hồ sơ người dùng & dấu vết "dòng này của ai" 👤
+
+File `candidates.sqlite` sắp được **dùng chung giữa hai người**, nên mỗi dòng
+phải tự nói được nó của ai. Hai phần, đi cùng nhau:
+
+- **Bảng `users`** giữ danh sách người dùng. Mỗi máy **tự nhận ra mình bằng tài
+  khoản Windows** (`os.getlogin()`, lùi về `%USERNAME%`) → tra ra `user_id`,
+  không hỏi ai đang dùng, không đăng nhập. Chưa có dòng thì `init_db()` tạo ngay
+  lượt mở app đầu tiên.
+- **`created_by` / `updated_by` ở mọi bảng nghiệp vụ** lưu `user_id` đó. **Tầng
+  repository tự điền** — đúng chỗ `updated_at` đang được chạm
+  (`cv_repository._insert_conn` / `_update_conn`), nên không màn hình nào phải
+  nhớ, và cũng không màn hình nào ghi đè được (hai cột này **không** nằm trong
+  các danh sách `*_FIELDS`).
+
+> **KHÔNG phải tính năng bảo mật.** Không mật khẩu, không phân quyền, không chặn
+> gì cả — chỉ để hiển thị và lưu vết. Đừng gắn thêm xác thực vào đây.
+
+**Hồ sơ** (tên hiển thị + ảnh đại diện) hiện ở **đáy sidebar** — ảnh tròn + tên,
+đúng **một** dòng chữ, không viền không nền — và **bấm vào ẢNH là mở modal *Edit
+profile*** để sửa, có nút *Save* riêng. Modal chỉ có đúng hai thứ: ảnh và tên.
+
+> Vùng bấm là **riêng cái ảnh**, không phải cả hàng: ô này không có nền/viền
+> nên một vùng bấm rộng bằng cả hàng là vùng bấm vô hình. Bù lại, rê chuột vào
+> **ảnh hay tên** đều hiện **chấm bút chì** ở góc dưới ảnh — chỉ dấu duy nhất
+> cho biết chỗ này bấm được. Chấm tô **nền trắng, bút chì màu nhấn**: khuôn chữ
+> cái đầu (khi chưa có ảnh) tô đúng màu nhấn, nên chấm mà cũng màu nhấn thì tan
+> biến vào nền.
+>
+> Modal treo vào **cửa sổ**, không treo vào ô hồ sơ — luật QSS `#Sidebar
+> QWidget` (nền tối) thắng `#Dialog` về độ ưu tiên, nên hộp thoại nào nhận
+> widget trong sidebar làm cha cũng bị nhuộm tối cả modal.
+
+> **Cố ý KHÔNG nằm trong màn hình Settings.** Mọi ô ở Settings lưu vào
+> `config.json` (cấu hình *của máy này*), còn hồ sơ lưu xuống bảng `users` của
+> chính file `.db` nên nó đi theo file sang máy kia. Hai thứ khác nơi lưu, khác
+> phạm vi thì không dùng chung một nút *Save*.
+
+Giao diện ở [app_qt/profile.py](app_qt/profile.py).
+
+- **Ảnh lưu bằng BYTES trong DB, không lưu đường dẫn** — đây là điểm cốt lõi:
+  đường dẫn là đường dẫn *của một máy*, copy DB sang máy kia là ảnh biến mất.
+  Ảnh được cắt vuông + thu nhỏ về **128×128 PNG** trước khi ghi (~10–30 KB), nên
+  hồ sơ đi theo file DB mà không phải đồng bộ thêm thư mục ảnh nào.
+- Chưa đặt ảnh thì app vẽ **vòng tròn chữ cái đầu** của tên — không bao giờ là
+  một ô trống.
+- **Bảng nhân viên cố tình KHÔNG hiện hai cột dấu vết**: bảng đó chỉ đọc, nguồn
+  sự thật là file Excel của HR, mà hiện một con số id thì người đọc cũng không
+  hiểu. Chỗ hiện là modal **View details** của màn hình *Candidates* (dòng *Last
+  edited by*) — đó mới là bảng hai người cùng sửa.
+- Hai người **trùng tên tài khoản Windows** trên hai máy sẽ dùng chung một dòng
+  `users`; đổi tên hiển thị cũng không tách ra được.
+
+> Việc **đồng bộ file DB giữa hai máy** (khóa file, push/pull lên ổ mạng) là
+> chuyện riêng, chưa làm ở đây.
 
 ## Đóng gói thành .exe
 

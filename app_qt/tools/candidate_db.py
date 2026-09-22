@@ -874,6 +874,9 @@ class _CandidateDetailDialog(ModalDialog):
             _txt(row, "position_title"), _txt(row, "department_name"),
             (f"DOB: {_txt(row, 'date_of_birth')}" if _txt(row, "date_of_birth") else ""),
             (f"Applied: {_txt(row, 'applied_at')[:10]}" if _txt(row, "applied_at") else ""),
+            # DB dùng chung giữa nhiều người → nói rõ hồ sơ này ai sửa gần nhất.
+            (f"Last edited by: {_txt(row, 'updated_by_name')}"
+             if _txt(row, "updated_by_name") else ""),
         ) if p)
         if meta:
             lbl = QLabel(meta, box)

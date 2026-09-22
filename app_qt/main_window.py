@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from app_qt import icons, settings_page, theme, widgets
+from app_qt import icons, profile, settings_page, theme, widgets
 from app_qt.registry import discover_tools
 
 
@@ -295,9 +295,10 @@ class MainWindow(QMainWindow):
 
         outer.addWidget(widgets.scroll_area(nav_holder), 1)
 
-        ver = QLabel("v0.2.0"); ver.setObjectName("SidebarVersion")
-        ver.setAlignment(Qt.AlignCenter)
-        outer.addWidget(ver)
+        # Hồ sơ người dùng là widget CUỐI CÙNG, sát đáy sidebar (chỗ quen thuộc
+        # của mọi app có tài khoản); bấm vào ẢNH mở modal sửa tên & ảnh. Không
+        # có đường kẻ ngăn phía trên: ô này đi liền mạch với danh sách menu.
+        outer.addWidget(profile.SidebarProfile(sb))
         return sb
 
     def _divider(self):

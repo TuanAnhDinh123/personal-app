@@ -29,6 +29,9 @@ SƠ ĐỒ QUAN HỆ (mềm, không ràng buộc FK)
                   code_lists  (nhiều danh mục một cột, phân biệt bằng `type`)
                   skills · mail_templates · app_meta
 
+  NGƯỜI DÙNG      users <──mềm── created_by / updated_by của MỌI bảng nghiệp vụ
+                  (một dòng mỗi tài khoản Windows dùng chung file .db này)
+
   TUYỂN DỤNG      positions  ──1:N──> position_requirements  (JD đã bóc tách)
                   positions  ──1:N──> applications
                   candidates ──1:N──> candidate_cvs          (CV theo thời gian)
@@ -823,6 +826,86 @@ MIGRATIONS: list[tuple[str, str]] = [
          WHERE department_name = 'Global COM' AND COALESCE(TRIM(department_name_vn), '') = '';
         UPDATE departments SET department_name_vn = 'Quản lí nhà cung cấp'
          WHERE department_name = 'Purchasing/Indirect Material' AND COALESCE(TRIM(department_name_vn), '') = '';
+    '''),
+    # NGƯỜI DÙNG + DẤU VẾT AI TẠO / AI SỬA. File .db được copy qua lại giữa hai
+    # máy nên mỗi dòng phải tự nói được nó của ai.
+    #
+    #   • `users` — danh sách người dùng. Nhận diện bằng TÀI KHOẢN WINDOWS
+    #     (`windows_login`, lưu chữ thường): mở app là tra ra `user_id`, không
+    #     hỏi ai đang dùng. KHÔNG phải cơ chế bảo mật — không mật khẩu, không
+    #     phân quyền, chỉ để hiển thị và lưu vết.
+    #
+    #   • `avatar` là BYTES ẢNH (PNG 128×128) chứ không phải đường dẫn file:
+    #     đường dẫn là đường dẫn CỦA MỘT MÁY, DB copy sang máy kia là ảnh không
+    #     hiện được nữa. Ảnh cỡ này ~10–30 KB nên nhét thẳng vào DB rẻ hơn nhiều
+    #     so với việc phải đồng bộ thêm một thư mục ảnh.
+    #
+    #   • `created_by` / `updated_by` thêm cho MỌI bảng nghiệp vụ, do
+    #     `cv_repository._insert_conn()` / `_update_conn()` tự điền — giống hệt
+    #     cách `updated_at` đang được chạm, màn hình không phải nhớ gì.
+    #     Hai bảng CHỈ-GHI-THÊM (`candidate_evaluations`, `candidate_activities`)
+    #     không có `updated_at` nên cũng chỉ có `created_by`.
+    #     `users` không có hai cột này: nó là ĐÍCH của dấu vết, tự trỏ vào mình
+    #     chỉ thành nhiễu. `app_meta` và bảng ảo FTS là hạ tầng, cũng không có.
+    ("0009_users_and_audit_columns", '''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            windows_login VARCHAR,    -- tài khoản Windows, chữ thường — khóa nhận diện
+            display_name  VARCHAR,    -- tên hiện trên giao diện
+            avatar        BLOB,       -- ảnh đại diện PNG 128×128 (bytes, không phải đường dẫn)
+            note          TEXT,
+            created_at    DATETIME DEFAULT (datetime('now', 'localtime')),
+            updated_at    DATETIME DEFAULT (datetime('now', 'localtime'))
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login ON users(windows_login);
+
+        ALTER TABLE departments ADD COLUMN created_by INT;
+        ALTER TABLE departments ADD COLUMN updated_by INT;
+        ALTER TABLE functions ADD COLUMN created_by INT;
+        ALTER TABLE functions ADD COLUMN updated_by INT;
+        ALTER TABLE code_lists ADD COLUMN created_by INT;
+        ALTER TABLE code_lists ADD COLUMN updated_by INT;
+        ALTER TABLE employee_types ADD COLUMN created_by INT;
+        ALTER TABLE employee_types ADD COLUMN updated_by INT;
+        ALTER TABLE cost_centers ADD COLUMN created_by INT;
+        ALTER TABLE cost_centers ADD COLUMN updated_by INT;
+        ALTER TABLE levels ADD COLUMN created_by INT;
+        ALTER TABLE levels ADD COLUMN updated_by INT;
+        ALTER TABLE skills ADD COLUMN created_by INT;
+        ALTER TABLE skills ADD COLUMN updated_by INT;
+        ALTER TABLE mail_templates ADD COLUMN created_by INT;
+        ALTER TABLE mail_templates ADD COLUMN updated_by INT;
+
+        ALTER TABLE positions ADD COLUMN created_by INT;
+        ALTER TABLE positions ADD COLUMN updated_by INT;
+        ALTER TABLE position_requirements ADD COLUMN created_by INT;
+        ALTER TABLE position_requirements ADD COLUMN updated_by INT;
+        ALTER TABLE candidates ADD COLUMN created_by INT;
+        ALTER TABLE candidates ADD COLUMN updated_by INT;
+        ALTER TABLE candidate_cvs ADD COLUMN created_by INT;
+        ALTER TABLE candidate_cvs ADD COLUMN updated_by INT;
+        ALTER TABLE candidate_experiences ADD COLUMN created_by INT;
+        ALTER TABLE candidate_experiences ADD COLUMN updated_by INT;
+        ALTER TABLE candidate_skills ADD COLUMN created_by INT;
+        ALTER TABLE candidate_skills ADD COLUMN updated_by INT;
+        ALTER TABLE applications ADD COLUMN created_by INT;
+        ALTER TABLE applications ADD COLUMN updated_by INT;
+        ALTER TABLE interviews ADD COLUMN created_by INT;
+        ALTER TABLE interviews ADD COLUMN updated_by INT;
+        ALTER TABLE interview_feedbacks ADD COLUMN created_by INT;
+        ALTER TABLE interview_feedbacks ADD COLUMN updated_by INT;
+
+        ALTER TABLE candidate_evaluations ADD COLUMN created_by INT;
+        ALTER TABLE candidate_activities ADD COLUMN created_by INT;
+
+        ALTER TABLE employees ADD COLUMN created_by INT;
+        ALTER TABLE employees ADD COLUMN updated_by INT;
+        ALTER TABLE courses ADD COLUMN created_by INT;
+        ALTER TABLE courses ADD COLUMN updated_by INT;
+        ALTER TABLE course_employees ADD COLUMN created_by INT;
+        ALTER TABLE course_employees ADD COLUMN updated_by INT;
+        ALTER TABLE birthday_emails ADD COLUMN created_by INT;
+        ALTER TABLE birthday_emails ADD COLUMN updated_by INT;
     '''),
 ]
 

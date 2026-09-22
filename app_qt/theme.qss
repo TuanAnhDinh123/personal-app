@@ -93,12 +93,14 @@ QWidget {
     font-weight: 600;
 }
 
-#SidebarVersion { color: {{--sidebar-title}}; font-size: 10px; padding: 12px; }
-/* background trong suốt: là widget CUỐI cùng ở đáy sidebar, nếu tô nền sẽ vẽ
-   hình chữ nhật VUÔNG đè lên góc bo dưới-trái của #Sidebar → góc bị vuông.
-   Phải viết '#Sidebar #SidebarVersion' để THẮNG luật '#Sidebar QWidget' (nền
-   tối) vì luật đó có độ ưu tiên cao hơn '#SidebarVersion' đơn lẻ. */
-#Sidebar #SidebarVersion { background: transparent; }
+/* Hồ sơ người dùng ở đáy sidebar (ảnh tròn + tên) — chỉ BẤM VÀO ẢNH mới mở
+   modal sửa hồ sơ. Không viền, không nền, không hover: nó là một dòng chữ +
+   một ảnh nằm thẳng hàng với menu, không phải một cái nút. Khoảng cách quanh
+   ô đặt bằng contentsMargins trong SidebarProfile, không đặt ở đây. */
+#SidebarProfile { border: none; }
+#SidebarProfile QLabel { background: transparent; }
+#ProfileName { font-size: 13px; font-weight: 600; color: #ffffff; }
+
 #SidebarDivider { background: {{--sidebar-border}}; max-height: 1px; min-height: 1px; }
 
 /* ============================================================

@@ -1,8 +1,8 @@
 # Thiết kế CSDL — Tuyển dụng & Nhân sự
 
-SQLite · không dùng `FOREIGN KEY` (cột `*_id` là tham chiếu mềm) · mọi cột cho phép NULL trừ khóa chính · mọi bảng có `created_at` + `updated_at` · danh sách nhiều giá trị trong một ô ngăn bởi `;`.
+SQLite · không dùng `FOREIGN KEY` (cột `*_id` là tham chiếu mềm) · mọi cột cho phép NULL trừ khóa chính · mọi bảng có `created_at` + `updated_at` và `created_by` + `updated_by` (xem [Dấu vết ai tạo / ai sửa](#dấu-vết-ai-tạo--ai-sửa)) · danh sách nhiều giá trị trong một ô ngăn bởi `;`.
 
-**Mục lục:** [Sơ đồ tổng thể](#sơ-đồ-tổng-thể) · [Bốn bài toán](#bốn-bài-toán-và-lời-giải) · [A. Tuyển dụng](#a--tuyển-dụng) · [B. Danh mục](#b--danh-mục-dùng-chung) · [C. Nhân sự](#c--nhân-sự--đào-tạo) · [Giá trị cố định](#giá-trị-cố-định) · [Migrations](#lịch-sử-thay-đổi-cấu-trúc-migrations)
+**Mục lục:** [Sơ đồ tổng thể](#sơ-đồ-tổng-thể) · [Bốn bài toán](#bốn-bài-toán-và-lời-giải) · [Dấu vết ai tạo / ai sửa](#dấu-vết-ai-tạo--ai-sửa) · [A. Tuyển dụng](#a--tuyển-dụng) · [B. Danh mục](#b--danh-mục-dùng-chung) · [C. Nhân sự](#c--nhân-sự--đào-tạo) · [Giá trị cố định](#giá-trị-cố-định) · [Migrations](#lịch-sử-thay-đổi-cấu-trúc-migrations)
 
 ---
 
@@ -116,6 +116,29 @@ Không lưu một con số chết. Luôn hiển thị **hai** con số:
 > Xem lại 08/2026 → hiển thị `5 năm (CV 03/2023) · ≈ 8,4 năm hôm nay`.
 
 Khi khoảng cách `as_of_date` → hôm nay vượt 18 tháng, màn hình tìm kiếm gắn nhãn **Stale profile** để nhắc xin CV mới.
+
+---
+
+## Dấu vết ai tạo / ai sửa
+
+File `.db` được **copy qua lại giữa hai máy**, nên mỗi dòng phải tự nói được nó của ai. Vì vậy **mọi bảng nghiệp vụ** có thêm hai cột:
+
+| Cột | Kiểu | Nghĩa |
+|---|---|---|
+| `created_by` | INT | → `users.user_id` — ai tạo dòng này. |
+| `updated_by` | INT | → `users.user_id` — ai sửa gần nhất. |
+
+Ba điều cần nhớ:
+
+1. **App tự điền, màn hình không phải nhớ gì.** Đúng chỗ `updated_at` đang được chạm: `cv_repository._insert_conn()` đóng dấu `created_by` + `updated_by`, `_update_conn()` đóng dấu `updated_by`. Vài câu `UPDATE` viết tay (ghi nguồn CV, đổi trạng thái mail sinh nhật…) dùng lại đúng helper đó qua `_audit_update()`.
+2. **Không nằm trong các danh sách `*_FIELDS`.** Giống `created_at`/`updated_at`: đó là danh sách cột màn hình được phép ghi, mà hai cột này do tầng repository điền — để lọt vào đó là mở đường cho giao diện khai man.
+3. **Hai bảng chỉ-ghi-thêm chỉ có `created_by`.** `candidate_evaluations` và `candidate_activities` không có `updated_at` (ghi rồi không sửa) nên cũng không có `updated_by`. `_update_conn()` kiểm tra bằng `_has_column()` nên điều này tự nhất quán, không phải khai ở đâu cả.
+
+Cột `created_by` **để trống** ở các dòng danh mục do khối `SEED_DATA` nạp trên một DB dựng mới: đó là dữ liệu app mang sẵn, không phải ai đó nhập.
+
+**Dữ liệu có từ trước lượt `0009` được gán cho người chạy lượt đó** (`cv_repository._backfill_audit()`): suốt thời gian chưa có cột lưu vết thì app chỉ có một người dùng, nên gán hết cho chính người đó sát thực tế hơn là để trống. Lượt gán chạy **một lần cho mỗi file `.db`** (đánh dấu `backfill:audit:v1` ở `app_meta`) nên máy thứ hai mở bản đã gán sẽ không ghi đè bằng id của mình, **bỏ qua hẳn với DB mới tinh** (ở đó chưa có dòng nào của ai), và **không chạm `updated_at`** — vá lại dấu vết không phải là một lượt sửa dữ liệu.
+
+Trên giao diện: bảng `employees` **cố tình không** hiện hai cột này (bảng đó chỉ đọc, nguồn sự thật là file Excel của HR, và một số id thì người đọc cũng không hiểu). Chỗ hiện là modal **View details** của màn hình *Candidates* — dòng *Last edited by* — vì đó mới là bảng hai người cùng sửa.
 
 ---
 
@@ -654,6 +677,30 @@ Nội dung hỗ trợ placeholder `{name}` `{position}` `{date}` `{time_start}` 
 CREATE INDEX idx_mailtpl_type ON mail_templates(type);
 ```
 
+### `users` — Người dùng của app
+
+Danh sách những người dùng chung file `.db` này. Đích của `created_by`/`updated_by` ở mọi bảng, và là chỗ giữ **hồ sơ** (tên hiển thị + ảnh đại diện) mà giao diện hiện ở đáy sidebar — bấm vào ảnh mở modal *Edit profile* để sửa.
+
+**KHÔNG phải cơ chế bảo mật**: không mật khẩu, không phân quyền, không chặn gì cả. Chỉ để hiển thị và lưu vết — đừng gắn thêm xác thực vào đây.
+
+| Cột | Kiểu | Mô tả |
+|---|---|---|
+| `user_id` | INTEGER **PK** | |
+| `windows_login` | VARCHAR | **Tài khoản Windows, viết thường** — khóa nhận diện. Unique. |
+| `display_name` | VARCHAR | Tên hiện trên giao diện. Mặc định = `windows_login`, người dùng đổi ở modal *Edit profile* (bấm ảnh đại diện ở đáy sidebar). |
+| `avatar` | BLOB | **Bytes ảnh PNG 128×128**, không phải đường dẫn file. |
+| `note` | TEXT | |
+
+> **Nhận diện bằng tài khoản Windows, không hỏi ai đang dùng.** Mở app → `cv_repository.windows_login()` (`os.getlogin()`, lùi về `%USERNAME%`) → tra ra `user_id`; chưa có thì `init_db()` tạo dòng mới ngay lượt đầu. Lưu chữ thường vì Windows không phân biệt hoa/thường ở tên tài khoản — không chuẩn hóa thì một người đăng nhập kiểu khác là thành hai dòng.
+>
+> Dòng `users` gắn với **máy**, không gắn với file `.db`, nên **không** dùng kiểu đánh dấu một-lần-mỗi-`.db` như `SEED_DATA`: máy thứ hai mở đúng file DB đó phải tự thêm được dòng của mình. Hệ quả cần biết: hai người **trùng tên tài khoản Windows** trên hai máy sẽ dùng chung một dòng — đổi `display_name` cũng không tách ra được.
+
+> **Vì sao `avatar` là BLOB chứ không phải đường dẫn.** Đường dẫn là đường dẫn *của một máy*: `C:\Users\A\pic.png` copy DB sang máy B là ảnh biến mất. Bytes nằm ngay trong DB nên hồ sơ đi theo file, không phải đồng bộ thêm thư mục ảnh nào. Ảnh được `app_qt/profile.py` cắt vuông + thu nhỏ về **128×128 PNG** trước khi ghi (~10–30 KB/hồ sơ) nên không làm phình file DB; app đọc ảnh gốc bằng `QImage` nên nhận mọi định dạng Qt đọc được (PNG · JPG · BMP · GIF · WEBP).
+
+```sql
+CREATE UNIQUE INDEX idx_users_login ON users(windows_login);
+```
+
 ### `app_meta` — Key-value nội bộ
 
 Đánh dấu vết những lượt đã chạy trên **file `.db` này**, để lần mở app sau không chạy lại.
@@ -1034,3 +1081,4 @@ Ba quy tắc bắt buộc:
 | `0006_functions_and_code_lists` | `functions` · `code_lists` · `employees` | **Thêm** hai bảng danh mục và một cột. `functions` — cột Excel *Function (Common)*, gắn vào `departments` (một phòng ban nhiều nhóm), sửa ngay trong form phòng ban. `code_lists` — gom nhiều danh mục một cột vào chung một bảng, phân biệt bằng `type` (Qualification · Qualification (VN) · ID issued place), có màn hình riêng *Master Data → Code lists*. `employees.qualification_vn` — cột *Qualification (Việt Nam)* trước đây bỏ qua khi import vì tưởng là bản dịch của *Qualification*; sheet *Code* của file HC cho thấy đó là danh mục riêng nên lưu lại. Bulk Import nay **chặn** cả bốn cột này nếu giá trị không có trong danh mục. |
 | `0007_birthday_email_queue` | `birthday_emails` *(mới)* | **Thêm** hàng chờ mail chúc mừng sinh nhật + unique `(employee_id, due_date)` và index `(status, due_date)`. Lịch gửi chuyển từ Outlook (`DeferredDeliveryTime`, mail nằm Outbox tới đúng ngày) sang **app tự giữ**: cách cũ chỉ chạy khi tài khoản gửi đã đăng nhập trong Outlook, còn gửi từ **hộp thư dùng chung** (chỉ được IT share) thì Outlook bỏ qua giờ hẹn và gửi ngay — cả tháng nhận mail cùng lúc. Không mất dữ liệu (bảng mới). Kèm theo: setting `birthday_send_time` **bị bỏ** (không còn giờ hẹn), thêm `birthday_subject` + `birthday_catchup_days`. |
 | `0008_department_name_vn` | `departments` | **Thêm** `department_name_vn` (tên phòng ban tiếng Việt) — **quyết định thôi việc** là văn bản song ngữ nên dòng *Bộ phận/Department* cần cả hai thứ tiếng. Là một **cột** chứ không phải bảng dịch riêng: mỗi phòng ban có đúng một tên tiếng Việt, tách bảng chỉ để nối lại ngay. Lượt này **nạp luôn dữ liệu** cho 19/20 phòng ban (sheet *Code* của file *Quick update resignation*, khớp theo `department_name`); *Global Operations* không có trong sheet đó nên để trống. Phải UPDATE ở đây chứ không chỉ sửa `SEED_DATA`: khối seed bỏ qua bản ghi **đã tồn tại**, mà máy nào cũng có sẵn 20 phòng ban từ lượt seed `v1` — `SEED_DATA["departments"]` lên `version: 2` là để máy **cài mới** có tên tiếng Việt ngay từ đầu. Điều kiện *"đang trống"* giữ lại tên người dùng tự sửa trước đó. Không mất dữ liệu. |
+| `0009_users_and_audit_columns` | `users` *(mới)* · *(mọi bảng nghiệp vụ)* | **Thêm** bảng `users` (+ unique `windows_login`) và hai cột `created_by` / `updated_by` cho **mọi bảng nghiệp vụ** — xem [Dấu vết ai tạo / ai sửa](#dấu-vết-ai-tạo--ai-sửa). Lý do: file `.db` sắp được copy qua lại giữa hai máy nên phải biết dòng nào của ai. Hai bảng chỉ-ghi-thêm (`candidate_evaluations`, `candidate_activities`) chỉ nhận `created_by` vì chúng cũng không có `updated_at`. `users` **không** có hai cột đó (nó là đích của dấu vết), `app_meta` và bảng ảo FTS cũng không (hạ tầng). Không mất dữ liệu; dòng đã có từ trước được gán cho chính người chạy lượt này (`_backfill_audit()` — xem mục đã dẫn). |

@@ -38,6 +38,11 @@ def build():
     data = settings.load()
     fields = {}
 
+    # Hồ sơ người dùng KHÔNG ở màn hình này: nó lưu xuống bảng `users` của file
+    # .db chứ không phải config.json, và sửa bằng modal riêng mở từ ô hồ sơ ở
+    # sidebar (`app_qt/profile.py`). Mọi ô dưới đây đều thuộc config.json và
+    # dùng chung đúng một nút *Save settings*.
+
     # ---- Nhóm AI (Gemini) ----
     inner = _group_card(outer_lay)
     widgets.section_label(inner, "AI (Gemini)")

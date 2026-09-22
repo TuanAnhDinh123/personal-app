@@ -22,6 +22,10 @@ from app.core import cv_schema
 
 # ─────────────────────── Cột được phép ghi cho từng bảng ─────────────────
 # (chặn khóa lạ lọt vào câu INSERT/UPDATE)
+#
+# `created_at`/`updated_at` và `created_by`/`updated_by` KHÔNG bao giờ nằm trong
+# các danh sách này: chúng do `_insert_conn()`/`_update_conn()` tự điền, màn
+# hình không được ghi đè.
 
 DEPARTMENT_FIELDS = ["department_name", "department_name_vn", "short_name",
                      "manager_name", "description"]
@@ -137,15 +141,21 @@ EMPLOYEE_FIELDS = [
 COURSE_FIELDS = ["title", "content", "date", "location", "course_type"]
 COURSE_EMPLOYEE_FIELDS = ["course_id", "employee_id", "status", "note"]
 
-# `updated_at` KHÔNG có trong danh sách: `_update_conn` tự chạm cột đó. Ngược
-# lại, `status`/`sent_at`/`attempts`/`last_error` BẮT BUỘC phải có — thiếu cột
-# nào thì lệnh đánh dấu trạng thái thành no-op mà không báo lỗi gì.
+# Hồ sơ người dùng. `windows_login` KHÔNG có ở đây: đó là khóa nhận diện máy do
+# app tự điền một lần, không phải ô cho người dùng sửa.
+USER_FIELDS = ["display_name", "avatar", "note"]
+
+# `updated_at` KHÔNG có trong danh sách (cũng như `created_by`/`updated_by` ở
+# mọi bảng): hai helper ghi dữ liệu tự chạm các cột đó. Ngược lại,
+# `status`/`sent_at`/`attempts`/`last_error` BẮT BUỘC phải có — thiếu cột nào
+# thì lệnh đánh dấu trạng thái thành no-op mà không báo lỗi gì.
 BIRTHDAY_EMAIL_FIELDS = [
     "employee_id", "due_date", "status", "attempts", "last_error", "sent_at",
 ]
 
 # PK của mỗi bảng (dùng cho update/delete generic).
 _PK = {
+    "users": "user_id",
     "departments": "department_id",
     "functions": "function_id",
     "code_lists": "code_list_id",
@@ -229,7 +239,8 @@ def applied_migrations() -> set[str]:
 
 
 def init_db() -> None:
-    """Chạy các lượt migration CÒN THIẾU + nạp danh mục khởi tạo.
+    """Chạy các lượt migration CÒN THIẾU + nạp danh mục khởi tạo + nhận diện
+    người dùng đang chạy app.
 
     Gọi mỗi lần mở tool (rẻ — máy đã cập nhật thì chỉ tốn một câu SELECT).
 
@@ -243,6 +254,9 @@ def init_db() -> None:
     dấu, lần mở app sau thử lại đúng lượt đó.
     """
     global FTS_AVAILABLE
+    # Máy chưa có file .db → mọi thứ sinh ra trong chính lượt này, không có dữ
+    # liệu "cũ" nào để gán người (xem `_backfill_audit`).
+    fresh_db = not os.path.exists(_db_path())
     with get_connection() as conn:
         conn.execute(_META_TABLE_SQL)
         done = {r[0] for r in conn.execute(
@@ -266,6 +280,52 @@ def init_db() -> None:
             FTS_AVAILABLE = False
 
         _seed_master_data(conn)
+        # Dòng `users` của máy này (tạo ở lần đầu mở app trên một tài khoản
+        # Windows) — phải có trước lượt ghi đầu tiên thì `created_by` mới điền
+        # được. Không đánh dấu ở app_meta: dòng gắn với MÁY chứ không gắn với
+        # file .db, máy thứ hai mở cùng file DB phải tự thêm được dòng của mình.
+        user_id = current_user_id(conn)
+        _backfill_audit(conn, user_id, fresh_db)
+
+
+# Dấu vết lượt gán ngược dấu vết cho dữ liệu cũ (chạy một lần mỗi file .db).
+_AUDIT_BACKFILL_KEY = "backfill:audit:v1"
+
+
+def _backfill_audit(conn, user_id, fresh_db: bool) -> None:
+    """Gán người dùng của máy này cho mọi dòng CÓ TỪ TRƯỚC lượt `0009`.
+
+    Dữ liệu tạo ra trước khi có cột lưu vết thì không truy ngược được ai làm,
+    nhưng suốt thời gian đó app chỉ có MỘT người dùng — nên gán hết cho chính
+    người chạy lượt thêm cột sát thực tế hơn hẳn là để trống.
+
+    Ba giới hạn:
+      • Chạy MỘT LẦN cho mỗi file .db (đánh dấu ở `app_meta`) — máy thứ hai mở
+        bản .db đã gán rồi sẽ không gán đè lên bằng id của mình.
+      • DB mới tinh thì BỎ QUA: ở đó chưa có dòng nào của ai, chỉ có danh mục
+        `SEED_DATA` do app mang sẵn — gán cho người dùng là ghi sai.
+      • KHÔNG chạm `updated_at`: đây là vá lại dấu vết, không phải một lượt sửa
+        dữ liệu; bump mốc thời gian lên là viết lại lịch sử.
+
+    Chưa tra được người dùng (`user_id` là None) thì không đánh dấu gì cả, lần
+    mở app sau thử lại.
+    """
+    if user_id is None:
+        return
+    if conn.execute("SELECT 1 FROM app_meta WHERE key = ?",
+                    (_AUDIT_BACKFILL_KEY,)).fetchone():
+        return
+    if not fresh_db:
+        for table in _PK:
+            if not _table_exists(conn, table):
+                continue
+            for column in ("created_by", "updated_by"):
+                if _has_column(conn, table, column):
+                    conn.execute(
+                        f"UPDATE {table} SET {column} = ? WHERE {column} IS NULL",
+                        (user_id,))
+    conn.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)",
+                 (_AUDIT_BACKFILL_KEY, _now()))
 
 
 def _table_exists(conn, name) -> bool:
@@ -332,6 +392,7 @@ def _insert(table: str, allowed: list[str], data: dict) -> int:
 def _insert_conn(conn, table: str, allowed: list[str], data: dict) -> int:
     """Bản dùng lại kết nối đang mở — cho các thao tác nhiều bảng trong 1 lượt."""
     d = {k: data[k] for k in allowed if k in data}
+    d.update(_audit_insert(conn, table))
     if not d:
         return conn.execute(f"INSERT INTO {table} DEFAULT VALUES").lastrowid
     cols = list(d)
@@ -351,15 +412,23 @@ def _update_conn(conn, table: str, allowed: list[str], row_id: int, data: dict) 
     if not d:
         return
     sets = ", ".join(f"{c} = ?" for c in d)
+    params = [d[c] for c in d]
     # Bảng chỉ-ghi-thêm (evaluations, activities) không có cột updated_at.
     if _has_column(conn, table, "updated_at"):
         sets += ", updated_at = datetime('now', 'localtime')"
+    touch, touch_params = _audit_update(conn, table)
+    sets += touch
+    params += touch_params
     conn.execute(f"UPDATE {table} SET {sets} WHERE {_PK[table]} = ?",
-                 [d[c] for c in d] + [row_id])
+                 params + [row_id])
+
+
+def _columns(conn, table: str) -> set:
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
 
 
 def _has_column(conn, table: str, column: str) -> bool:
-    return any(r[1] == column for r in conn.execute(f"PRAGMA table_info({table})"))
+    return column in _columns(conn, table)
 
 
 def _delete(table: str, row_id: int) -> None:
@@ -379,6 +448,148 @@ def now_text() -> str:
 
 
 _now = now_text   # tên ngắn dùng nội bộ trong file này
+
+
+# ════════════ NGƯỜI DÙNG & DẤU VẾT AI TẠO / AI SỬA (users) ══════════════
+#
+# File .db được copy qua lại giữa hai máy nên mỗi dòng phải tự nói được nó của
+# ai. Mỗi máy nhận ra mình bằng TÀI KHOẢN WINDOWS → một dòng `users` → id đó
+# được đóng vào `created_by`/`updated_by` NGAY TRONG hai helper ghi dữ liệu bên
+# trên, đúng chỗ `updated_at` đang được chạm. Màn hình không phải nhớ gì cả.
+#
+# KHÔNG phải cơ chế bảo mật: không mật khẩu, không phân quyền, không chặn gì.
+
+# id người dùng đang chạy app — tra một lần rồi giữ trong suốt phiên (mỗi lượt
+# ghi đều cần tới). Còn None nghĩa là chưa tra được (bảng `users` chưa tồn tại,
+# hoặc hệ điều hành không cho biết tên tài khoản) → lần ghi sau thử lại.
+_USER_ID: int | None = None
+
+
+def windows_login() -> str:
+    """Tài khoản Windows đang chạy app, viết thường ("" nếu không tra được).
+
+    Chữ thường vì Windows không phân biệt hoa/thường ở tên tài khoản — không
+    chuẩn hóa thì cùng một người đăng nhập kiểu khác là thành hai dòng `users`.
+    """
+    try:
+        candidates = [os.getlogin()]
+    except OSError:          # không có console (chạy bằng pythonw, dịch vụ…)
+        candidates = []
+    candidates += [os.environ.get("USERNAME"), os.environ.get("USER")]
+    for value in candidates:
+        name = (value or "").strip()
+        if name:
+            return name.lower()
+    return ""
+
+
+def _resolve_user_id(conn) -> int | None:
+    """Tra `user_id` của tài khoản Windows hiện tại, TẠO dòng nếu chưa có.
+
+    Dòng `users` gắn với MÁY chứ không gắn với file .db, nên không dùng kiểu
+    đánh dấu một-lần-mỗi-.db như `_seed_master_data()`: máy thứ hai mở đúng file
+    DB đó phải tự thêm được dòng của mình.
+    """
+    login = windows_login()
+    if not login or not _table_exists(conn, "users"):
+        return None
+    row = conn.execute("SELECT user_id FROM users WHERE windows_login = ?",
+                       (login,)).fetchone()
+    if row is not None:
+        return row[0]
+    # Tên hiển thị mặc định = chính tên tài khoản; người dùng đặt lại ở Settings.
+    return conn.execute(
+        "INSERT INTO users (windows_login, display_name) VALUES (?, ?)",
+        (login, login)).lastrowid
+
+
+def current_user_id(conn=None) -> int | None:
+    """id của người đang chạy app (None nếu chưa tra được).
+
+    `conn` là kết nối ĐANG MỞ của lượt ghi gọi tới: phải dùng lại nó chứ không
+    mở kết nối mới, nếu không lượt tạo dòng `users` sẽ đụng khóa ghi của chính
+    lượt ghi đang chạy.
+    """
+    global _USER_ID
+    if _USER_ID is not None:
+        return _USER_ID
+    if conn is not None:
+        _USER_ID = _resolve_user_id(conn)
+    else:
+        with get_connection() as own:
+            _USER_ID = _resolve_user_id(own)
+    return _USER_ID
+
+
+def forget_current_user() -> None:
+    """Quên id đã tra, lần ghi sau tra lại từ đầu.
+
+    Cần gọi khi FILE .db bị THAY (lượt đồng bộ kéo bản của máy kia về): id đang
+    nhớ là id trong file cũ, file mới cùng một tài khoản Windows có thể mang id
+    khác — không quên đi thì mọi dấu vết ghi sau đó trỏ nhầm người.
+    """
+    global _USER_ID
+    _USER_ID = None
+
+
+def _audit_insert(conn, table: str) -> dict:
+    """Cột lưu vết cho một lượt INSERT: {created_by, updated_by} = người đang
+    chạy app.
+
+    Bảng nào thiếu cột nào thì bỏ qua đúng cột ấy — bảng chỉ-ghi-thêm chỉ có
+    `created_by`, còn `users`/`app_meta` không có cột nào. Đặt cả `updated_by`
+    ngay từ lúc tạo để đối xứng với `updated_at` (cột đó cũng được DEFAULT điền
+    sẵn), nhờ vậy câu hỏi "dòng này của ai" luôn có câu trả lời.
+    """
+    have = _columns(conn, table)
+    cols = [c for c in ("created_by", "updated_by") if c in have]
+    if not cols:
+        return {}
+    user_id = current_user_id(conn)
+    return {} if user_id is None else {c: user_id for c in cols}
+
+
+def _audit_update(conn, table: str) -> tuple[str, list]:
+    """Mẩu SQL ", updated_by = ?" + tham số cho một lượt UPDATE ("" nếu bảng
+    không có cột hoặc chưa tra được người dùng).
+
+    Trả về mẩu SQL thay vì ghi thẳng để mấy câu UPDATE viết tay (đổi trạng thái
+    mail sinh nhật, ghi nguồn CV…) dùng lại được y như `_update_conn`.
+    """
+    user_id = current_user_id(conn) if _has_column(conn, table, "updated_by") else None
+    return (", updated_by = ?", [user_id]) if user_id is not None else ("", [])
+
+
+def get_user(user_id):
+    return _get("users", user_id)
+
+
+def list_users():
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT * FROM users ORDER BY COALESCE(display_name, windows_login)"
+        ).fetchall()
+
+
+def current_user():
+    """Dòng `users` của người đang chạy app (None nếu chưa tra được)."""
+    with get_connection() as conn:
+        user_id = current_user_id(conn)
+        if user_id is None:
+            return None
+        return conn.execute("SELECT * FROM users WHERE user_id = ?",
+                            (user_id,)).fetchone()
+
+
+def update_user(user_id, data: dict) -> None:
+    """Sửa hồ sơ người dùng. `avatar` = bytes ảnh PNG (None để gỡ ảnh)."""
+    _update("users", USER_FIELDS, user_id, data)
+
+
+def user_names() -> dict:
+    """{user_id → tên hiển thị} — để đổi `created_by`/`updated_by` thành tên."""
+    return {r["user_id"]: (r["display_name"] or r["windows_login"] or
+                           f"#{r['user_id']}") for r in list_users()}
 
 
 # ═══════════════════════════ DANH MỤC DÙNG CHUNG ════════════════════════
@@ -518,15 +729,12 @@ def replace_department_functions(department_id, names) -> None:
                              (row["function_id"],))
                 continue
             if wanted[low] != row["function_name"]:
-                conn.execute(
-                    "UPDATE functions SET function_name = ?, "
-                    "updated_at = datetime('now', 'localtime') "
-                    "WHERE function_id = ?", (wanted[low], row["function_id"]))
+                _update_conn(conn, "functions", FUNCTION_FIELDS, row["function_id"],
+                             {"function_name": wanted[low]})
             wanted.pop(low)
         for name in wanted.values():
-            conn.execute(
-                "INSERT INTO functions (department_id, function_name) VALUES (?, ?)",
-                (department_id, name))
+            _insert_conn(conn, "functions", FUNCTION_FIELDS,
+                         {"department_id": department_id, "function_name": name})
 
 
 def list_employee_types():
@@ -896,7 +1104,11 @@ SELECT c.*,
        e.ai_score, e.rule_score, e.evaluated_at,
        e.summary AS fit_summary, e.strengths, e.weaknesses,
        (SELECT COUNT(*) FROM applications x WHERE x.candidate_id = c.candidate_id)
-           AS application_count
+           AS application_count,
+       -- Ai sửa hồ sơ này gần nhất (DB dùng chung giữa nhiều người) — đổi id ra
+       -- tên ngay trong câu truy vấn để màn hình khỏi phải tra bảng `users`.
+       (SELECT COALESCE(u.display_name, u.windows_login) FROM users u
+         WHERE u.user_id = c.updated_by) AS updated_by_name
 FROM candidates c
 LEFT JOIN applications a ON a.application_id = (
         SELECT x.application_id FROM applications x
@@ -1011,17 +1223,21 @@ def set_candidate_source(candidate_id, source: str, application_id=None) -> None
     source = (source or "").strip()
     now = _now()
     with get_connection() as conn:
+        by, by_params = _audit_update(conn, "candidates")
         conn.execute(
-            "UPDATE candidates SET source = ?, updated_at = ? WHERE candidate_id = ?",
-            (source, now, candidate_id))
+            f"UPDATE candidates SET source = ?, updated_at = ?{by} "
+            "WHERE candidate_id = ?", [source, now] + by_params + [candidate_id])
         if application_id:
+            by, by_params = _audit_update(conn, "applications")
             conn.execute(
-                "UPDATE applications SET source = ?, updated_at = ? "
-                "WHERE application_id = ?", (source, now, application_id))
+                f"UPDATE applications SET source = ?, updated_at = ?{by} "
+                "WHERE application_id = ?",
+                [source, now] + by_params + [application_id])
+        by, by_params = _audit_update(conn, "candidate_cvs")
         conn.execute(
-            "UPDATE candidate_cvs SET source = ?, updated_at = ? WHERE cv_id = "
+            f"UPDATE candidate_cvs SET source = ?, updated_at = ?{by} WHERE cv_id = "
             "(SELECT latest_cv_id FROM candidates WHERE candidate_id = ?)",
-            (source, now, candidate_id))
+            [source, now] + by_params + [candidate_id])
 
 
 def delete_candidate(candidate_id) -> None:
@@ -1173,17 +1389,15 @@ def set_cv_file_path(candidate_id, path) -> None:
             (candidate_id,)).fetchone()
         cv_id = row["latest_cv_id"] if row else None
         if cv_id:
-            conn.execute(
-                "UPDATE candidate_cvs SET file_path = ?, "
-                "updated_at = datetime('now', 'localtime') WHERE cv_id = ?",
-                (path, cv_id))
+            _update_conn(conn, "candidate_cvs", CANDIDATE_CV_FIELDS, cv_id,
+                         {"file_path": path})
         else:
-            _insert_conn(conn, "candidate_cvs", CANDIDATE_CV_FIELDS,
-                         {"candidate_id": candidate_id, "file_path": path,
-                          "received_at": date.today().isoformat()})
-            conn.execute(
-                "UPDATE candidates SET latest_cv_id = last_insert_rowid() "
-                "WHERE candidate_id = ?", (candidate_id,))
+            new_id = _insert_conn(
+                conn, "candidate_cvs", CANDIDATE_CV_FIELDS,
+                {"candidate_id": candidate_id, "file_path": path,
+                 "received_at": date.today().isoformat()})
+            _update_conn(conn, "candidates", CANDIDATE_FIELDS, candidate_id,
+                         {"latest_cv_id": new_id})
 
 
 def candidate_cv_path(candidate_id) -> str:
@@ -1778,10 +1992,9 @@ def log_activity(data: dict) -> int:
     with get_connection() as conn:
         act_id = _insert_conn(conn, "candidate_activities", ACTIVITY_FIELDS, data)
         if data.get("type") in ("Email", "Call") and data.get("candidate_id"):
-            conn.execute(
-                "UPDATE candidates SET last_contacted_at = ?, "
-                "updated_at = datetime('now', 'localtime') WHERE candidate_id = ?",
-                (data["occurred_at"], data["candidate_id"]))
+            _update_conn(conn, "candidates", CANDIDATE_FIELDS,
+                         data["candidate_id"],
+                         {"last_contacted_at": data["occurred_at"]})
     return act_id
 
 
@@ -2278,13 +2491,14 @@ def claim_birthday_email(row_id) -> bool:
     `Sent`/`Cancelled` là trạng thái cuối, không giành được.
     """
     with get_connection() as conn:
+        by, by_params = _audit_update(conn, "birthday_emails")
         cur = conn.execute(
             "UPDATE birthday_emails "
-            "SET status = ?, updated_at = datetime('now', 'localtime') "
+            f"SET status = ?, updated_at = datetime('now', 'localtime'){by} "
             "WHERE birthday_email_id = ? AND status IN (?, ?, ?)",
-            (cv_schema.BIRTHDAY_EMAIL_SENDING, row_id,
-             cv_schema.BIRTHDAY_EMAIL_PENDING, cv_schema.BIRTHDAY_EMAIL_FAILED,
-             cv_schema.BIRTHDAY_EMAIL_MISSED))
+            [cv_schema.BIRTHDAY_EMAIL_SENDING] + by_params +
+            [row_id, cv_schema.BIRTHDAY_EMAIL_PENDING,
+             cv_schema.BIRTHDAY_EMAIL_FAILED, cv_schema.BIRTHDAY_EMAIL_MISSED])
         return cur.rowcount == 1
 
 
@@ -2296,38 +2510,41 @@ def reset_stale_sending(cutoff: str) -> int:
     crash là dòng đó không bao giờ được gửi nữa.
     """
     with get_connection() as conn:
+        by, by_params = _audit_update(conn, "birthday_emails")
         return conn.execute(
             "UPDATE birthday_emails "
-            "SET status = ?, updated_at = datetime('now', 'localtime') "
+            f"SET status = ?, updated_at = datetime('now', 'localtime'){by} "
             "WHERE status = ? AND COALESCE(updated_at, '') < ?",
-            (cv_schema.BIRTHDAY_EMAIL_PENDING,
-             cv_schema.BIRTHDAY_EMAIL_SENDING, cutoff)).rowcount
+            [cv_schema.BIRTHDAY_EMAIL_PENDING] + by_params +
+            [cv_schema.BIRTHDAY_EMAIL_SENDING, cutoff]).rowcount
 
 
 def expire_birthday_emails(earliest_iso: str) -> int:
     """Quá hạn gửi bù → `Missed`: dòng còn chờ mà `due_date` đã lùi xa hơn mốc
     sớm nhất còn được gửi. Không tự gửi nữa, chỉ để người dùng nhìn thấy."""
     with get_connection() as conn:
+        by, by_params = _audit_update(conn, "birthday_emails")
         return conn.execute(
             "UPDATE birthday_emails "
-            "SET status = ?, updated_at = datetime('now', 'localtime') "
+            f"SET status = ?, updated_at = datetime('now', 'localtime'){by} "
             "WHERE status IN (?, ?) AND due_date < ?",
-            (cv_schema.BIRTHDAY_EMAIL_MISSED,
-             cv_schema.BIRTHDAY_EMAIL_PENDING, cv_schema.BIRTHDAY_EMAIL_FAILED,
-             earliest_iso)).rowcount
+            [cv_schema.BIRTHDAY_EMAIL_MISSED] + by_params +
+            [cv_schema.BIRTHDAY_EMAIL_PENDING, cv_schema.BIRTHDAY_EMAIL_FAILED,
+             earliest_iso]).rowcount
 
 
 def mark_birthday_email_sent(row_id) -> None:
     """Gửi xong. SQL viết tay vì `attempts + 1` là BIỂU THỨC — `_update` chỉ gán
     được giá trị có sẵn."""
     with get_connection() as conn:
+        by, by_params = _audit_update(conn, "birthday_emails")
         conn.execute(
             "UPDATE birthday_emails "
             "SET status = ?, sent_at = datetime('now', 'localtime'), "
             "    attempts = COALESCE(attempts, 0) + 1, last_error = NULL, "
-            "    updated_at = datetime('now', 'localtime') "
+            f"    updated_at = datetime('now', 'localtime'){by} "
             "WHERE birthday_email_id = ?",
-            (cv_schema.BIRTHDAY_EMAIL_SENT, row_id))
+            [cv_schema.BIRTHDAY_EMAIL_SENT] + by_params + [row_id])
 
 
 def mark_birthday_email_failed(row_id, error: str,
@@ -2339,13 +2556,14 @@ def mark_birthday_email_failed(row_id, error: str,
     được thiệp) — không đẩy số lần thử lên oan.
     """
     with get_connection() as conn:
+        by, by_params = _audit_update(conn, "birthday_emails")
         conn.execute(
             "UPDATE birthday_emails "
             f"SET status = ?, last_error = ?, "
             f"    attempts = COALESCE(attempts, 0) + {1 if count_attempt else 0}, "
-            "    updated_at = datetime('now', 'localtime') "
+            f"    updated_at = datetime('now', 'localtime'){by} "
             "WHERE birthday_email_id = ?",
-            (status or cv_schema.BIRTHDAY_EMAIL_FAILED, error, row_id))
+            [status or cv_schema.BIRTHDAY_EMAIL_FAILED, error] + by_params + [row_id])
 
 
 def count_birthday_emails(status: str = "", year=None) -> int:
