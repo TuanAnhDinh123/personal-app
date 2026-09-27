@@ -65,6 +65,7 @@ personal-app/
 └── app/core/                # LOGIC NGHIỆP VỤ (thuần Python, KHÔNG dính UI)
     ├── config.py · settings.py          # cấu hình
     ├── cv_repository.py · cv_schema.py   # SQLite quản lý CV ứng viên
+    ├── shared_db.py                      # Đẩy bản sao DB lên thư mục dùng chung (ổ mạng)
     ├── employee_excel.py                 # SSOT bố cục file Excel "Personnel Data"
     ├── employee_sync.py                  # Đối chiếu bảng employees ↔ file Excel HC
     ├── docx_merge.py                     # Điền trường MERGEFIELD của file Word (.docx)
@@ -78,6 +79,33 @@ personal-app/
     ├── pdf_text.py                       # PDF → Markdown (+ OCR bằng Gemini)
     └── reminder_logic.py                 # Helper nhắc phản hồi phỏng vấn
 ```
+
+## DB dùng chung trên ổ mạng 🗄️
+
+[app/core/shared_db.py](app/core/shared_db.py) — mỗi máy làm việc trên file
+`.db` ở ổ local; thư mục dùng chung (⚙️ **Settings → Shared database**, khóa
+`shared_db_folder`) chỉ nhận **bản chủ** + lịch sử. Không máy nào mở SQLite trực
+tiếp trên ổ mạng (SQLite qua SMB/VPN là hỏng file). **Để trống = tắt hẳn**, app
+chạy một máy như cũ.
+
+```
+<shared_db_folder>\
+├── candidates.sqlite    ← bản chủ
+├── state.json           ← version · updated_by · updated_at · schema_version · reason
+└── history\             ← candidates-YYYYMMDD-HHMMSS-<tài khoản>.sqlite, giữ 30 bản
+```
+
+- **Khi nào đẩy**: lúc **đóng app** (cửa sổ ẩn ngay, lượt đẩy chờ tối đa 60 giây
+  rồi thôi) và nút **Back up now** ở Settings (chạy nền, báo kết quả).
+- **Chụp bằng `sqlite3.Connection.backup()`** ra file tạm ở ổ local (không copy
+  file thô), `quick_check` rồi mới copy lên tên tạm trong thư mục đích và
+  `os.replace()` đè bản chủ — rớt mạng giữa chừng thì bản chủ cũ còn nguyên.
+- **`version`** tăng mỗi lượt, nằm ở cả `state.json` lẫn `app_meta` (khóa
+  `sync:version`) của chính file `.db` nên đi theo file khi được copy.
+  `schema_version` = tên lượt migration mới nhất của DB.
+- **Thư mục không với tới** (chưa bật VPN, ổ chưa mount) → bỏ qua, ghi một dòng
+  vào `debug.log`, không báo lỗi và không chặn việc đóng app.
+- Mới có chiều **ĐẨY LÊN**; chưa có khóa, chưa có kéo về.
 
 ## Thêm một tác vụ mới
 

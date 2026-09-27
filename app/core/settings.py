@@ -43,6 +43,9 @@ DEFAULTS = {
     # dấu hiệu để đánh số lại từ 1 (xem `next_decision_number`).
     "resignation_decision_no": 1,
     "resignation_decision_year": 0,
+    # Thư mục dùng chung (ổ mạng) nhận bản chủ của DB — app/core/shared_db.py.
+    # Để trống = tắt hẳn tính năng, app chạy một máy như bình thường.
+    "shared_db_folder": "",
 }
 
 # Section cũ (tool "Quét CV bằng AI" từng lưu API key/model ở đây). Dùng để tự

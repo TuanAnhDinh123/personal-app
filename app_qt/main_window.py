@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
+from app.core import debuglog, shared_db
 from app_qt import icons, profile, settings_page, theme, widgets
 from app_qt.registry import discover_tools
 
@@ -223,6 +224,25 @@ class MainWindow(QMainWindow):
                 tool.startup(self)
             except Exception:
                 pass   # một tool lỗi không được làm hỏng cả app
+
+    # Thời gian tối đa chờ lượt đẩy DB lên thư mục dùng chung lúc đóng app.
+    SHARED_PUSH_TIMEOUT = 60
+
+    def closeEvent(self, e):
+        """Đóng app → đẩy DB lên thư mục dùng chung (nếu đã cấu hình).
+
+        Ẩn cửa sổ TRƯỚC rồi mới đẩy, nên người dùng thấy app đóng ngay; lượt
+        đẩy lỗi / thư mục không với tới chỉ ghi log, không chặn việc đóng.
+        """
+        super().closeEvent(e)
+        try:
+            if not e.isAccepted() or not shared_db.is_enabled():
+                return
+            self.hide()
+            QApplication.processEvents()
+            shared_db.push_with_timeout("close", self.SHARED_PUSH_TIMEOUT)
+        except Exception as exc:
+            debuglog.exception("closeEvent: shared DB push", exc)
 
     def changeEvent(self, e):
         """Phóng to → vuông (bỏ bo góc + viền); khôi phục → bo góc lại."""

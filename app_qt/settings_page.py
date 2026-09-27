@@ -1,8 +1,9 @@
 """Màn hình "Cài đặt" (PySide6). Dùng lại app.core.settings (backend không đổi)."""
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
 
-from app.core import outlook, settings
+from app.core import outlook, settings, shared_db
 from app_qt import dialogs, theme, widgets
+from app_qt.components.task import Task
 
 
 def _int_or_default(text, key):
@@ -120,6 +121,59 @@ def build():
                         "Set it to 0 to turn catch-up off: anyone whose birthday has "
                         "already passed is marked Missed instead.")
 
+    # ---- Nhóm DB dùng chung ----
+    inner = _group_card(outer_lay)
+    widgets.section_label(inner, "Shared database")
+    fields["shared_db_folder"] = widgets.file_row(
+        inner, "Shared database folder (network drive)", mode="folder")
+    fields["shared_db_folder"].set(data["shared_db_folder"])
+    widgets.hint(inner, "When set, the app copies its database to this folder every "
+                        "time you close it, and keeps the last "
+                        f"{shared_db.HISTORY_KEEP} copies in a history subfolder. "
+                        "If the folder can't be reached (VPN off, drive not "
+                        "connected) the backup is skipped silently. Leave it empty "
+                        "to keep the database on this computer only.")
+    backup_row = QHBoxLayout()
+    backup_row.setContentsMargins(0, 6, 0, 0)
+    backup_btn = widgets.button(inner, "Back up now", variant="neutral",
+                                icon="download")
+    backup_row.addWidget(backup_btn)
+    backup_row.addStretch(1)
+    inner.layout().addLayout(backup_row)
+
+    def backup_now():
+        folder = fields["shared_db_folder"].get().strip()
+        if not folder:
+            dialogs.warning(outer, "Back up now",
+                            "Choose a shared database folder first.")
+            return
+        if folder != shared_db.shared_folder():
+            dialogs.warning(outer, "Back up now",
+                            "The shared database folder has changed. "
+                            "Click Save settings first.")
+            return
+        backup_btn.setEnabled(False)
+        backup_btn.setText("Backing up…")
+
+        def done(result):
+            backup_btn.setEnabled(True)
+            backup_btn.setText("Back up now")
+            if result.ok:
+                dialogs.success(outer, "Back up now", result.message)
+            elif result.skipped:
+                dialogs.warning(outer, "Back up now", result.message)
+            else:
+                dialogs.error(outer, "Back up now",
+                              f"{result.message}\n\nDetails are in debug.log.")
+
+        # Ổ mạng có thể treo hàng chục giây → chạy nền, không đứng giao diện.
+        task = Task(lambda _emit: shared_db.push("manual"), outer)
+        task.signals.finished.connect(done)
+        outer._backup_task = task      # giữ tham chiếu để QThread không bị thu hồi
+        task.start()
+
+    backup_btn.clicked.connect(lambda *_: backup_now())
+
     # ---- Nút lưu ----
     # Thẻ tự chừa CARD_PAD cho bóng → nút (không phải thẻ) thêm lề trái CARD_PAD
     # để thẳng hàng mép thẻ nhìn thấy.
@@ -148,6 +202,7 @@ def build():
                               or settings.DEFAULTS["birthday_subject"]),
             birthday_catchup_days=_int_or_default(
                 fields["birthday_catchup_days"].get(), "birthday_catchup_days"),
+            shared_db_folder=fields["shared_db_folder"].get().strip(),
         )
         dialogs.success(outer, "Saved", "Settings saved ✅")
 
