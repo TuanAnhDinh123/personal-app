@@ -16,6 +16,7 @@ import hashlib
 import os
 import re
 import sqlite3
+import threading
 from datetime import date, datetime
 
 from app.core import cv_schema
@@ -192,13 +193,139 @@ def _db_path() -> str:
     return os.path.join(folder, "candidates.sqlite")
 
 
+# ─────────────── Đếm kết nối · thay file .db · cổng ghi ───────────────────
+#
+# File .db local có thể bị THAY NGUYÊN FILE bằng bản kéo về từ thư mục dùng
+# chung (`shared_db.ensure_fresh`). Thay file ngay dưới chân một kết nối đang
+# mở là hỏng dữ liệu, nên:
+#   • `_Connection` tự đếm số kết nối đang mở (tăng lúc mở, giảm lúc đóng);
+#   • mở kết nối và thay file cùng giữ `_FILE_LOCK` → không kết nối nào chen
+#     vào giữa lúc thay; `replace_db_file()` chỉ thay khi đếm bằng 0.
+
+_FILE_LOCK = threading.RLock()
+_COUNT_LOCK = threading.Lock()
+_OPEN_CONNECTIONS = 0
+
+# Hàm chạy ở đầu mỗi `get_connection()` — `shared_db` gắn vào để kiểm tra bản
+# chủ mới (module này không import `shared_db` vì chiều ngược lại đã có).
+_connect_hook = None
+
+
+def set_connect_hook(fn) -> None:
+    global _connect_hook
+    _connect_hook = fn
+
+
+def open_connection_count() -> int:
+    with _COUNT_LOCK:
+        return _OPEN_CONNECTIONS
+
+
+def _count_connection(delta: int) -> None:
+    global _OPEN_CONNECTIONS
+    with _COUNT_LOCK:
+        _OPEN_CONNECTIONS += delta
+
+
+# Câu lệnh GHI: nhận diện bằng từ khóa đầu câu (bỏ qua comment đứng trước).
+# `WITH … AS (…) INSERT/UPDATE…` cũng là ghi. `executescript` có nhiều câu nên
+# xét đầu MỌI câu (sau mỗi dấu `;`).
+_LEADING_COMMENTS = r"(?:\s|--[^\n]*(?:\n|$)|/\*.*?\*/)*"
+_WRITE_VERBS = r"(?:INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER)\b"
+_WRITE_RE = re.compile(r"^" + _LEADING_COMMENTS + _WRITE_VERBS, re.I | re.S)
+_WRITE_IN_SCRIPT_RE = re.compile(r"(?:^|;)" + _LEADING_COMMENTS + _WRITE_VERBS,
+                                 re.I | re.S)
+_CTE_WRITE_RE = re.compile(r"^" + _LEADING_COMMENTS + r"WITH\b.*\)\s*"
+                           r"(?:INSERT|UPDATE|DELETE|REPLACE)\b", re.I | re.S)
+
+
+def is_write_sql(sql: str, script: bool = False) -> bool:
+    """Câu SQL (hoặc cả script) có GHI vào DB không."""
+    sql = sql or ""
+    if script:
+        return bool(_WRITE_IN_SCRIPT_RE.search(sql))
+    return bool(_WRITE_RE.match(sql) or _CTE_WRITE_RE.match(sql))
+
+
+class ReadOnlyDatabaseError(RuntimeError):
+    """Lượt ghi bị chặn vì máy này đang ở chế độ chỉ đọc."""
+
+    MESSAGE = ("This computer is in read-only mode (Settings → Shared database), "
+               "so changes can't be saved here. The data you see comes from the "
+               "shared database; make this change on the computer that edits it.")
+
+    def __init__(self, message: str = MESSAGE):
+        super().__init__(message)
+
+
+def _before_first_write(conn) -> None:
+    """Cổng ghi: chạy ở câu GHI ĐẦU TIÊN của mỗi kết nối, qua được thì các câu
+    ghi sau của kết nối đó đi thẳng.
+
+    Máy bật `shared_db_read_only` thì chặn (ném `ReadOnlyDatabaseError`). Kết
+    nối bảo trì của `init_db()` được miễn — xem `init_db`.
+    """
+    if conn.maintenance:
+        return
+    from app.core import settings   # import muộn: settings không cần lúc nạp module
+    if settings.get("shared_db_read_only", False):
+        raise ReadOnlyDatabaseError()
+
+
 class _Connection(sqlite3.Connection):
-    """Kết nối tự ĐÓNG khi thoát khối `with`.
+    """Kết nối tự ĐÓNG khi thoát khối `with`, tự đếm, và đi qua cổng ghi.
 
     `sqlite3.Connection` gốc chỉ commit/rollback ở `__exit__` chứ không đóng
     file, nên file .db còn bị giữ cho tới lượt gom rác. Trên Windows điều đó
     chặn hẳn việc đổi tên DB cũ lúc dựng lại schema (WinError 32).
+
+    Mọi câu lệnh đi qua `execute`/`executemany`/`executescript` (repository
+    không dùng cursor riêng) nên cổng ghi đặt ở đây là đủ cho toàn app.
     """
+
+    # True = kết nối bảo trì (migration / seed / dòng `users` của máy) — được
+    # ghi kể cả ở chế độ chỉ đọc.
+    maintenance = False
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._counted = True
+        self._write_checked = False
+        _count_connection(+1)
+
+    def _release(self):
+        if getattr(self, "_counted", False):
+            self._counted = False
+            _count_connection(-1)
+
+    def close(self):
+        try:
+            super().close()
+        finally:
+            self._release()
+
+    def __del__(self):
+        # Kết nối bị bỏ rơi không qua close() vẫn phải trả lại lượt đếm, nếu
+        # không file .db sẽ không bao giờ được thay nữa.
+        self._release()
+
+    def _check_write(self, sql, script=False):
+        if self._write_checked or not is_write_sql(sql, script):
+            return
+        _before_first_write(self)
+        self._write_checked = True
+
+    def execute(self, sql, *args, **kwargs):
+        self._check_write(sql)
+        return super().execute(sql, *args, **kwargs)
+
+    def executemany(self, sql, *args, **kwargs):
+        self._check_write(sql)
+        return super().executemany(sql, *args, **kwargs)
+
+    def executescript(self, sql):
+        self._check_write(sql, script=True)
+        return super().executescript(sql)
 
     def __exit__(self, exc_type, exc, tb):
         try:
@@ -212,10 +339,52 @@ def get_connection() -> sqlite3.Connection:
 
     Luôn dùng trong khối `with` — thoát khối là commit và ĐÓNG luôn kết nối.
     KHÔNG bật PRAGMA foreign_keys — thiết kế cố tình không dùng khóa ngoại.
+
+    Trước khi mở, gọi `_connect_hook` (kiểm tra bản chủ mới hơn trên thư mục
+    dùng chung — hook tự giới hạn tần suất và không chờ ổ mạng). Hook lỗi thì
+    chỉ ghi log: không được làm hỏng lượt đọc/ghi của người dùng.
     """
-    conn = sqlite3.connect(_db_path(), factory=_Connection)
+    hook = _connect_hook
+    if hook is not None:
+        try:
+            hook()
+        except Exception as exc:
+            from app.core import debuglog
+            debuglog.exception("get_connection: connect hook failed", exc)
+    with _FILE_LOCK:
+        conn = sqlite3.connect(_db_path(), factory=_Connection)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def replace_db_file(new_path: str, keep_old_as: str | None = None) -> bool:
+    """Thay file .db local bằng `new_path` (cùng ổ đĩa → `os.replace` nguyên tử).
+
+    Chỉ thay khi KHÔNG còn kết nối nào mở và không có file journal/WAL sót lại
+    (journal cũ nằm cạnh file mới sẽ bị SQLite áp nhầm lên file mới). Trả về
+    False nếu phải hoãn — `new_path` giữ nguyên để lần sau thay tiếp.
+
+    `keep_old_as`: đổi tên file cũ sang đây thay vì bỏ đi (bản lưu phòng hờ).
+    Thay xong thì quên id người dùng đang nhớ: đó là id trong file cũ.
+    """
+    db = _db_path()
+    with _FILE_LOCK:
+        if open_connection_count() != 0:
+            return False
+        if any(os.path.exists(db + suffix) for suffix in ("-journal", "-wal")):
+            return False
+        moved_old = False
+        try:
+            if keep_old_as and os.path.exists(db):
+                os.replace(db, keep_old_as)
+                moved_old = True
+            os.replace(new_path, db)
+        except OSError:
+            if moved_old and not os.path.exists(db):
+                os.replace(keep_old_as, db)
+            raise
+        forget_current_user()
+        return True
 
 
 # Có dùng được bảng ảo FTS5 hay không (một số bản SQLite không biên dịch kèm).
@@ -233,6 +402,7 @@ def applied_migrations() -> set[str]:
     if not os.path.exists(_db_path()):
         return set()
     with get_connection() as conn:
+        conn.maintenance = True
         conn.execute(_META_TABLE_SQL)
         return {r[0][len("migration:"):] for r in conn.execute(
             "SELECT key FROM app_meta WHERE key LIKE 'migration:%'")}
@@ -252,12 +422,20 @@ def init_db() -> None:
     Mỗi lượt chạy xong mới được đánh dấu, và đánh dấu nằm cùng transaction với
     chính lượt đó → lượt nào lỗi thì DỪNG HẲN (ném lỗi ra ngoài), không đánh
     dấu, lần mở app sau thử lại đúng lượt đó.
+
+    Chạy bằng KẾT NỐI BẢO TRÌ, được ghi kể cả khi máy ở chế độ chỉ đọc: mọi
+    thứ nó ghi (cấu trúc bảng, danh mục khởi tạo, dòng `users` của máy này)
+    chỉ là đưa file về đúng dạng mà code của app đang chạy cần, không phải dữ
+    liệu người dùng nhập. Trên máy chỉ đọc, file local không bao giờ được đẩy
+    lên và bị thay nguyên file ở lượt kéo sau, nên các lượt ghi này không lan
+    sang máy nào. Chặn nó thì app không mở nổi mỗi khi bản chủ cũ hơn app.
     """
     global FTS_AVAILABLE
     # Máy chưa có file .db → mọi thứ sinh ra trong chính lượt này, không có dữ
     # liệu "cũ" nào để gán người (xem `_backfill_audit`).
     fresh_db = not os.path.exists(_db_path())
     with get_connection() as conn:
+        conn.maintenance = True
         conn.execute(_META_TABLE_SQL)
         done = {r[0] for r in conn.execute(
             "SELECT key FROM app_meta WHERE key LIKE 'migration:%'")}

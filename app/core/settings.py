@@ -46,6 +46,9 @@ DEFAULTS = {
     # Thư mục dùng chung (ổ mạng) nhận bản chủ của DB — app/core/shared_db.py.
     # Để trống = tắt hẳn tính năng, app chạy một máy như bình thường.
     "shared_db_folder": "",
+    # Máy CHỈ ĐỌC: vẫn kéo bản chủ về, nhưng mọi lượt ghi DB bị chặn và không
+    # bao giờ đẩy lên. Rào chắn khi chưa có khóa ghi — chỉ một máy được ghi.
+    "shared_db_read_only": False,
 }
 
 # Section cũ (tool "Quét CV bằng AI" từng lưu API key/model ở đây). Dùng để tự

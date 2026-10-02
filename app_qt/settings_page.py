@@ -127,12 +127,21 @@ def build():
     fields["shared_db_folder"] = widgets.file_row(
         inner, "Shared database folder (network drive)", mode="folder")
     fields["shared_db_folder"].set(data["shared_db_folder"])
-    widgets.hint(inner, "When set, the app copies its database to this folder every "
-                        "time you close it, and keeps the last "
-                        f"{shared_db.HISTORY_KEEP} copies in a history subfolder. "
+    widgets.hint(inner, "When set, the app downloads the newest shared copy when it "
+                        "starts and every few minutes, and uploads its own copy "
+                        "every time you close it (keeping the last "
+                        f"{shared_db.HISTORY_KEEP} copies in a history subfolder). "
                         "If the folder can't be reached (VPN off, drive not "
-                        "connected) the backup is skipped silently. Leave it empty "
-                        "to keep the database on this computer only.")
+                        "connected) the app keeps working on its local copy. Leave "
+                        "it empty to keep the database on this computer only.")
+    fields["shared_db_read_only"] = widgets.checkbox(
+        inner, "Read-only on this computer", checked=bool(data["shared_db_read_only"]))
+    widgets.hint(inner, "Turn this on for every computer except the one that edits "
+                        "the data. A read-only computer still downloads the latest "
+                        "shared database (at start-up, every few minutes, and with "
+                        "Refresh in the sidebar), but it can't save changes and "
+                        "never uploads. Only one computer may edit at a time — two "
+                        "editors would overwrite each other's work.")
     backup_row = QHBoxLayout()
     backup_row.setContentsMargins(0, 6, 0, 0)
     backup_btn = widgets.button(inner, "Back up now", variant="neutral",
@@ -203,7 +212,11 @@ def build():
             birthday_catchup_days=_int_or_default(
                 fields["birthday_catchup_days"].get(), "birthday_catchup_days"),
             shared_db_folder=fields["shared_db_folder"].get().strip(),
+            shared_db_read_only=bool(fields["shared_db_read_only"].get()),
         )
+        # Đổi thư mục / chế độ chỉ đọc → kiểm lại ngay (ở nền) để ô trạng thái
+        # ở sidebar và bản local cập nhật luôn, không đợi nhịp định kỳ.
+        shared_db.check_in_background("settings")
         dialogs.success(outer, "Saved", "Settings saved ✅")
 
     btn = widgets.button(outer, "Save settings", variant="primary", icon="save", command=save)

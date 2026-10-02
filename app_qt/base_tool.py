@@ -76,6 +76,18 @@ class BaseTool(ABC):
     def startup(self, window) -> None:
         """Chạy tự động khi mở app (chỉ khi auto_startup=True)."""
 
+    def reload_data(self) -> None:
+        """Đọc lại dữ liệu từ DB lên trang đã dựng.
+
+        `MainWindow` gọi sau khi file .db local bị THAY bằng bản kéo về từ thư
+        mục dùng chung, để trang đang mở không hiện dữ liệu cũ. Mặc định gọi
+        `_reload()` nếu tool có (giữ nguyên bộ lọc đang chọn); tool không đọc
+        DB thì không làm gì.
+        """
+        fn = getattr(self, "_reload", None)
+        if callable(fn):
+            fn()
+
     # --- tiện ích hộp thoại cho class con ---
     def info(self, title, msg):
         dialogs.info(getattr(self, "_page", None), title, msg)

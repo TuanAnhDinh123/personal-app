@@ -57,6 +57,7 @@ personal-app/
 │   ├── dialogs.py           # Hộp thoại tùy biến (info/error/confirm)
 │   ├── settings_page.py     # Trang Cài đặt
 │   ├── profile.py           # Hồ sơ người dùng (tên hiển thị + avatar)
+│   ├── sync_status.py       # Ô trạng thái đồng bộ DB ở sidebar (Synced · Refresh · Read-only)
 │   ├── icons.py             # Map emoji → tên icon line
 │   ├── richtext.py          # Ô soạn thảo rich text (QTextEdit)
 │   ├── assets/icons/        # Bộ icon line (SVG)
@@ -65,7 +66,7 @@ personal-app/
 └── app/core/                # LOGIC NGHIỆP VỤ (thuần Python, KHÔNG dính UI)
     ├── config.py · settings.py          # cấu hình
     ├── cv_repository.py · cv_schema.py   # SQLite quản lý CV ứng viên
-    ├── shared_db.py                      # Đẩy bản sao DB lên thư mục dùng chung (ổ mạng)
+    ├── shared_db.py                      # Đồng bộ DB ↔ thư mục dùng chung (ổ mạng): đẩy · kéo · chỉ đọc
     ├── employee_excel.py                 # SSOT bố cục file Excel "Personnel Data"
     ├── employee_sync.py                  # Đối chiếu bảng employees ↔ file Excel HC
     ├── docx_merge.py                     # Điền trường MERGEFIELD của file Word (.docx)
@@ -91,21 +92,91 @@ chạy một máy như cũ.
 ```
 <shared_db_folder>\
 ├── candidates.sqlite    ← bản chủ
-├── state.json           ← version · updated_by · updated_at · schema_version · reason
+├── state.json           ← version · db_id · updated_by · updated_at · schema_version · reason
 └── history\             ← candidates-YYYYMMDD-HHMMSS-<tài khoản>.sqlite, giữ 30 bản
 ```
 
-- **Khi nào đẩy**: lúc **đóng app** (cửa sổ ẩn ngay, lượt đẩy chờ tối đa 60 giây
-  rồi thôi) và nút **Back up now** ở Settings (chạy nền, báo kết quả).
+> **Chỉ MỘT máy được ghi.** Chưa có khóa ghi, nên mọi máy khác phải bật
+> **Read-only on this computer** (⚙️ Settings → Shared database, khóa
+> `shared_db_read_only`). Hai máy cùng ghi thì bản đẩy sau đè mất dữ liệu của
+> bản trước.
+
+### Đẩy lên — `push()`
+
+- **Khi nào**: lúc **đóng app** (cửa sổ ẩn ngay, lượt đẩy chờ tối đa 60 giây rồi
+  thôi) và nút **Back up now** ở Settings (chạy nền, báo kết quả). Máy chỉ đọc
+  **không bao giờ đẩy**.
 - **Chụp bằng `sqlite3.Connection.backup()`** ra file tạm ở ổ local (không copy
   file thô), `quick_check` rồi mới copy lên tên tạm trong thư mục đích và
   `os.replace()` đè bản chủ — rớt mạng giữa chừng thì bản chủ cũ còn nguyên.
-- **`version`** tăng mỗi lượt, nằm ở cả `state.json` lẫn `app_meta` (khóa
-  `sync:version`) của chính file `.db` nên đi theo file khi được copy.
-  `schema_version` = tên lượt migration mới nhất của DB.
-- **Thư mục không với tới** (chưa bật VPN, ổ chưa mount) → bỏ qua, ghi một dòng
-  vào `debug.log`, không báo lỗi và không chặn việc đóng app.
-- Mới có chiều **ĐẨY LÊN**; chưa có khóa, chưa có kéo về.
+- **Từ chối đẩy** khi bản chủ thuộc DB khác (khác `db_id`), hoặc bản chủ **mới
+  hơn** bản local (có người đã đẩy mà máy này chưa kéo về) — đẩy lúc đó là đè
+  mất dữ liệu mới.
+
+### Kéo về — `ensure_fresh()`
+
+- **Khi nào**: lúc **mở app** (chờ tối đa 5 giây, quá thì chạy tiếp ở nền), mỗi
+  3 phút (`QTimer`), nút **Refresh** ở sidebar, sau khi lưu Settings, và ở đầu
+  mỗi `cv_repository.get_connection()` — **nhiều nhất 10 giây một lần**.
+- **Chỉ đọc `state.json`** (vài trăm byte) để so `version` với `sync:version`
+  của DB local; không mới hơn thì **không copy gì cả**.
+- **Mới hơn** → copy bản chủ về tên tạm **cạnh** file DB local, kiểm lại chính
+  file đó (`quick_check`, version, `db_id`, schema) rồi `os.replace()` đè lên
+  `candidates.sqlite`. Thay xong: `forget_current_user()` (id người dùng đang
+  nhớ là id của file cũ) và chạy lại `init_db()` trên file mới.
+- **KHÔNG thay file khi còn kết nối mở**: `_Connection` tự đếm số kết nối, và
+  mở kết nối với thay file cùng giữ một khóa. Còn kết nối mở thì file đã tải
+  thành **bản chờ**, được thay ở lượt sau (thường chỉ vài mili giây sau, ngay
+  đầu `get_connection()` kế tiếp) — không tải lại.
+- **Hook trong `get_connection()` không bao giờ chờ ổ mạng**: nó chỉ thay bản
+  chờ (việc đổi tên file ở ổ local) hoặc khởi động một lượt kiểm ở luồng nền.
+  VPN treo không làm đứng giao diện.
+- **Máy được ghi** còn giữ file cũ thành `candidates.sqlite.before-pull` trước
+  khi thay (một bản, đè lần sau) — phòng khi nó có thay đổi chưa đẩy lên.
+- Kéo xong thì **các trang đã mở tự tải lại** (`BaseTool.reload_data()`, mặc
+  định gọi `_reload()` của tool, giữ nguyên bộ lọc).
+
+### Hai lớp kiểm tra an toàn
+
+| Kiểm tra | Khi nào chặn | Việc |
+|---|---|---|
+| `schema_version` | bản chủ do app **mới hơn** lưu | không kéo, báo *"please update the app"* |
+| `db_id` | local và bản chủ là **hai DB khác dòng dõi** | dừng hẳn — không kéo, không đẩy, báo người dùng |
+
+`db_id` là UUID sinh **một lần** ở lượt đẩy đầu tiên, lưu ở `app_meta`
+(`sync:db_id`) và `state.json`. Đây là lưới chắn tai nạn nặng nhất (vd máy B
+đã lỡ dùng app một mình trước khi cấu hình → kéo về là mất sạch dữ liệu của B).
+Giữ bản nào là quyết định của **con người**, app không tự chọn. Ngoại lệ duy
+nhất: DB local **chưa từng đồng bộ và chưa có dữ liệu người dùng** (máy mới cài,
+chỉ có danh mục app nạp sẵn) thì nhận bản chủ luôn — không có gì để mất.
+
+### Chế độ chỉ đọc
+
+- **Chặn ở đúng một chỗ**: `_Connection.execute/executemany/executescript` trong
+  [cv_repository.py](app/core/cv_repository.py) nhận diện câu ghi
+  (`INSERT/UPDATE/DELETE/REPLACE/CREATE/DROP/ALTER`, kể cả `WITH … INSERT`) ở
+  **câu ghi đầu tiên** của mỗi kết nối rồi đi qua `_before_first_write()` — hiện
+  ném `ReadOnlyDatabaseError`. Repository không dùng cursor riêng nên mọi lượt
+  ghi của app đều đi qua đây. Lỗi không tool nào bắt thì `MainWindow` hiện hộp
+  thoại *Read-only*.
+- **`init_db()` được miễn** (kết nối *bảo trì*): nó chỉ đưa file về đúng cấu trúc
+  mà code của app cần (migration, danh mục khởi tạo, dòng `users` của máy), không
+  phải dữ liệu người dùng. File local của máy chỉ đọc không bao giờ được đẩy lên
+  và bị thay nguyên file ở lượt kéo sau, nên các lượt ghi này không lan đi đâu.
+  Chặn nó thì app không mở nổi mỗi khi bản chủ cũ hơn app.
+- Sidebar hiện nhãn **READ-ONLY** màu cam ngay trên ô hồ sơ — nhìn là biết.
+
+### Trạng thái ở sidebar
+
+[app_qt/sync_status.py](app_qt/sync_status.py): chấm màu + *"Synced 09:15"* +
+nút **Refresh**; ẩn hẳn khi chưa cấu hình thư mục. Các trạng thái: *Synced* ·
+*Update waiting…* (đã tải, chờ thay file) · *Offline* · *Sync paused* (bị chặn —
+hộp thoại giải thích hiện một lần mỗi phiên, di chuột vào dòng chữ để xem lại).
+
+- **Thư mục không với tới** (chưa bật VPN, ổ chưa mount) → app chạy tiếp trên
+  bản local, ghi một dòng vào `debug.log`, không chặn việc đóng app.
+- Chưa có (giai đoạn 3–4): file khóa `lock.json`, nhịp tim, khoảng ân hạn, cướp
+  khóa, bọc các thao tác dài.
 
 ## Thêm một tác vụ mới
 

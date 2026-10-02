@@ -344,6 +344,9 @@ class AiScanCvTool(BaseTool):
     action_style = "success"
     action_icon = "sparkles"
 
+    def reload_data(self):
+        self.cbo_pos.reload()
+
     def build_body(self, parent):
         cfg = config.load(SECTION, DEFAULTS)
         gen = settings.load()

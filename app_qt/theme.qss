@@ -101,6 +101,23 @@ QWidget {
 #SidebarProfile QLabel { background: transparent; }
 #ProfileName { font-size: 13px; font-weight: 600; color: #ffffff; }
 
+/* Ô trạng thái đồng bộ DB (app_qt/sync_status.py), ngay trên ô hồ sơ. */
+#SidebarSync { border: none; }
+#SyncText { font-size: 11px; color: {{--sidebar-muted}}; background: transparent; }
+#SyncRefresh {
+    background: transparent; border: 1px solid {{--sidebar-border}};
+    border-radius: 6px; padding: 2px 8px;
+    font-size: 11px; color: {{--sidebar-text}};
+}
+#SyncRefresh:hover { background: {{--sidebar-hover}}; }
+#SyncRefresh:disabled { color: {{--sidebar-muted}}; }
+/* Phải kèm #Sidebar: một mình #SyncReadOnly thua '#Sidebar QWidget' (nền tối). */
+#Sidebar #SyncReadOnly {
+    background: {{--warning}}; color: #1f1300;
+    border-radius: 5px; padding: 3px 8px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+}
+
 #SidebarDivider { background: {{--sidebar-border}}; max-height: 1px; min-height: 1px; }
 
 /* ============================================================

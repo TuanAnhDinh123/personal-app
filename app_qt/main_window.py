@@ -9,8 +9,8 @@ from PySide6.QtWidgets import (
     QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from app.core import debuglog, shared_db
-from app_qt import icons, profile, settings_page, theme, widgets
+from app.core import cv_repository, debuglog, shared_db
+from app_qt import dialogs, icons, profile, settings_page, sync_status, theme, widgets
 from app_qt.registry import discover_tools
 
 
@@ -140,6 +140,13 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        # Kéo bản chủ về TRƯỚC khi dựng giao diện (ô hồ sơ ở sidebar đã đọc DB).
+        # Ổ mạng treo thì chỉ chờ tối đa STARTUP_PULL_TIMEOUT giây; lượt kéo chạy
+        # tiếp ở nền và các trang được tải lại khi nó xong.
+        if shared_db.is_enabled():
+            shared_db.ensure_fresh_with_timeout("startup", self.STARTUP_PULL_TIMEOUT)
+        self._install_read_only_hook()
+
         self.tools = discover_tools()
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
@@ -227,6 +234,26 @@ class MainWindow(QMainWindow):
 
     # Thời gian tối đa chờ lượt đẩy DB lên thư mục dùng chung lúc đóng app.
     SHARED_PUSH_TIMEOUT = 60
+    # Thời gian tối đa chờ lượt kéo bản chủ về lúc mở app.
+    STARTUP_PULL_TIMEOUT = 5
+
+    def _install_read_only_hook(self):
+        """Lượt ghi bị chặn ở máy chỉ đọc mà không tool nào bắt → hiện thông báo
+        dễ hiểu thay vì chỉ nằm im trong debug.log.
+
+        Cổng ghi ở `cv_repository` ném `ReadOnlyDatabaseError`; Qt đưa lỗi từ
+        slot (nút bấm, menu) tới `sys.excepthook`, nên bắt ở đây là đủ cho mọi
+        màn hình — tool nào tự bắt lỗi thì đã hiện `str(exc)` của chính lỗi đó.
+        """
+        prev = sys.excepthook
+
+        def hook(exc_type, exc, tb):
+            if isinstance(exc, cv_repository.ReadOnlyDatabaseError):
+                dialogs.warning(self, "Read-only", str(exc))
+                return
+            prev(exc_type, exc, tb)
+
+        sys.excepthook = hook
 
     def closeEvent(self, e):
         """Đóng app → đẩy DB lên thư mục dùng chung (nếu đã cấu hình).
@@ -315,11 +342,33 @@ class MainWindow(QMainWindow):
 
         outer.addWidget(widgets.scroll_area(nav_holder), 1)
 
+        # Trạng thái đồng bộ DB dùng chung ngay trên ô hồ sơ (tự ẩn khi chưa cấu
+        # hình thư mục dùng chung).
+        self._sync_bar = sync_status.SyncStatusBar(sb)
+        self._sync_bar.db_replaced.connect(self._reload_pages)
+        outer.addWidget(self._sync_bar)
+
         # Hồ sơ người dùng là widget CUỐI CÙNG, sát đáy sidebar (chỗ quen thuộc
         # của mọi app có tài khoản); bấm vào ẢNH mở modal sửa tên & ảnh. Không
         # có đường kẻ ngăn phía trên: ô này đi liền mạch với danh sách menu.
-        outer.addWidget(profile.SidebarProfile(sb))
+        self._profile = profile.SidebarProfile(sb)
+        outer.addWidget(self._profile)
         return sb
+
+    def _reload_pages(self):
+        """File .db local vừa bị thay bằng bản kéo về → đọc lại dữ liệu cho mọi
+        trang tool ĐÃ DỰNG (trang chưa mở thì lúc mở tự đọc bản mới)."""
+        for tool in self.tools:
+            if tool.name not in self.pages:
+                continue
+            try:
+                tool.reload_data()
+            except Exception as exc:
+                debuglog.exception(f"reload_data failed: {tool.name}", exc)
+        try:
+            self._profile.refresh()
+        except Exception as exc:
+            debuglog.exception("profile refresh after pull failed", exc)
 
     def _divider(self):
         line = QFrame(); line.setObjectName("SidebarDivider")

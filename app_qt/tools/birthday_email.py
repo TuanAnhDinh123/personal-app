@@ -228,6 +228,9 @@ class BirthdayEmailTool(BaseTool):
     def build_body(self, parent):
         pass
 
+    def reload_data(self):
+        self._reload_queue()
+
     # ------------------------------------------------------------ hàng chờ
     def _build_queue_bar(self, lay):
         row = QHBoxLayout()

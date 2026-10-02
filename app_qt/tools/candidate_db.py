@@ -725,11 +725,15 @@ class _MasterPageTool(BaseTool):
         repo.init_db()
         card, lay = _card(parent)
         spec = _master_specs()[self.spec_key]
-        lay.addWidget(CrudTablePanel(spec), 1)
+        self._panel = CrudTablePanel(spec)
+        lay.addWidget(self._panel, 1)
         return card
 
     def build_body(self, parent):
         pass
+
+    def reload_data(self):
+        self._panel.reload()
 
 
 class DepartmentTool(_MasterPageTool):
