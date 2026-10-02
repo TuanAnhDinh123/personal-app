@@ -104,6 +104,7 @@ QWidget {
 /* Ô trạng thái đồng bộ DB (app_qt/sync_status.py), ngay trên ô hồ sơ. */
 #SidebarSync { border: none; }
 #SyncText { font-size: 11px; color: {{--sidebar-muted}}; background: transparent; }
+#SyncLease { font-size: 11px; color: {{--sidebar-text}}; background: transparent; }
 #SyncRefresh {
     background: transparent; border: 1px solid {{--sidebar-border}};
     border-radius: 6px; padding: 2px 8px;

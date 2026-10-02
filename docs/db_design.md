@@ -712,10 +712,12 @@ CREATE UNIQUE INDEX idx_users_login ON users(windows_login);
 
 Khóa `migration:*` do `cv_repository.init_db()` ghi — xem [Lịch sử thay đổi cấu trúc](#lịch-sử-thay-đổi-cấu-trúc-migrations).
 
-Hai khóa `sync:*` do `shared_db.push()` ghi, nằm trong chính file `.db` để đi theo file khi được copy (và có mặt sẵn trong bản kéo về):
+Bốn khóa `sync:*` của [shared_db.py](../app/core/shared_db.py), nằm trong chính file `.db` để đi theo file khi được copy (và có mặt sẵn trong bản kéo về):
 
 - `sync:version` (số nguyên) — version của lượt đẩy gần nhất lên thư mục DB dùng chung; khớp với `version` trong `state.json`. `shared_db.ensure_fresh()` so hai số này để biết có cần kéo về không.
 - `sync:db_id` (UUID hex) — định danh **dòng dõi** của DB, sinh một lần ở lượt đẩy đầu tiên; khớp với `db_id` trong `state.json`. Local và bản chủ khác `db_id` = hai DB khác nhau → không kéo, không đẩy.
+- `sync:local_seq` (số nguyên) — **sổ đếm lượt ghi**: tăng 1 ở câu ghi đầu tiên của mỗi kết nối (cổng ghi của `cv_repository`, chung transaction với lượt ghi nên rollback thì lùi theo). Tăng cả khi chưa bật DB dùng chung, để lúc bật lên vẫn biết local có thay đổi chưa đẩy.
+- `sync:pushed_seq` (số nguyên) — `local_seq` của bản đã đẩy lên gần nhất (đóng dấu vào bản chụp lúc đẩy). **`local_seq > pushed_seq` = local có thay đổi chưa đẩy** ("dirty"): khi đó app không bao giờ thay file local bằng bản kéo về.
 
 ---
 

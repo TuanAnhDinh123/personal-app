@@ -66,7 +66,7 @@ personal-app/
 └── app/core/                # LOGIC NGHIỆP VỤ (thuần Python, KHÔNG dính UI)
     ├── config.py · settings.py          # cấu hình
     ├── cv_repository.py · cv_schema.py   # SQLite quản lý CV ứng viên
-    ├── shared_db.py                      # Đồng bộ DB ↔ thư mục dùng chung (ổ mạng): đẩy · kéo · chỉ đọc
+    ├── shared_db.py                      # Đồng bộ DB ↔ thư mục dùng chung (ổ mạng): khóa ghi · đẩy · kéo · chỉ đọc
     ├── employee_excel.py                 # SSOT bố cục file Excel "Personnel Data"
     ├── employee_sync.py                  # Đối chiếu bảng employees ↔ file Excel HC
     ├── docx_merge.py                     # Điền trường MERGEFIELD của file Word (.docx)
@@ -93,19 +93,75 @@ chạy một máy như cũ.
 <shared_db_folder>\
 ├── candidates.sqlite    ← bản chủ
 ├── state.json           ← version · db_id · updated_by · updated_at · schema_version · reason
+├── lock.json            ← khóa ghi: ai giữ · nhịp tim · đang làm gì
+├── release-request.json ← máy đang chờ nhờ máy giữ khóa nhả sớm
 └── history\             ← candidates-YYYYMMDD-HHMMSS-<tài khoản>.sqlite, giữ 30 bản
 ```
 
-> **Chỉ MỘT máy được ghi.** Chưa có khóa ghi, nên mọi máy khác phải bật
-> **Read-only on this computer** (⚙️ Settings → Shared database, khóa
-> `shared_db_read_only`). Hai máy cùng ghi thì bản đẩy sau đè mất dữ liệu của
-> bản trước.
+**Mọi máy đều ghi được** — khóa ghi tự chia lượt, người dùng không phải hẹn
+nhau. Chế độ *Read-only* chỉ còn dành cho máy chỉ cần xem.
+
+### Khóa ghi — mỗi lúc một máy
+
+Một lượt ghi đi qua năm bước, người dùng chỉ thấy nút Save bấm là lưu:
+
+```
+① Xin khóa     câu ghi ĐẦU TIÊN của kết nối (cổng ghi) → tạo lock.json
+② Kiểm         bản chủ mới hơn local? → không ghi, nhả khóa, kéo bản mới ở nền
+③ Ghi          vào DB LOCAL, đúng code repository hiện có
+④ Đẩy lên      hết ân hạn / máy kia xin / đóng app → push()
+⑤ Nhả khóa     xóa lock.json — CHỈ SAU KHI ĐÃ ĐẨY XONG
+```
+
+- **Chỉ nhả khóa khi đã đẩy xong.** Đây là nguyên tắc giữ cả mô hình an toàn:
+  bản local không bao giờ đi trước bản chủ mà lại không cầm khóa, nên kéo về
+  lúc nào cũng an toàn. Đẩy hỏng (rớt mạng) thì **vẫn giữ khóa**, nhịp sau đẩy
+  lại.
+- **Ân hạn `GRACE` = 45 giây.** Ghi xong không nhả ngay: các lượt ghi tiếp theo
+  trong khoảng đó không phải xin lại, và **gom chung thành một lần đẩy** (DB
+  ~6 MB, đẩy sau mỗi lượt ghi qua VPN là quá chậm).
+- **Máy kia đang giữ khóa** → lượt ghi bị chặn **trước khi ghi được gì**, hiện
+  *"Lan (PC-B) is saving … try again in a few seconds"*, đồng thời ghi
+  `release-request.json`: máy giữ khóa thấy ở nhịp tim kế tiếp (≤ 5 giây) thì
+  đẩy + nhả ngay, không bắt chờ hết ân hạn. Form đang mở **không đóng** — bấm
+  Save lại là xong.
+- **Bản chủ mới hơn local** lúc vừa giành khóa → không ghi (kết nối đang mở nên
+  không thay file được), kéo bản mới ở nền, báo *"try again in a few seconds"*.
+- **Nhịp tim `HEARTBEAT` = 5 giây.** App chết khi đang giữ khóa → nhịp tim đứng
+  yên → máy kia giành lại sau **`STALE_AFTER` = 90 giây** (đo bằng đồng hồ của
+  máy đang nhìn, nên hai máy lệch giờ không ảnh hưởng). Chính máy đó mở lại app
+  thì giành lại **ngay** (tiến trình cũ đã chết, kiểm bằng pid).
+- **Rớt mạng khi đang giữ khóa**: quá nửa `STALE_AFTER` không ghi được nhịp tim
+  thì máy đó **tự ngừng nhận lượt ghi mới** — không bao giờ ghi trong lúc máy
+  kia đã có quyền coi khóa là chết.
+- **Chưa bật VPN** (không với tới thư mục chung) → **xem được, không ghi được**:
+  không giành được khóa thì không biết máy kia có đang ghi không.
+
+### Thao tác dài — `shared_db.session()`
+
+*Quét CV bằng AI* · *Bulk Import* · *Sync with Excel* giữ khóa **suốt lượt**:
+giành khóa **ngay đầu** (máy kia đang ghi thì báo luôn, trước khi tốn lượt gọi
+AI nào), không đẩy giữa chừng dù hai lượt ghi cách nhau lâu hơn ân hạn, máy kia
+thấy *"… is running a CV scan"*. *Sync with Excel* chỉ giữ khóa lúc **ghi**,
+không giữ suốt lúc người dùng ngồi duyệt modal.
+
+### Thay đổi chưa đẩy ("dirty")
+
+`sync:local_seq` / `sync:pushed_seq` trong `app_meta` là **sổ đếm lượt ghi**
+(xem [db_design.md](docs/db_design.md)). Local có thay đổi chưa đẩy thì **không
+bao giờ bị thay bằng bản kéo về**:
+
+| Tình huống | Việc |
+|---|---|
+| App tắt khi đang offline / crash, **không ai ghi chen vào** | lần mở sau **tự đẩy nốt** |
+| …mà **máy kia đã ghi** trong lúc đó | **DỪNG đồng bộ** (*Sync paused*), không kéo, không đẩy — hai bên đã rẽ nhánh, người phải quyết giữ bên nào. Dữ liệu local còn nguyên |
 
 ### Đẩy lên — `push()`
 
-- **Khi nào**: lúc **đóng app** (cửa sổ ẩn ngay, lượt đẩy chờ tối đa 60 giây rồi
-  thôi) và nút **Back up now** ở Settings (chạy nền, báo kết quả). Máy chỉ đọc
-  **không bao giờ đẩy**.
+- **Khi nào**: lúc nhả khóa (hết ân hạn · máy kia xin), lúc **đóng app** (cửa
+  sổ ẩn ngay, chờ tối đa 60 giây rồi thôi — chỉ đẩy khi có thay đổi, hoặc thư
+  mục chung chưa có bản chủ) và nút **Back up now** ở Settings (cũng phải giành
+  khóa; máy kia đang ghi thì báo lại). Máy chỉ đọc **không bao giờ đẩy**.
 - **Chụp bằng `sqlite3.Connection.backup()`** ra file tạm ở ổ local (không copy
   file thô), `quick_check` rồi mới copy lên tên tạm trong thư mục đích và
   `os.replace()` đè bản chủ — rớt mạng giữa chừng thì bản chủ cũ còn nguyên.
@@ -150,15 +206,16 @@ Giữ bản nào là quyết định của **con người**, app không tự ch�
 nhất: DB local **chưa từng đồng bộ và chưa có dữ liệu người dùng** (máy mới cài,
 chỉ có danh mục app nạp sẵn) thì nhận bản chủ luôn — không có gì để mất.
 
-### Chế độ chỉ đọc
+### Cổng ghi & chế độ chỉ đọc
 
-- **Chặn ở đúng một chỗ**: `_Connection.execute/executemany/executescript` trong
-  [cv_repository.py](app/core/cv_repository.py) nhận diện câu ghi
-  (`INSERT/UPDATE/DELETE/REPLACE/CREATE/DROP/ALTER`, kể cả `WITH … INSERT`) ở
-  **câu ghi đầu tiên** của mỗi kết nối rồi đi qua `_before_first_write()` — hiện
-  ném `ReadOnlyDatabaseError`. Repository không dùng cursor riêng nên mọi lượt
-  ghi của app đều đi qua đây. Lỗi không tool nào bắt thì `MainWindow` hiện hộp
-  thoại *Read-only*.
+- **Mọi lượt ghi đi qua đúng một chỗ**: `_Connection.execute/executemany/
+  executescript` trong [cv_repository.py](app/core/cv_repository.py) nhận diện
+  câu ghi (`INSERT/UPDATE/DELETE/REPLACE/CREATE/DROP/ALTER`, kể cả `WITH …
+  INSERT`) ở **câu ghi đầu tiên** của mỗi kết nối rồi gọi `_before_first_write()`:
+  máy chỉ đọc → `ReadOnlyDatabaseError`; còn lại → hook của `shared_db` giành khóa
+  ghi (không được thì `DatabaseBusyError`). Repository không dùng cursor riêng nên
+  mọi lượt ghi của app đều đi qua đây. Cả hai lỗi là con của `WriteBlockedError`;
+  không tool nào bắt thì `MainWindow` hiện hộp thoại theo `exc.title`.
 - **`init_db()` được miễn** (kết nối *bảo trì*): nó chỉ đưa file về đúng cấu trúc
   mà code của app cần (migration, danh mục khởi tạo, dòng `users` của máy), không
   phải dữ liệu người dùng. File local của máy chỉ đọc không bao giờ được đẩy lên
@@ -170,13 +227,23 @@ chỉ có danh mục app nạp sẵn) thì nhận bản chủ luôn — không c
 
 [app_qt/sync_status.py](app_qt/sync_status.py): chấm màu + *"Synced 09:15"* +
 nút **Refresh**; ẩn hẳn khi chưa cấu hình thư mục. Các trạng thái: *Synced* ·
-*Update waiting…* (đã tải, chờ thay file) · *Offline* · *Sync paused* (bị chặn —
-hộp thoại giải thích hiện một lần mỗi phiên, di chuột vào dòng chữ để xem lại).
+*Uploading…* · *Update waiting…* (đã tải, chờ thay file) · *Offline* · *Sync
+paused* (bị chặn — hộp thoại giải thích hiện một lần mỗi phiên, di chuột vào
+dòng chữ để xem lại). Máy **khác** đang giữ khóa thì có thêm dòng *"✎ Lan
+(PC-B) is editing"*.
+
+- **Chỉ hiện việc ĐANG xảy ra**, kiểu Google Docs: lưu xong vẫn là *Synced*,
+  khoảng ân hạn chạy ngầm không hiện gì; đúng lúc đẩy lên mới hiện
+  *Uploading…* (cờ `SyncStatus.uploading`), xong thì quay về *Synced*. Chữ
+  *Uploading…* giữ tối thiểu 0,8 giây — trên LAN lượt đẩy chỉ ~0,3 giây, chớp
+  nhanh hơn thì không kịp đọc.
 
 - **Thư mục không với tới** (chưa bật VPN, ổ chưa mount) → app chạy tiếp trên
-  bản local, ghi một dòng vào `debug.log`, không chặn việc đóng app.
-- Chưa có (giai đoạn 3–4): file khóa `lock.json`, nhịp tim, khoảng ân hạn, cướp
-  khóa, bọc các thao tác dài.
+  bản local (chỉ xem), ghi một dòng vào `debug.log`, không chặn việc đóng app.
+- **Kiểm thử hai máy**: bộ giả lập nhiều tiến trình (mỗi tiến trình một APPDATA,
+  tên máy, tài khoản riêng, cùng trỏ một thư mục chung) chạy qua 11 kịch bản —
+  ghi xen kẽ, gom lượt ghi, thao tác dài, crash, rớt mạng khi giữ khóa và khi
+  đang đẩy, hai máy ghi đúng một lúc, máy chỉ đọc, đóng app, offline.
 
 ## Thêm một tác vụ mới
 

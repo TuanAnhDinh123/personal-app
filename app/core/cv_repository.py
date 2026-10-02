@@ -247,22 +247,52 @@ def is_write_sql(sql: str, script: bool = False) -> bool:
     return bool(_WRITE_RE.match(sql) or _CTE_WRITE_RE.match(sql))
 
 
-class ReadOnlyDatabaseError(RuntimeError):
+class WriteBlockedError(RuntimeError):
+    """Lượt ghi bị chặn ở cổng ghi, TRƯỚC khi ghi được gì — dữ liệu không đổi.
+
+    `title` là tiêu đề hộp thoại khi giao diện hiện lỗi này ra.
+    """
+    title = "Can't save"
+
+
+class ReadOnlyDatabaseError(WriteBlockedError):
     """Lượt ghi bị chặn vì máy này đang ở chế độ chỉ đọc."""
 
+    title = "Read-only"
     MESSAGE = ("This computer is in read-only mode (Settings → Shared database), "
                "so changes can't be saved here. The data you see comes from the "
-               "shared database; make this change on the computer that edits it.")
+               "shared database; make this change on a computer that edits it.")
 
     def __init__(self, message: str = MESSAGE):
         super().__init__(message)
+
+
+class DatabaseBusyError(WriteBlockedError):
+    """Không giành được khóa ghi của DB dùng chung: máy khác đang ghi, thư mục
+    dùng chung không với tới được, hoặc bản chủ vừa có dữ liệu mới hơn."""
+
+    title = "Shared database"
+
+
+# Hai hàm `shared_db` gắn vào cổng ghi (module này không import `shared_db` vì
+# chiều ngược lại đã có):
+#   begin(conn)        — câu ghi đầu tiên của kết nối; ném lỗi để chặn lượt ghi.
+#   end(conn, failed)  — kết nối đã qua cổng ghi vừa đóng (sau commit/rollback).
+_write_begin_hook = None
+_write_end_hook = None
+
+
+def set_write_hooks(begin, end) -> None:
+    global _write_begin_hook, _write_end_hook
+    _write_begin_hook, _write_end_hook = begin, end
 
 
 def _before_first_write(conn) -> None:
     """Cổng ghi: chạy ở câu GHI ĐẦU TIÊN của mỗi kết nối, qua được thì các câu
     ghi sau của kết nối đó đi thẳng.
 
-    Máy bật `shared_db_read_only` thì chặn (ném `ReadOnlyDatabaseError`). Kết
+    Máy bật `shared_db_read_only` thì chặn (ném `ReadOnlyDatabaseError`); còn
+    lại giao cho `_write_begin_hook` (giành khóa ghi của DB dùng chung). Kết
     nối bảo trì của `init_db()` được miễn — xem `init_db`.
     """
     if conn.maintenance:
@@ -270,6 +300,9 @@ def _before_first_write(conn) -> None:
     from app.core import settings   # import muộn: settings không cần lúc nạp module
     if settings.get("shared_db_read_only", False):
         raise ReadOnlyDatabaseError()
+    hook = _write_begin_hook
+    if hook is not None:
+        hook(conn)
 
 
 class _Connection(sqlite3.Connection):
@@ -291,12 +324,21 @@ class _Connection(sqlite3.Connection):
         super().__init__(*args, **kwargs)
         self._counted = True
         self._write_checked = False
+        self._failed = False
         _count_connection(+1)
 
     def _release(self):
-        if getattr(self, "_counted", False):
-            self._counted = False
-            _count_connection(-1)
+        if not getattr(self, "_counted", False):
+            return
+        self._counted = False
+        _count_connection(-1)
+        hook = _write_end_hook
+        if self._write_checked and not self.maintenance and hook is not None:
+            try:
+                hook(self, self._failed)
+            except Exception as exc:
+                from app.core import debuglog
+                debuglog.exception("_Connection: write end hook failed", exc)
 
     def close(self):
         try:
@@ -312,8 +354,14 @@ class _Connection(sqlite3.Connection):
     def _check_write(self, sql, script=False):
         if self._write_checked or not is_write_sql(sql, script):
             return
-        _before_first_write(self)
+        # Đánh dấu TRƯỚC khi gọi cổng: hook của cổng được tự ghi trên chính
+        # kết nối này (sổ đếm lượt ghi) mà không vòng lại cổng lần nữa.
         self._write_checked = True
+        try:
+            _before_first_write(self)
+        except BaseException:
+            self._write_checked = False
+            raise
 
     def execute(self, sql, *args, **kwargs):
         self._check_write(sql)
@@ -328,6 +376,7 @@ class _Connection(sqlite3.Connection):
         return super().executescript(sql)
 
     def __exit__(self, exc_type, exc, tb):
+        self._failed = exc_type is not None
         try:
             return super().__exit__(exc_type, exc, tb)
         finally:

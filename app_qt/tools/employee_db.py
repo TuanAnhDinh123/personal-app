@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 
 from app.core import (
     application_form, config, docx_merge, employee_excel, employee_sync,
-    resignation_decision, settings,
+    resignation_decision, settings, shared_db,
 )
 from app.core import cv_repository as repo
 from app.core import cv_schema
@@ -1177,17 +1177,25 @@ class EmployeeDbTool(BaseTool):
 
         added = 0
         skipped = 0
-        for rec in rows:
-            rec.pop("_row", None)
-            if skip_codes and _norm(rec.get("code", "")) in skip_codes:
-                skipped += 1
-                continue
-            for sentinel, field, _loader, _match_col, _id_col, _label in _MASTER_LOOKUPS:
-                text = rec.pop(sentinel, "")
-                if text:
-                    rec[field] = lookup_tables[sentinel][_norm(text)]
-            repo.insert_employee(rec)
-            added += 1
+        # Giữ khóa ghi của DB dùng chung suốt lượt nhập: máy kia đang ghi thì
+        # báo NGAY, trước khi nhập dòng nào — không để lượt nhập dừng giữa chừng.
+        try:
+            with shared_db.session("a Bulk Import"):
+                for rec in rows:
+                    rec.pop("_row", None)
+                    if skip_codes and _norm(rec.get("code", "")) in skip_codes:
+                        skipped += 1
+                        continue
+                    for sentinel, field, _loader, _match_col, _id_col, _label in _MASTER_LOOKUPS:
+                        text = rec.pop(sentinel, "")
+                        if text:
+                            rec[field] = lookup_tables[sentinel][_norm(text)]
+                    repo.insert_employee(rec)
+                    added += 1
+        except repo.WriteBlockedError as exc:
+            dialogs.warning(self._root, exc.title,
+                            f"{exc}\n\nRun Bulk Import again when it's free.")
+            return
 
         self._reload()
         msg = f"Imported {added} employees."
@@ -1444,11 +1452,21 @@ class EmployeeDbTool(BaseTool):
         # qua sẽ chẳng bao giờ được nói ra.
         notes = self._sync_notes(plan)
         updated = resigned = 0
+        # Khóa ghi chỉ giữ lúc GHI, không giữ suốt lúc người dùng ngồi duyệt
+        # modal — duyệt bao lâu tùy ý cũng không chặn máy kia.
         if plan["changes"]:
             picked = _SyncChangesDialog(self._root, plan["changes"], notes).run()
             notes = []
             if picked:
-                updated = employee_sync.apply_changes(picked, resolve=_sync_resolver())
+                try:
+                    with shared_db.session("Sync with Excel"):
+                        updated = employee_sync.apply_changes(
+                            picked, resolve=_sync_resolver())
+                except repo.WriteBlockedError as exc:
+                    dialogs.warning(self._root, exc.title,
+                                    f"{exc}\n\nRun Sync with Excel again to apply "
+                                    "these changes.")
+                    return
         elif not plan["missing"]:
             dialogs.success(self._root, "Already in sync", "\n\n".join(
                 ["Every employee in the file matches the app — nothing to update.",
@@ -1458,7 +1476,15 @@ class EmployeeDbTool(BaseTool):
         if plan["missing"] and self._confirm_resignation_list(plan["missing"]):
             dlg = _ResignationsDialog(self._root, plan["missing"], plan["no_code"])
             if dlg.run():
-                resigned = employee_sync.apply_resignations(dlg.entries())
+                try:
+                    with shared_db.session("Sync with Excel"):
+                        resigned = employee_sync.apply_resignations(dlg.entries())
+                except repo.WriteBlockedError as exc:
+                    self._reload()
+                    dialogs.warning(self._root, exc.title,
+                                    f"{exc}\n\nThe resignations were not saved — run "
+                                    "Sync with Excel again to record them.")
+                    return
 
         self._reload()
         lines = []

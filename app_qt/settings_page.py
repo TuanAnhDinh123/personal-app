@@ -127,21 +127,24 @@ def build():
     fields["shared_db_folder"] = widgets.file_row(
         inner, "Shared database folder (network drive)", mode="folder")
     fields["shared_db_folder"].set(data["shared_db_folder"])
-    widgets.hint(inner, "When set, the app downloads the newest shared copy when it "
-                        "starts and every few minutes, and uploads its own copy "
-                        "every time you close it (keeping the last "
+    widgets.hint(inner, "When set, several computers share one database. Each works "
+                        "on its own copy and the app keeps them in step: it downloads "
+                        "the newest shared copy at start-up and every few minutes, "
+                        "and uploads your changes about "
+                        f"{shared_db.GRACE} seconds after you stop editing, or when "
+                        "you close the app (keeping the last "
                         f"{shared_db.HISTORY_KEEP} copies in a history subfolder). "
-                        "If the folder can't be reached (VPN off, drive not "
-                        "connected) the app keeps working on its local copy. Leave "
-                        "it empty to keep the database on this computer only.")
+                        "Only one computer saves at a time — if someone else is "
+                        "saving, you'll be asked to try again in a few seconds. If "
+                        "the folder can't be reached (VPN off), you can still view "
+                        "the data but not save. Leave it empty to keep the database "
+                        "on this computer only.")
     fields["shared_db_read_only"] = widgets.checkbox(
         inner, "Read-only on this computer", checked=bool(data["shared_db_read_only"]))
-    widgets.hint(inner, "Turn this on for every computer except the one that edits "
-                        "the data. A read-only computer still downloads the latest "
-                        "shared database (at start-up, every few minutes, and with "
-                        "Refresh in the sidebar), but it can't save changes and "
-                        "never uploads. Only one computer may edit at a time — two "
-                        "editors would overwrite each other's work.")
+    widgets.hint(inner, "For a computer that only needs to look at the data. It still "
+                        "downloads the latest shared database (at start-up, every few "
+                        "minutes, and with Refresh in the sidebar), but it can't save "
+                        "changes and never uploads.")
     backup_row = QHBoxLayout()
     backup_row.setContentsMargins(0, 6, 0, 0)
     backup_btn = widgets.button(inner, "Back up now", variant="neutral",

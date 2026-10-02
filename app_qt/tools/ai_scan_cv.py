@@ -19,7 +19,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QWidget
 
-from app.core import config, cv_repository as repo, cv_schema, settings
+from app.core import config, cv_repository as repo, cv_schema, settings, shared_db
 from app.core.ai_cv_scan import (
     _call_gemini, _Cancelled, append_rows_to_excel, done_folder_for,
     flatten_result, move_to_done, read_jd_file, resolve_done_target,
@@ -491,6 +491,13 @@ class AiScanCvTool(BaseTool):
         batch = int(m.group()) if m else None
 
         def job(ctx):
+            # Giữ khóa ghi của DB dùng chung SUỐT lượt quét: máy kia đang ghi
+            # thì báo ngay (trước khi tốn lượt gọi AI nào), và giữa hai CV —
+            # mỗi lượt gọi AI có thể lâu hơn ân hạn — khóa không bị nhả mất.
+            with shared_db.session("a CV scan"):
+                return scan_all(ctx)
+
+        def scan_all(ctx):
             # Quét TUẦN TỰ; mỗi CV thành công được import thẳng vào DB (hoặc gom
             # vào danh sách trùng) + chuyển sang folder 'đã quét' NGAY, nên khi
             # gặp lỗi (giới hạn key free) có thể DỪNG mà không mất tiến độ — lần

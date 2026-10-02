@@ -1,10 +1,13 @@
-"""Ô trạng thái đồng bộ DB ở sidebar: "Synced 09:15" + nút Refresh + nhãn Read-only.
+"""Ô trạng thái đồng bộ DB ở sidebar: "Synced 09:15" + nút Refresh + dòng "ai
+đang ghi" + nhãn Read-only.
 
 Chỉ là lớp vỏ của `app.core.shared_db`: đọc `shared_db.status()`, nghe thay đổi
 qua `shared_db.add_listener` (có thể đến từ luồng phụ → chuyển về luồng giao
 diện bằng Signal), bấm Refresh thì chạy `ensure_fresh()` ở luồng nền. Tính năng
 tắt (chưa cấu hình thư mục dùng chung) thì cả ô ẩn đi.
 """
+import time
+
 from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
@@ -14,6 +17,9 @@ from app_qt.components.task import Task
 
 # Nhịp kiểm tra bản chủ mới khi app đang mở (ngoài các lượt từ get_connection).
 CHECK_INTERVAL_MS = 3 * 60 * 1000
+# "Uploading…" hiện ít nhất chừng này: trên LAN lượt đẩy chỉ ~0,3 giây, chớp
+# qua nhanh hơn thì không kịp đọc, trông như giao diện bị giật.
+MIN_UPLOADING_MS = 800
 
 _DOT = {
     "synced":  theme.PALETTE["--success"],
@@ -29,7 +35,14 @@ def _hhmm(dt):
 
 
 def status_text(st: shared_db.SyncStatus) -> str:
-    """Dòng chữ ngắn cho ô trạng thái (tiếng Anh)."""
+    """Dòng chữ ngắn cho ô trạng thái (tiếng Anh).
+
+    Chỉ nói việc ĐANG xảy ra: "Uploading…" đúng lúc đang đẩy rồi quay về
+    "Synced". Khoảng ân hạn trước lượt đẩy chạy ngầm, không hiện gì — người
+    dùng không cần biết app đang chờ, chỉ cần biết dữ liệu đã lưu.
+    """
+    if st.uploading:
+        return "Uploading…"
     if st.state == "synced":
         return f"Synced {_hhmm(st.synced_at)}".strip()
     if st.state == "pending":
@@ -61,6 +74,7 @@ class SyncStatusBar(QFrame):
         self._task = None
         self._refreshing = False
         self._warned = set()       # thông báo "blocked" đã hiện trong phiên này
+        self._uploading_since = None   # monotonic lúc bắt đầu hiện "Uploading…"
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(26, 6, 12, 4)   # thẳng mép trái ô hồ sơ
@@ -85,6 +99,15 @@ class SyncStatusBar(QFrame):
         row.addWidget(self._btn)
         outer.addLayout(row)
 
+        # Máy KHÁC đang giữ khóa ghi → nói luôn ai, để người dùng biết vì sao
+        # lượt lưu có thể bị bảo "try again" trước khi bấm.
+        self._lease = QLabel(self)
+        self._lease.setObjectName("SyncLease")
+        self._lease.setToolTip("Only one computer can save at a time. The app takes "
+                               "turns automatically — if you save while they do, "
+                               "you'll be asked to try again in a few seconds.")
+        outer.addWidget(self._lease)
+
         # Nhãn Read-only đứng riêng một dòng, nền màu cảnh báo: máy chỉ đọc phải
         # NHÌN LÀ BIẾT, không phải di chuột mới thấy.
         self._ro = QLabel("READ-ONLY  ·  changes can't be saved", self)
@@ -106,8 +129,24 @@ class SyncStatusBar(QFrame):
 
     # ------------------------------------------------------------ hiển thị
     def _apply(self, st):
+        now = time.monotonic()
+        if st.uploading:
+            if self._uploading_since is None:
+                self._uploading_since = now
+        elif self._uploading_since is not None:
+            left = MIN_UPLOADING_MS / 1000 - (now - self._uploading_since)
+            if left > 0:
+                # Giữ chữ "Uploading…" thêm cho đủ thời gian tối thiểu, rồi vẽ
+                # lại theo trạng thái lúc đó.
+                QTimer.singleShot(int(left * 1000) + 1,
+                                  lambda: self._apply(shared_db.status()))
+                return
+            self._uploading_since = None
         self.setVisible(st.state != "off")
         self._ro.setVisible(st.state != "off" and st.read_only)
+        other = st.lease not in ("", "mine")
+        self._lease.setVisible(st.state != "off" and other)
+        self._lease.setText(f"✎ {st.lease} is editing" if other else "")
         self._text.setText(status_text(st))
         self._text.setToolTip(st.message)
         self._dot.setStyleSheet(
@@ -115,7 +154,10 @@ class SyncStatusBar(QFrame):
             "border-radius: 4px;")
 
     def _on_changed(self, st, replaced):
-        self._apply(st)
+        # Vẽ trạng thái HIỆN TẠI chứ không phải `st`: thông báo từ luồng phụ đi
+        # qua hàng đợi Qt nên có thể tới SAU một thông báo mới hơn phát thẳng ở
+        # luồng giao diện — vẽ theo `st` là đè trạng thái cũ lên trạng thái mới.
+        self._apply(shared_db.status())
         if replaced:
             self.db_replaced.emit()
         # Bị chặn là việc cần NGƯỜI quyết định → báo một lần mỗi phiên cho mỗi

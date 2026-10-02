@@ -238,25 +238,28 @@ class MainWindow(QMainWindow):
     STARTUP_PULL_TIMEOUT = 5
 
     def _install_read_only_hook(self):
-        """Lượt ghi bị chặn ở máy chỉ đọc mà không tool nào bắt → hiện thông báo
+        """Lượt ghi bị chặn ở cổng ghi mà không tool nào bắt → hiện thông báo
         dễ hiểu thay vì chỉ nằm im trong debug.log.
 
-        Cổng ghi ở `cv_repository` ném `ReadOnlyDatabaseError`; Qt đưa lỗi từ
-        slot (nút bấm, menu) tới `sys.excepthook`, nên bắt ở đây là đủ cho mọi
-        màn hình — tool nào tự bắt lỗi thì đã hiện `str(exc)` của chính lỗi đó.
+        Cổng ghi ở `cv_repository` ném `WriteBlockedError` (máy chỉ đọc · máy
+        kia đang ghi · thư mục dùng chung không với tới · bản chủ vừa có dữ
+        liệu mới); Qt đưa lỗi từ slot (nút bấm, menu) tới `sys.excepthook`, nên
+        bắt ở đây là đủ cho mọi màn hình — tool nào tự bắt lỗi thì đã hiện
+        `str(exc)` của chính lỗi đó.
         """
         prev = sys.excepthook
 
         def hook(exc_type, exc, tb):
-            if isinstance(exc, cv_repository.ReadOnlyDatabaseError):
-                dialogs.warning(self, "Read-only", str(exc))
+            if isinstance(exc, cv_repository.WriteBlockedError):
+                dialogs.warning(self, exc.title, str(exc))
                 return
             prev(exc_type, exc, tb)
 
         sys.excepthook = hook
 
     def closeEvent(self, e):
-        """Đóng app → đẩy DB lên thư mục dùng chung (nếu đã cấu hình).
+        """Đóng app → đẩy thay đổi còn chờ lên thư mục dùng chung rồi nhả khóa
+        ghi (nếu đã cấu hình).
 
         Ẩn cửa sổ TRƯỚC rồi mới đẩy, nên người dùng thấy app đóng ngay; lượt
         đẩy lỗi / thư mục không với tới chỉ ghi log, không chặn việc đóng.
@@ -267,9 +270,9 @@ class MainWindow(QMainWindow):
                 return
             self.hide()
             QApplication.processEvents()
-            shared_db.push_with_timeout("close", self.SHARED_PUSH_TIMEOUT)
+            shared_db.shutdown_with_timeout(self.SHARED_PUSH_TIMEOUT)
         except Exception as exc:
-            debuglog.exception("closeEvent: shared DB push", exc)
+            debuglog.exception("closeEvent: shared DB shutdown", exc)
 
     def changeEvent(self, e):
         """Phóng to → vuông (bỏ bo góc + viền); khôi phục → bo góc lại."""
