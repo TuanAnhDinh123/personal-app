@@ -23,6 +23,9 @@ _MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 DEFAULTS = {
     "api_key":  "",                 # API key Gemini, dùng chung cho các tính năng AI
     "ai_model": "gemini-3.6-flash",  # model mặc định khi gọi AI
+    # ── Sửa ảnh bằng AI (app/core/image_edit.py) — model riêng, chỉ model ảnh ──
+    "image_model": "gemini-nano-banana-2.1",
+    "image_size": "2K",             # độ phân giải ảnh kết quả: 1K / 2K / 4K
     "course_template_path": "",     # file Excel mẫu để xuất roster khóa học
     # File Excel "Personnel Data" của HR — nguồn để đồng bộ bảng `employees`
     # (nút Sync with Excel ở màn hình Employees).
@@ -118,12 +121,12 @@ def save_decision_number(year: int, number: int) -> None:
     update(resignation_decision_year=int(year), resignation_decision_no=int(number))
 
 
-def list_models(api_key, timeout=30):
-    """Gọi Gemini ListModels API → trả về list tên model hỗ trợ generateContent.
+def fetch_models(api_key, timeout=30):
+    """Gọi Gemini ListModels API → list tên model (bỏ tiền tố "models/") hỗ trợ
+    generateContent.
 
-    Dùng cho ô chọn Model ở màn hình Cài đặt: bấm vào để lấy danh sách model
-    hiện có ứng với API key. Chỉ dùng thư viện chuẩn (urllib) — không cần cài
-    thêm gói. Ném ValueError nếu thiếu key, RuntimeError nếu API/mạng lỗi.
+    Chỉ dùng thư viện chuẩn (urllib) — không cần cài thêm gói. Ném ValueError
+    nếu thiếu key, RuntimeError nếu API/mạng lỗi.
     """
     api_key = (api_key or "").strip()
     if not api_key:
@@ -155,9 +158,24 @@ def list_models(api_key, timeout=30):
         name = m.get("name", "")
         if name.startswith("models/"):
             name = name[len("models/"):]
-        # Chỉ giữ dòng flash / flash-lite / pro (các model khác không dùng đến,
-        # bỏ đi cho gọn). flash-lite đã nằm trong "flash".
-        if name and ("flash" in name or "pro" in name):
+        if name:
             models.append(name)
+    return models
+
+
+def is_image_model(name):
+    """Model tạo/sửa ảnh (dòng Nano Banana) — có ô chọn riêng ở Cài đặt."""
+    return "image" in name or "banana" in name
+
+
+def list_models(api_key, timeout=30):
+    """Danh sách model cho ô chọn "AI Model" ở màn hình Cài đặt.
+
+    Chỉ giữ dòng flash / flash-lite / pro (các model khác không dùng đến, bỏ đi
+    cho gọn; flash-lite đã nằm trong "flash"), trừ model ảnh — chúng không đọc
+    CV/PDF ra chữ được và đã có ô chọn riêng.
+    """
+    models = [name for name in fetch_models(api_key, timeout)
+              if ("flash" in name or "pro" in name) and not is_image_model(name)]
     models.sort()
     return models

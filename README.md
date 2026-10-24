@@ -78,6 +78,7 @@ personal-app/
     ├── cv_scan.py                        # Chuẩn hóa tên file CV + trích text CV
     ├── candidate_export.py               # Xuất sheet "Candidates" ra Excel
     ├── pdf_text.py                       # PDF → Markdown (+ OCR bằng Gemini)
+    ├── image_edit.py                     # Sửa ảnh bằng Gemini (model ảnh Nano Banana)
     └── reminder_logic.py                 # Helper nhắc phản hồi phỏng vấn
 ```
 
@@ -274,6 +275,11 @@ class MyTool(BaseTool):
 
 App sẽ **tự động** nhận tool mới và hiện trong sidebar — không cần sửa file nào khác.
 
+Hai cờ quyết định tool hiện ở đâu: `show_on_home = False` → không có thẻ ở Trang
+chủ (vd các bảng Master Data); `show_in_sidebar = False` → không có mục ở
+sidebar, chỉ mở từ thẻ ở Trang chủ (tính năng ít người dùng, vd *AI Image
+Editor*).
+
 ### Tool chạy tự động khi mở app
 
 Đặt `auto_startup = True` và ghi đè `startup(self, window)` trong class tool.
@@ -311,6 +317,35 @@ vào ô text thường vẫn sạch. Xuất ra `.md` hoặc `.txt`.
 > Cố ý **không dùng Tesseract**: nó là chương trình native phải cài riêng kèm gói
 > ngôn ngữ, máy không có quyền admin sẽ tắc. Cả tính năng này giờ chỉ cần
 > `pip install pymupdf` (wheel thuần) + `urllib` chuẩn.
+
+## Tool: Sửa ảnh bằng AI 🖼️
+
+[app_qt/tools/image_editor.py](app_qt/tools/image_editor.py) — đưa 1 ảnh, gõ
+yêu cầu bằng lời ("xóa người bên trái", "đổi nền thành bãi biển", "tông màu ấm
+hơn"…), AI trả về ảnh đã sửa; ảnh gốc và kết quả đặt cạnh nhau để so. Logic ở
+[app/core/image_edit.py](app/core/image_edit.py).
+
+- **Chỉ mở từ Trang chủ** (`show_in_sidebar = False`) — không chiếm chỗ ở sidebar.
+- **Ảnh vào**: bấm khung *Original* · kéo-thả file/ảnh · **Ctrl+V** ảnh trong
+  clipboard. JPG/PNG/WEBP dưới 10 MB gửi nguyên byte gốc; định dạng khác, ảnh
+  quá lớn hay ảnh điện thoại có cờ xoay EXIF thì chuyển sang PNG/JPEG đúng chiều
+  (cạnh dài ≤ 4096 px) trước khi gửi.
+- **Prompt mẫu** (chip *Quick start*): bấm là điền sẵn câu mẫu, chỗ cần điền
+  `[trong ngoặc]` được bôi đen để gõ đè; còn sót ngoặc thì app nhắc trước khi
+  gửi. Lời người dùng được bọc thêm khung chỉ dẫn (`build_prompt`) nhắc model
+  chỉ sửa đúng phần được yêu cầu, giữ nguyên phần còn lại.
+- **Mỗi lượt là một lời gọi độc lập** (ảnh + yêu cầu). *Keep editing* đưa kết
+  quả sang làm ảnh gốc để sửa tiếp — không giữ hội thoại phía server.
+- **Chờ**: vòng xoay + dòng trạng thái đổi dần + số giây đã chờ; *Cancel* bỏ
+  qua kết quả của lượt đó (request đã gửi thì vẫn có thể bị tính tiền).
+- **Kết quả**: *Download* ghi nguyên byte model trả về (không nén lại), nút copy
+  đặt ảnh lên clipboard.
+
+⚙️ **Settings → AI image editing**: *Image model* chỉ liệt kê model ảnh
+(`generateContent`, bỏ bản `-preview`); *Result resolution* 1K/2K/4K (bản Lite
+và dòng 2.5 không nhận tham số này — app tự bỏ). Ô *AI Model* dùng cho CV/PDF
+thì loại model ảnh ra. Dùng chung API key Gemini; model ảnh tính tiền theo ảnh
+nên key phải bật thanh toán.
 
 ## Tool: Mở cổng lịch phỏng vấn 🛂
 

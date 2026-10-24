@@ -23,6 +23,9 @@ class BaseTool(ABC):
     action_icon: str = "play"
     auto_startup: bool = False
     show_on_home: bool = True
+    # False → không có mục ở sidebar, chỉ mở được từ thẻ ở Trang chủ (tính
+    # năng ít người dùng, để sidebar gọn cho các việc hằng ngày).
+    show_in_sidebar: bool = True
     fills_height: bool = False
 
     def build(self, parent=None) -> QWidget:

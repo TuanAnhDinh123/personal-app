@@ -26,6 +26,7 @@ EMOJI_ICON = {
     "🧹": "eraser",
     "📧": "mail",
     "🔔": "bell",
+    "🖼": "image",
 }
 
 

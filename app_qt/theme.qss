@@ -573,6 +573,42 @@ QProgressBar::chunk {
 #CopyChipText { font-size: 12px; color: {{--text}}; background: transparent; }
 
 /* ============================================================
+   SỬA ẢNH BẰNG AI (app_qt/tools/image_editor.py)
+   ============================================================ */
+/* Chip prompt mẫu: viên thuốc tím nhạt, nhỏ hơn nút thường. Selector #id nặng
+   hơn [variant] nên không bị luật nút chung đè. */
+QPushButton#PromptChip {
+    background: {{--accent-soft}};
+    color: {{--accent}};
+    border: 1px solid {{--accent-soft-hi}};
+    border-radius: 13px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+QPushButton#PromptChip:hover { background: {{--accent-soft-hi}}; }
+QPushButton#PromptChip:disabled {
+    background: {{--content-bg}};
+    color: {{--text-faint}};
+    border: 1px solid {{--border}};
+}
+/* Khung chứa ảnh. Khung ảnh gốc khi còn trống là vùng thả file → viền nét đứt;
+   đang kéo file vào → viền + nền màu nhấn. */
+#ImageStage {
+    background: {{--content-bg}};
+    border: 1px solid {{--border}};
+    border-radius: 12px;
+}
+#ImageStage[drop="true"] { border: 2px dashed {{--border-strong}}; }
+#ImageStage[dragOver="true"] {
+    border: 2px dashed {{--accent}};
+    background: {{--accent-soft}};
+}
+#StageTitle { font-size: 14px; font-weight: 600; color: {{--text}}; background: transparent; }
+#StageSub   { font-size: 12px; color: {{--text-muted}}; background: transparent; }
+#StageMeta  { font-size: 12px; color: {{--text-faint}}; background: transparent; }
+
+/* ============================================================
    HỘP THOẠI HỆ THỐNG (dự phòng)
    ============================================================ */
 QMessageBox { background: {{--card-bg}}; }

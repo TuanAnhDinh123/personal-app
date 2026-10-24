@@ -1,9 +1,16 @@
 """Màn hình "Cài đặt" (PySide6). Dùng lại app.core.settings (backend không đổi)."""
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
 
-from app.core import outlook, settings, shared_db
+from app.core import image_edit, outlook, settings, shared_db
 from app_qt import dialogs, theme, widgets
 from app_qt.components.task import Task
+
+# Ô "Result resolution": (nhãn hiển thị, giá trị lưu ở khóa image_size).
+_IMAGE_SIZES = [
+    ("1K — fastest, lowest cost", "1K"),
+    ("2K — sharper (recommended)", "2K"),
+    ("4K — most detail, highest cost", "4K"),
+]
 
 
 def _int_or_default(text, key):
@@ -53,9 +60,33 @@ def build():
         inner, "AI Model",
         lambda: settings.list_models(fields["api_key"].get()))
     fields["ai_model"].set(data["ai_model"])
+    # ---- Nhóm Sửa ảnh bằng AI (dùng chung API key ở trên) ----
+    inner = _group_card(outer_lay)
+    widgets.section_label(inner, "AI image editing")
+    fields["image_model"] = widgets.model_select_row(
+        inner, "Image model",
+        lambda: image_edit.list_image_models(fields["api_key"].get()))
+    fields["image_model"].set(data["image_model"])
+    widgets.hint(inner, "Only models that can edit images are listed.\n"
+                        "• gemini-nano-banana-2.1 — recommended: good quality at a "
+                        "moderate price.\n"
+                        "• gemini-3.1-flash-lite-image — cheapest and fastest; the "
+                        "result is always 1K.\n"
+                        "• gemini-3-pro-image — best for difficult edits (keeping "
+                        "faces, small text), but costs several times more.")
+    fields["image_size"] = widgets.dropdown(
+        inner, "Result resolution", [label for label, _ in _IMAGE_SIZES])
+    fields["image_size"].set(next(
+        (label for label, value in _IMAGE_SIZES if value == data["image_size"]),
+        _IMAGE_SIZES[1][0]))
+    widgets.hint(inner, "Each edit is billed to your Gemini API key per image, and "
+                        "larger results cost more. Image editing needs billing "
+                        "enabled on the key.")
+
     # Đổi API key thì cho phép tải lại danh sách model ở lần mở kế tiếp.
     fields["api_key"].widget.textChanged.connect(
-        lambda *_: fields["ai_model"].widget.reset())
+        lambda *_: (fields["ai_model"].widget.reset(),
+                    fields["image_model"].widget.reset()))
 
     # ---- Nhóm Xuất Excel ----
     inner = _group_card(outer_lay)
@@ -198,6 +229,10 @@ def build():
         settings.update(
             api_key=fields["api_key"].get().strip(),
             ai_model=fields["ai_model"].get().strip() or settings.DEFAULTS["ai_model"],
+            image_model=(fields["image_model"].get().strip()
+                         or settings.DEFAULTS["image_model"]),
+            image_size=dict(_IMAGE_SIZES).get(fields["image_size"].get(),
+                                              settings.DEFAULTS["image_size"]),
             course_template_path=fields["course_template_path"].get().strip(),
             hc_excel_path=fields["hc_excel_path"].get().strip(),
             resignation_template_path=fields["resignation_template_path"].get().strip(),

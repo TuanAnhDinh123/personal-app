@@ -332,8 +332,9 @@ class MainWindow(QMainWindow):
         self._nav_layout.setContentsMargins(0, 8, 0, 0)
         self._nav_layout.setSpacing(0)
 
-        master = [t for t in self.tools if t.category == self.MASTER_CATEGORY]
-        others = [t for t in self.tools if t.category != self.MASTER_CATEGORY]
+        listed = [t for t in self.tools if getattr(t, "show_in_sidebar", True)]
+        master = [t for t in listed if t.category == self.MASTER_CATEGORY]
+        others = [t for t in listed if t.category != self.MASTER_CATEGORY]
         self._build_nav_group(others)
         if master:
             self._divider()
@@ -422,8 +423,9 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.pages[key])
         if key in self.nav_buttons:
             self.nav_buttons[key].setChecked(True)
-        elif key == "home":
-            # Home không có mục nav → bỏ chọn mọi mục (nhóm exclusive cần mở tạm).
+        else:
+            # Home và tool không có mục ở sidebar → bỏ chọn mọi mục, kẻo mục
+            # của trang trước còn sáng (nhóm exclusive cần mở tạm).
             self.nav_group.setExclusive(False)
             for btn in self.nav_buttons.values():
                 btn.setChecked(False)
